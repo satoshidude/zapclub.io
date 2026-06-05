@@ -155,6 +155,10 @@ func main() {
 		for range ticker.C {
 			sweepCache()
 			ytLimiter.sweep(10 * time.Minute)
+			// Per-pubkey content limiters also need sweeping or their maps grow forever.
+			chatLimiter.sweep(10 * time.Minute)
+			reactionLimiter.sweep(10 * time.Minute)
+			pruneAdminNonces()
 		}
 	}()
 

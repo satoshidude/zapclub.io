@@ -129,7 +129,37 @@ func verifyAdmin(r *http.Request) bool {
 	if err != nil || parsed.Path != r.URL.Path {
 		return false
 	}
+	// Replay protection: each NIP-98 token (event id) is single-use within its freshness
+	// window. A captured Authorization header can't be replayed to re-run ban/delete.
+	if ev.ID != "" && adminNonceSeen(ev.ID) {
+		return false
+	}
 	return true
+}
+
+// adminNonces tracks used NIP-98 event ids → their expiry, for single-use enforcement.
+var adminNonces sync.Map
+
+func adminNonceSeen(id string) bool {
+	exp := time.Now().Add(125 * time.Second) // > the ±60s freshness window
+	if prev, loaded := adminNonces.LoadOrStore(id, exp); loaded {
+		if prev.(time.Time).After(time.Now()) {
+			return true // already used and still within the window
+		}
+		adminNonces.Store(id, exp)
+	}
+	return false
+}
+
+// pruneAdminNonces drops expired nonces (called from the background sweep).
+func pruneAdminNonces() {
+	now := time.Now()
+	adminNonces.Range(func(k, v any) bool {
+		if exp, ok := v.(time.Time); ok && exp.Before(now) {
+			adminNonces.Delete(k)
+		}
+		return true
+	})
 }
 
 // adminAPI exposes superadmin-only relay management over HTTP (NIP-98 authenticated).
@@ -231,23 +261,37 @@ func (a *adminAPI) purgeAuthor(ctx context.Context, pk string) int {
 	return a.purgeFilter(ctx, nostr.Filter{Authors: []string{pk}})
 }
 
-// purgeFilter deletes every event matching a filter. Collects first, then deletes, so we
-// don't mutate the store while ranging its query channel.
+// purgeFilter deletes every event matching a filter. The badger store caps a single query
+// (~250 events), so we LOOP: each pass collects the current matches, deletes them, and
+// repeats until a pass deletes nothing — otherwise a ban/club-delete would leave most of a
+// prolific author's / busy club's events in the DB. Bounded by a hard pass cap.
 func (a *adminAPI) purgeFilter(ctx context.Context, f nostr.Filter) int {
-	ch, err := a.db.QueryEvents(ctx, f)
-	if err != nil {
-		log.Printf("purge query: %v", err)
-		return 0
-	}
-	var evs []*nostr.Event
-	for ev := range ch {
-		evs = append(evs, ev)
-	}
-	n := 0
-	for _, ev := range evs {
-		if err := a.db.DeleteEvent(ctx, ev); err == nil {
-			n++
+	total := 0
+	for pass := 0; pass < 2000; pass++ {
+		ch, err := a.db.QueryEvents(ctx, f)
+		if err != nil {
+			log.Printf("purge query: %v", err)
+			break
+		}
+		var evs []*nostr.Event
+		for ev := range ch { // drain the channel fully before deleting
+			evs = append(evs, ev)
+		}
+		if len(evs) == 0 {
+			break
+		}
+		deleted := 0
+		for _, ev := range evs {
+			if err := a.db.DeleteEvent(ctx, ev); err == nil {
+				deleted++
+			} else {
+				log.Printf("purge delete %s: %v", ev.ID, err)
+			}
+		}
+		total += deleted
+		if deleted == 0 {
+			break // no progress (all deletes failing) — avoid an infinite loop
 		}
 	}
-	return n
+	return total
 }

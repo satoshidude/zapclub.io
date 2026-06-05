@@ -328,7 +328,7 @@ export async function fetchUserClubActivity(
 
 /** Fetch single club metadata (by d-tag). */
 export async function fetchClub(groupId: string): Promise<Club | null> {
-  const ev = await pool.get(RELAYS, { kinds: [KIND_METADATA], '#d': [groupId] })
+  const ev = await pool.get(RELAYS, { kinds: [KIND_METADATA], '#d': [groupId] }, { maxWait: 4000 })
   return ev ? parseClubMetadata(ev) : null
 }
 

@@ -44,8 +44,13 @@
         onStateChange: () => {},
         onError: () => {},
       }).then((p) => {
-        player = p
         creating = false
+        if (!show) {
+          // Hidden again before the player finished initializing → don't leak it.
+          p.destroy()
+          return
+        }
+        player = p
         driftTimer = setInterval(() => applyTrack(true), 5000)
       })
     } else if (!show && player) {

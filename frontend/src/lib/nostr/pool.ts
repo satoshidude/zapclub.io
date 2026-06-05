@@ -32,7 +32,7 @@ export const pool = new SimplePool()
 
 /** Reads the latest kind:0 profile of a pubkey from the public pool. */
 export async function fetchProfile(pubkey: string): Promise<ProfileMetadata | null> {
-  const event = await pool.get(PROFILE_RELAYS, { kinds: [0], authors: [pubkey] })
+  const event = await pool.get(PROFILE_RELAYS, { kinds: [0], authors: [pubkey] }, { maxWait: 4000 })
   if (!event) return null
   try {
     return JSON.parse(event.content) as ProfileMetadata

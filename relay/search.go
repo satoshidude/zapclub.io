@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -12,6 +13,34 @@ import (
 	"sync"
 	"time"
 )
+
+const maxYtdlpOutput = 1 << 20 // 1 MiB — generous for ≤100 lines of id/title/duration
+
+// capBuffer collects up to `cap` bytes and silently drops the rest, always reporting a
+// full write so the child (yt-dlp) never blocks on a filled pipe. Bounds memory from a
+// subprocess that emits unexpectedly large output.
+type capBuffer struct {
+	buf bytes.Buffer
+	cap int
+}
+
+func (c *capBuffer) Write(p []byte) (int, error) {
+	if room := c.cap - c.buf.Len(); room > 0 {
+		if room > len(p) {
+			room = len(p)
+		}
+		c.buf.Write(p[:room])
+	}
+	return len(p), nil
+}
+
+// runCapped runs cmd, capturing at most maxYtdlpOutput bytes of stdout.
+func runCapped(cmd *exec.Cmd) ([]byte, error) {
+	cb := &capBuffer{cap: maxYtdlpOutput}
+	cmd.Stdout = cb
+	err := cmd.Run()
+	return cb.buf.Bytes(), err
+}
 
 // Self-hosted YouTube-Suche via yt-dlp. Kein Google-API-Key.
 // Sicherheit: exec.CommandContext mit Arg-Liste (kein Shell → keine Injection),
@@ -45,14 +74,13 @@ var ytLimiter = newIPLimiter(10, 1.0/3.0)
 // clientIP liefert die ECHTE Client-IP. Hinter Caddy ist RemoteAddr stets localhost;
 // Caddy setzt die echte IP via header_up X-Real-IP {remote_host} (nicht client-spoofbar).
 func clientIP(r *http.Request) string {
+	// Trust ONLY X-Real-IP (set by Caddy, not client-spoofable). Do NOT fall back to a
+	// client-supplied X-Forwarded-For — an attacker could send a fresh value per request
+	// to mint a new bucket each time and bypass the yt-dlp rate limit. If X-Real-IP is ever
+	// missing, RemoteAddr is loopback behind Caddy → one shared bucket (fail-closed).
 	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
 		return ip
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	// RemoteAddr ist "IP:Port" — Port abschneiden, sonst wäre jede Verbindung eine
-	// eigene „IP" (eigener Bucket) und das Limit liefe ins Leere.
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}
@@ -88,7 +116,7 @@ func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
 		"--", // Ende der Optionen → Query kann nie als yt-dlp-Flag interpretiert werden.
 		"ytsearch"+strconv.Itoa(searchResults)+":"+query,
 	)
-	out, err := cmd.Output()
+	out, err := runCapped(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +145,7 @@ func ytPlaylist(ctx context.Context, listID string) ([]searchResult, error) {
 		"--", // Ende der Optionen (URL ist durch https://-Präfix ohnehin kein Flag).
 		"https://www.youtube.com/playlist?list="+listID,
 	)
-	out, err := cmd.Output()
+	out, err := runCapped(cmd)
 	if err != nil {
 		return nil, err
 	}

@@ -38,13 +38,24 @@ interface LnurlPay {
   maxSendable?: number
 }
 
+// fetch with a hard timeout — a hung LNURL host must not wedge the zap UI forever.
+async function fetchTimeout(url: string, ms = 9000): Promise<Response> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { signal: ctrl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 /** Resolves a lightning address (lud16) to its LNURL-pay parameters. */
 async function lnurlPayData(lud16: string): Promise<LnurlPay> {
   const at = lud16.indexOf('@')
   if (at < 1) throw new Error('Invalid lightning address')
   const name = lud16.slice(0, at)
   const domain = lud16.slice(at + 1)
-  const res = await fetch(`https://${domain}/.well-known/lnurlp/${name}`)
+  const res = await fetchTimeout(`https://${domain}/.well-known/lnurlp/${name}`)
   if (!res.ok) throw new Error('Could not reach the lightning address')
   const j = (await res.json()) as LnurlPay & { tag?: string }
   if (!j.callback) throw new Error('Not a valid LNURL-pay endpoint')
@@ -96,7 +107,7 @@ export async function requestZapInvoice(
     url.searchParams.set('comment', comment.slice(0, 120))
   }
 
-  const res = await fetch(url.toString())
+  const res = await fetchTimeout(url.toString())
   const json = (await res.json()) as { pr?: string; verify?: string; reason?: string }
   if (!json.pr) throw new Error(json.reason || 'No invoice received')
   return { invoice: json.pr, verify: json.verify }

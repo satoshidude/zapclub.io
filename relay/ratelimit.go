@@ -67,6 +67,20 @@ func (l *kindLimiter) reject(_ context.Context, evt *nostr.Event) (bool, string)
 	return false, ""
 }
 
+// sweep entfernt länger inaktive Buckets, damit die per-pubkey-Map nicht unbegrenzt
+// wächst (Memory-DoS-Schutz — billig erzeugte Spam-pubkeys hinterließen sonst dauerhaft
+// Einträge). Vom 5-Minuten-Ticker in main.go aufgerufen.
+func (l *kindLimiter) sweep(idle time.Duration) {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for pk, b := range l.buckets {
+		if now.Sub(b.last) > idle {
+			delete(l.buckets, pk)
+		}
+	}
+}
+
 // IP-basierter Token-Bucket für die teuren yt-dlp-HTTP-Endpunkte (DoS-Schutz).
 // Greift ZUSÄTZLICH zum globalen Concurrency-Limit. Der pubkey-Limiter oben gilt nur
 // für Nostr-Events, nicht für die HTTP-Routen — daher hier IP-basiert.

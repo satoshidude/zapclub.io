@@ -24,6 +24,7 @@
 
   const elementId = 'yt-player'
   let player: YouTubePlayer | null = null
+  let destroyed = false
   let ready = $state(false)
   let muted = $state(true)
   let volume = $state(70)
@@ -58,6 +59,11 @@
       if (id) onerror?.(id) // conductor advances
     },
   }).then((p) => {
+    if (destroyed) {
+      // Component unmounted before the player finished initializing → don't leak it.
+      p.destroy()
+      return
+    }
     player = p
     ready = true
     apply(true)
@@ -158,6 +164,7 @@
   driftTimer = setInterval(() => apply(false), 5000)
 
   onDestroy(() => {
+    destroyed = true
     if (driftTimer) clearInterval(driftTimer)
     if (typeof document !== 'undefined') document.removeEventListener('fullscreenchange', onFsChange)
     player?.destroy()

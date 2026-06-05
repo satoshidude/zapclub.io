@@ -125,9 +125,11 @@
     }
   })
 
-  // Subscribe to zap receipts (9735) for the stage DJs → live score on the zap button.
+  // One zap-receipt (9735) subscription per club for everyone shown with a zap chip:
+  // the stage DJs + the club owner. ZapButton instances only READ the score, they don't
+  // open their own subscriptions (avoids N overlapping REQs per club).
   $effect(() => {
-    const pks = stage.djs.map((d) => d.pubkey)
+    const pks = [...new Set([...stage.djs.map((d) => d.pubkey), owner].filter(Boolean))]
     return subscribeZaps(pks)
   })
 

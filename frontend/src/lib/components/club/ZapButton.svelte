@@ -1,6 +1,6 @@
 <script lang="ts">
   import { sync } from '../../nostr/sync.svelte'
-  import { requestZapInvoice, zaps, subscribeZaps } from '../../nostr/zaps.svelte'
+  import { requestZapInvoice, zaps } from '../../nostr/zaps.svelte'
   import { showPay } from '../../nostr/payModal.svelte'
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -22,12 +22,8 @@
   // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
   const total = $derived(dj ? zaps.score(dj) : 0)
 
-  // Subscribe to the live DJ's zap receipts so the total is loaded even when they
-  // aren't on the stage (the stage subscription only covers stage DJs).
-  $effect(() => {
-    if (!dj) return
-    return subscribeZaps([dj])
-  })
+  // The score is fed by ClubView's single per-club zap subscription (stage DJs + owner) —
+  // this component only reads zaps.score(dj), it does not open its own subscription.
 
   function fmtSats(n: number): string {
     return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n)

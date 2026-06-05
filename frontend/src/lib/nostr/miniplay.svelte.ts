@@ -25,7 +25,7 @@ interface MiniState {
 
 const state = $state<MiniState>({ clubId: null, clubName: '', np: null, offsetMs: 0 })
 let sub: { close(): void } | null = null
-let newest = 0 // created_at (s) of the newest now_playing seen
+let newestSent = 0 // sent_at (ms) of the newest now_playing seen — ms so same-second heartbeats aren't dropped
 
 export const miniplay = {
   get clubId() {
@@ -49,13 +49,13 @@ export function miniPosition(): number {
 }
 
 function ingest(ev: Event): void {
-  if (ev.created_at < newest) return
-  newest = ev.created_at
   const tag = (k: string) => ev.tags.find((t) => t[0] === k)?.[1]
   const track = tag('track') ?? ''
   const videoId = track.startsWith('yt:') ? track.slice(3) : ''
   const startedAt = Number(tag('started_at')) || ev.created_at * 1000
-  const sentAt = Number(tag('sent_at')) || Date.now()
+  const sentAt = Number(tag('sent_at')) || ev.created_at * 1000
+  if (sentAt <= newestSent) return // older/duplicate heartbeat — keep the freshest (ms)
+  newestSent = sentAt
   state.offsetMs = sentAt - Date.now()
   state.np = {
     videoId,
@@ -75,7 +75,7 @@ export function registerActiveClub(clubId: string, clubName: string): void {
   if (state.clubId === clubId) return
   state.clubId = clubId
   state.np = null
-  newest = 0
+  newestSent = 0
   try {
     localStorage.setItem(KEY, clubId)
   } catch {
@@ -99,7 +99,7 @@ export function stopMiniPlay(): void {
   state.clubId = null
   state.clubName = ''
   state.np = null
-  newest = 0
+  newestSent = 0
   try {
     localStorage.removeItem(KEY)
   } catch {
