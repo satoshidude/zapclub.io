@@ -132,6 +132,14 @@
     if (np && np.dj === auth.pubkey && np.videoId) void markPlayed(groupId, np.videoId)
   })
 
+  const onStageNow = $derived(stage.isOnStage(auth.pubkey))
+
+  /** From the lobby "go on stage" link: hop on the stage and open the Stage tab. */
+  function goOnStage() {
+    if (!onStageNow) void joinStage(groupId)
+    tab = 'stage'
+  }
+
   async function doJoin() {
     busy = true
     error = ''
@@ -183,26 +191,60 @@
 
 <div class="wrap">
   <header class="hero">
-    <div class="pic" style:background-image={club?.picture ? `url(${club.picture})` : 'none'}>
-      {#if !club?.picture}<DiscoBall size={56} />{/if}
-    </div>
-    <div class="info">
-      <h1>{club?.name ?? 'Loading…'}</h1>
-      <div class="tags">
-        {#if club?.open}<span class="tag">open</span>{/if}
-        {#if club?.isPublic}<span class="tag">public</span>{/if}
-        <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+    <div class="hero-top">
+      <div class="pic" style:background-image={club?.picture ? `url(${club.picture})` : 'none'}>
+        {#if !club?.picture}<DiscoBall size={56} />{/if}
+      </div>
+      <div class="info">
+        <h1>{club?.name ?? 'Loading…'}</h1>
+        <div class="tags">
+          {#if club?.open}<span class="tag">open</span>{/if}
+          {#if club?.isPublic}<span class="tag">public</span>{/if}
+          <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+      <div class="actions">
+        {#if auth.canSign}
+          {#if isMember}
+            <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
+          {:else}
+            <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
+          {/if}
+        {/if}
       </div>
     </div>
-    <div class="actions">
-      {#if auth.canSign}
-        {#if isMember}
-          <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
-        {:else}
-          <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
-        {/if}
+
+    {#if club?.about}<p class="desc">{club.about}</p>{/if}
+
+    <details class="members-acc">
+      <summary>
+        <span class="sum-label">Members</span>
+        <span class="mcount">{members.length}</span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </summary>
+      {#if members.length === 0}
+        <p class="dim">No members yet.</p>
+      {:else}
+        <ul class="member-list">
+          {#each members as m (m.pubkey)}
+            {@const profile = useProfile(m.pubkey)}
+            <li>
+              <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
+              <span class="mname">{displayName(m.pubkey, profile)}</span>
+              {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
+              {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
+                <span class="mod-actions">
+                  {#if isOwner && !m.roles.includes('moderator')}
+                    <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
+                  {/if}
+                  <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
+                </span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
       {/if}
-    </div>
+    </details>
   </header>
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
@@ -233,47 +275,11 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
       />
-      <NowPlaying />
+      <NowPlaying
+        onGoStage={goOnStage}
+        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+      />
       <ComingNext />
-
-      <section class="about card">
-        <h3>About this club</h3>
-        {#if club?.about}
-          <p class="desc">{club.about}</p>
-        {:else}
-          <p class="desc dim">No description yet.</p>
-        {/if}
-
-        <details class="members-acc">
-          <summary>
-            <span class="sum-label">Members</span>
-            <span class="mcount">{members.length}</span>
-            <span class="chevron" aria-hidden="true">▾</span>
-          </summary>
-          {#if members.length === 0}
-            <p class="dim">No members yet.</p>
-          {:else}
-            <ul class="member-list">
-              {#each members as m (m.pubkey)}
-                {@const profile = useProfile(m.pubkey)}
-                <li>
-                  <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
-                  <span class="mname">{displayName(m.pubkey, profile)}</span>
-                  {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
-                  {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
-                    <span class="mod-actions">
-                      {#if isOwner && !m.roles.includes('moderator')}
-                        <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
-                      {/if}
-                      <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
-                    </span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </details>
-      </section>
     </div>
 
     <div class="panel" class:active={tab === 'stage'}>
@@ -303,13 +309,15 @@
     padding: 1.2rem 1rem 4rem;
   }
   .hero {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.1rem;
+  }
+  .hero-top {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
   }
   .pic {
     width: 72px;
@@ -347,25 +355,11 @@
   .actions {
     flex: 0 0 auto;
   }
-  .about.card {
-    margin-top: 0.9rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1rem;
-  }
-  .about h3 {
-    margin: 0 0 0.6rem;
-    font-size: 0.95rem;
-  }
   .desc {
-    margin: 0;
+    margin: 0.9rem 0 0;
     font-size: 0.9rem;
-    color: var(--text);
-    line-height: 1.6;
-  }
-  .desc.dim {
     color: var(--text-dim);
+    line-height: 1.6;
   }
   .members-acc {
     margin-top: 0.9rem;

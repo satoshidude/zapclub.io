@@ -2,6 +2,9 @@
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
 
+  // Optional "go on stage" action shown in the idle (lobby) state.
+  let { onGoStage, stageLabel = '' }: { onGoStage?: () => void; stageLabel?: string } = $props()
+
   // Reactive clock so the progress bar advances between now_playing events.
   let nowMs = $state(Date.now())
   $effect(() => {
@@ -41,7 +44,12 @@
     </div>
     <div class="bar"><div class="fill" style:width="{pct}%"></div></div>
   {:else}
-    <div class="idle">No DJ on stage — lobby is playing.</div>
+    <div class="idle">
+      No DJ on stage — lobby is playing.
+      {#if onGoStage && stageLabel}
+        <button class="stage-link" onclick={onGoStage}>{stageLabel}</button>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -106,6 +114,18 @@
     color: var(--text-dim);
     font-size: 0.88rem;
     text-align: center;
+  }
+  .stage-link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.88rem;
+    cursor: pointer;
+    padding: 0 0 0 0.25rem;
+  }
+  .stage-link:hover {
+    text-decoration: underline;
   }
   /* Tiny equalizer animation. */
   .eq {
