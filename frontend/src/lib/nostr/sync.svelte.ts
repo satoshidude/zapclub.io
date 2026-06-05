@@ -222,6 +222,18 @@ export function conductorTick(groupId: string): void {
   heartbeat(groupId)
 }
 
+/**
+ * Conductor: immediately re-anchor pos to the running track and republish now_playing, so
+ * a just-made reorder is pushed to everyone's Up next without waiting for the heartbeat.
+ * No-op for a non-conductor (their republished queue reaches the conductor instead).
+ */
+export function applyOrderNow(groupId: string): void {
+  const me = auth.pubkey
+  if (!me || me !== stage.conductor || !state.np) return
+  state.np = reanchorPos(state.np)
+  publishNp(groupId, state.np)
+}
+
 /** Manual skip to the next track — ONLY the leading DJ (conductor). */
 export function skipTrack(groupId: string): void {
   const me = auth.pubkey

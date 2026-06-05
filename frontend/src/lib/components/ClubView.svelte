@@ -266,7 +266,6 @@
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
-          {#if clubZapTotal > 0}<span class="tag zaps">⚡ {clubZapTotal.toLocaleString()} sats</span>{/if}
           {#if owner}
             {@const op = useProfile(owner)}
             <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
@@ -274,6 +273,7 @@
               {displayName(owner, op)}
             </a>
           {/if}
+          {#if clubZapTotal > 0}<span class="tag zaps">⚡ {clubZapTotal.toLocaleString()} sats</span>{/if}
         </div>
       </div>
       <div class="actions">
@@ -458,9 +458,14 @@
   }
   .tags {
     display: flex;
+    align-items: center;
     gap: 0.4rem;
     margin-top: 0.6rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .tags > * {
+    flex: 0 0 auto;
   }
   .tag {
     font-size: 0.72rem;
