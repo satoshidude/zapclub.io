@@ -109,10 +109,50 @@ var (
 	cacheMu     sync.Mutex
 )
 
+// The print format: id, title, duration, and artist. We ask yt-dlp for the artist so
+// YouTube-Music-style results (where %(title)s is just the song) still show "Artist – Title".
+const ytPrint = "%(id)s\t%(title)s\t%(duration)s\t%(artist)s"
+
+// buildTitle folds the artist into the title when yt-dlp gives a distinct artist and it
+// isn't already part of the title (avoids "Artist – Artist - Song" duplication).
+func buildTitle(title, artist string) string {
+	artist = strings.TrimSpace(artist)
+	if artist == "" || artist == "NA" {
+		return title
+	}
+	if strings.Contains(strings.ToLower(title), strings.ToLower(artist)) {
+		return title
+	}
+	return artist + " – " + title
+}
+
+// parseYtLines parses tab-separated "id\ttitle\tduration\tartist" lines from yt-dlp.
+func parseYtLines(out []byte) []searchResult {
+	var results []searchResult
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 2 || parts[0] == "" {
+			continue
+		}
+		dur := 0
+		if len(parts) >= 3 {
+			if f, e := strconv.ParseFloat(parts[2], 64); e == nil {
+				dur = int(f)
+			}
+		}
+		artist := ""
+		if len(parts) >= 4 {
+			artist = parts[3]
+		}
+		results = append(results, searchResult{ID: parts[0], Title: buildTitle(parts[1], artist), Duration: dur})
+	}
+	return results
+}
+
 func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
 	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
 		"--flat-playlist", "--no-cache-dir", "--no-warnings",
-		"--print", "%(id)s\t%(title)s\t%(duration)s",
+		"--print", ytPrint,
 		"--", // Ende der Optionen → Query kann nie als yt-dlp-Flag interpretiert werden.
 		"ytsearch"+strconv.Itoa(searchResults)+":"+query,
 	)
@@ -120,28 +160,14 @@ func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	var results []searchResult
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 2 || parts[0] == "" {
-			continue
-		}
-		dur := 0
-		if len(parts) == 3 {
-			if f, e := strconv.ParseFloat(parts[2], 64); e == nil {
-				dur = int(f)
-			}
-		}
-		results = append(results, searchResult{ID: parts[0], Title: parts[1], Duration: dur})
-	}
-	return results, nil
+	return parseYtLines(out), nil
 }
 
 func ytPlaylist(ctx context.Context, listID string) ([]searchResult, error) {
 	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
 		"--flat-playlist", "--no-cache-dir", "--no-warnings",
 		"--playlist-end", strconv.Itoa(playlistMax),
-		"--print", "%(id)s\t%(title)s\t%(duration)s",
+		"--print", ytPrint,
 		"--", // Ende der Optionen (URL ist durch https://-Präfix ohnehin kein Flag).
 		"https://www.youtube.com/playlist?list="+listID,
 	)
@@ -149,21 +175,7 @@ func ytPlaylist(ctx context.Context, listID string) ([]searchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	var results []searchResult
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 2 || parts[0] == "" {
-			continue
-		}
-		dur := 0
-		if len(parts) == 3 {
-			if f, e := strconv.ParseFloat(parts[2], 64); e == nil {
-				dur = int(f)
-			}
-		}
-		results = append(results, searchResult{ID: parts[0], Title: parts[1], Duration: dur})
-	}
-	return results, nil
+	return parseYtLines(out), nil
 }
 
 // /yt-playlist?list=<id> — importiert eine YouTube-Playlist (Track-Liste).
