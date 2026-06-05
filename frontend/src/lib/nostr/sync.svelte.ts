@@ -160,6 +160,14 @@ function heartbeat(groupId: string): void {
 /** Advances to the next round-robin track (or loops). Only on end/skip. */
 function advance(groupId: string, fromPos: number): void {
   const djs = stage.djs.map((d) => d.pubkey)
+  // Honor a reorder made since the last heartbeat: re-anchor to the playing track's
+  // current index, so the NEXT pick follows the new order even if the track ends before
+  // the next heartbeat would have corrected pos.
+  if (state.np) {
+    const re = reanchorPos(state.np)
+    state.np = re
+    fromPos = re.pos
+  }
   const playable = queues.playable(djs)
   let next = nextPlayablePos(fromPos, djs.length, playable)
   if (next === -1) next = firstPlayablePos(djs.length, playable) // loop
