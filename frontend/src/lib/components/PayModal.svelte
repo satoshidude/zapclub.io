@@ -10,6 +10,19 @@
   const webln = $derived(
     typeof window !== 'undefined' ? ((window as unknown as { webln?: WebLN }).webln ?? null) : null,
   )
+
+  // On iOS and macOS Safari, prefer the lightning: deep link → it opens the locally
+  // installed Alby Go (the iOS app also runs on Apple-Silicon Macs and registers the
+  // scheme). On those platforms "Open in Alby Go" is the default action, even if a WebLN
+  // extension is present.
+  const preferAlby = (() => {
+    if (typeof navigator === 'undefined') return false
+    const ua = navigator.userAgent
+    const iOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+    const macSafari = /Macintosh/.test(ua) && /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR/.test(ua)
+    return iOS || macSafari
+  })()
+
   let paying = $state(false)
   let payErr = $state('')
 
@@ -79,16 +92,17 @@
             <img class="qr" src={qrSrc} alt="invoice QR" width="220" height="220" />
           </button>
         {/if}
+        <!-- lightning: scheme → opens Alby Go locally (iOS / macOS Safari) or any wallet
+             registered for the scheme. Primary/default on Apple Safari. -->
+        <button class="btn {preferAlby || !webln ? 'btn-primary' : 'btn-ghost'} big" onclick={openWallet}>
+          📲 Open in Alby Go
+        </button>
         {#if webln}
-          <button class="btn btn-primary big" onclick={payWithExtension} disabled={paying}>
+          <button class="btn {preferAlby ? 'btn-ghost' : 'btn-primary'} big" onclick={payWithExtension} disabled={paying}>
             {paying ? 'Paying…' : '⚡ Pay now'}
           </button>
           {#if payErr}<p class="err">⚠ {payErr}</p>{/if}
         {/if}
-        <!-- lightning: scheme → opens Alby Go on mobile (and the Alby extension on desktop). -->
-        <button class="btn {webln ? 'btn-ghost' : 'btn-primary'} big" onclick={openWallet}>
-          📲 Open in Alby Go
-        </button>
         <button class="copy" onclick={copy}>{copied ? '✓ Copied' : 'Copy invoice'}</button>
         <p class="hint">Pay with the Alby extension, scan the QR, or tap “Open in Alby Go” on mobile.</p>
         <!-- No reliable auto-detect (LNURL endpoint has no verify URL) → confirm manually. -->
