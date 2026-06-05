@@ -77,22 +77,22 @@
 <style>
   .zap-wrap {
     display: flex;
-    justify-content: center;
+    flex: 0 0 auto;
   }
-  /* Fat, pulsing zap button. */
+  /* Compact pulsing zap button. */
   .zap-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.4rem;
     border: none;
     border-radius: 999px;
-    padding: 0.8rem 1.6rem;
-    font-size: 1.05rem;
-    font-weight: 800;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 700;
     color: #1a1205;
     cursor: pointer;
     background: linear-gradient(95deg, var(--amber), #ffd24a);
-    animation: zap-pulse 1.5s ease-in-out infinite;
+    animation: zap-pulse 1.6s ease-in-out infinite;
   }
   .zap-btn:disabled {
     opacity: 0.5;
@@ -116,7 +116,7 @@
     }
   }
   .bolt {
-    font-size: 1.2rem;
+    font-size: 1rem;
   }
   .score {
     background: rgba(0, 0, 0, 0.22);

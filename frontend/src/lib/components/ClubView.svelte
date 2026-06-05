@@ -228,10 +228,12 @@
     {#if club?.about}<p class="desc">{club.about}</p>{/if}
 
     <div class="hero-now">
-      <NowPlaying
-        onGoStage={goOnStage}
-        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
-      />
+      <div class="now-col">
+        <NowPlaying
+          onGoStage={goOnStage}
+          stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+        />
+      </div>
       <ZapButton />
     </div>
     <ComingNext />
@@ -336,9 +338,19 @@
   }
   .hero-now {
     display: flex;
-    flex-direction: column;
     gap: 0.8rem;
+    align-items: center;
     margin-top: 0.9rem;
+  }
+  .now-col {
+    flex: 1;
+    min-width: 0;
+  }
+  @media (max-width: 560px) {
+    .hero-now {
+      flex-direction: column;
+      align-items: stretch;
+    }
   }
   .pic {
     width: 72px;
