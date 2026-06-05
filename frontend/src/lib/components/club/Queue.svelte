@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, republishQueue } from '../../nostr/queue.svelte'
   import { skipTrack, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
@@ -106,6 +106,9 @@
     <div class="head-actions">
       {#if canSkip()}
         <button class="btn btn-ghost btn-sm" onclick={() => skipTrack(groupId)} title="Skip current track">⏭ Skip</button>
+      {/if}
+      {#if tracks.length > 0}
+        <button class="mini" onclick={() => republishQueue(groupId)} title="Apply current order to the round-robin">↻</button>
       {/if}
       {#if tracks.length > 1}
         <button class="mini" onclick={() => shuffleQueue(groupId)} title="Shuffle">🔀</button>

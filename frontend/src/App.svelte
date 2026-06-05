@@ -111,7 +111,7 @@
     align-items: center;
     gap: 0.5rem;
     font-weight: 800;
-    font-size: 1.4rem;
+    font-size: 1.25rem;
     cursor: pointer;
     letter-spacing: -0.02em;
   }
@@ -119,8 +119,7 @@
     color: #fff;
   }
   .brand .tld {
-    /* Nostr purple */
-    color: #8e30eb;
+    color: #22c55e;
     font-weight: 700;
   }
   .reconnect {

@@ -109,6 +109,12 @@ export function setMyQueue(groupId: string, tracks: QueueTrack[]): Promise<void>
   return publishMyQueue(groupId, tracks)
 }
 
+/** Re-publishes my queue as-is (current order + active flags) so the round-robin/
+ *  conductor re-reads the latest order. A manual "apply order" for the DJ. */
+export function republishQueue(groupId: string): Promise<void> {
+  return publishMyQueue(groupId, myTracks())
+}
+
 export function removeTrack(groupId: string, index: number): Promise<void> {
   const tracks = myTracks().filter((_, i) => i !== index)
   return publishMyQueue(groupId, tracks)

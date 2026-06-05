@@ -29,7 +29,7 @@
   import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
-  import { subscribeZaps, resetZaps } from '../nostr/zaps.svelte'
+  import { subscribeZaps, resetZaps, zaps } from '../nostr/zaps.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
   import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
@@ -57,6 +57,10 @@
   )
   const isMember = $derived(!!auth.pubkey && members.some((m) => m.pubkey === auth.pubkey))
   const canModerate = $derived(isOwner || isMod)
+
+  // Total sats zapped in this club so far — summed from the zaps received by the club's
+  // stage DJs (receipts don't carry the club, so DJ totals are the available proxy).
+  const clubZapTotal = $derived(stage.djs.reduce((sum, d) => sum + zaps.score(d.pubkey), 0))
 
   /** Is a pubkey an admin/moderator (allowed to kick from stage)? */
   function isModerator(pubkey: string): boolean {
@@ -262,6 +266,7 @@
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+          {#if clubZapTotal > 0}<span class="tag zaps">⚡ {clubZapTotal.toLocaleString()} sats</span>{/if}
           {#if owner}
             {@const op = useProfile(owner)}
             <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
@@ -463,6 +468,11 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
+  }
+  .tag.zaps {
+    color: var(--amber);
+    border-color: var(--amber);
+    font-weight: 700;
   }
   .tag.host {
     display: inline-flex;

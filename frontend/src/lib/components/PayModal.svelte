@@ -47,6 +47,12 @@
     return () => clearTimeout(t)
   })
 
+  // Open the invoice in a wallet app. Driving window.location from the tap handler is
+  // more reliable than an <a href="lightning:…"> in iOS Safari, which often does nothing.
+  function openWallet() {
+    if (payModal.invoice) window.location.href = `lightning:${payModal.invoice}`
+  }
+
   let copied = $state(false)
   async function copy() {
     try {
@@ -69,9 +75,9 @@
       {:else}
         <h3>{payModal.label} · {payModal.sats} sats</h3>
         {#if qrSrc}
-          <a class="qr-link" href={`lightning:${payModal.invoice}`}>
+          <button class="qr-link" onclick={openWallet} title="Open in wallet">
             <img class="qr" src={qrSrc} alt="invoice QR" width="220" height="220" />
-          </a>
+          </button>
         {/if}
         {#if webln}
           <button class="btn btn-primary big" onclick={payWithExtension} disabled={paying}>
@@ -80,9 +86,9 @@
           {#if payErr}<p class="err">⚠ {payErr}</p>{/if}
         {/if}
         <!-- lightning: scheme → opens Alby Go on mobile (and the Alby extension on desktop). -->
-        <a class="btn {webln ? 'btn-ghost' : 'btn-primary'} big" href={`lightning:${payModal.invoice}`}>
+        <button class="btn {webln ? 'btn-ghost' : 'btn-primary'} big" onclick={openWallet}>
           📲 Open in Alby Go
-        </a>
+        </button>
         <button class="copy" onclick={copy}>{copied ? '✓ Copied' : 'Copy invoice'}</button>
         <p class="hint">Pay with the Alby extension, scan the QR, or tap “Open in Alby Go” on mobile.</p>
         <!-- No reliable auto-detect (LNURL endpoint has no verify URL) → confirm manually. -->
@@ -123,6 +129,10 @@
   }
   .qr-link {
     align-self: center;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
   }
   .qr {
     width: 220px;
