@@ -45,7 +45,7 @@
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
-  let tab = $state<'club' | 'stage' | 'chat'>('club')
+  let tab = $state<'stage' | 'chat'>('stage')
 
   const owner = $derived(admins[0] ?? '')
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -249,10 +249,26 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
+  <!-- Player + now-playing + coming-up: always visible under the hero. -->
+  <section class="stream">
+    <Player
+      canHear={isMember}
+      ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
+      onCta={() => {
+        if (auth.isLoggedIn) void doJoin()
+        else launchLogin()
+      }}
+      onended={() => onTrackEnded(groupId)}
+      onerror={(vid) => onTrackError(groupId, vid)}
+    />
+    <NowPlaying
+      onGoStage={goOnStage}
+      stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+    />
+    <ComingNext />
+  </section>
+
   <div class="club-tabs" role="tablist">
-    <button class="ctab" class:active={tab === 'club'} role="tab" aria-selected={tab === 'club'} onclick={() => (tab = 'club')}>
-      🪩 Club
-    </button>
     <button class="ctab" class:active={tab === 'stage'} role="tab" aria-selected={tab === 'stage'} onclick={() => (tab = 'stage')}>
       🎧 Stage
     </button>
@@ -261,44 +277,22 @@
     </button>
   </div>
 
-  <!-- All panels stay mounted; inactive ones are moved off-screen (not unmounted) so
-       the player in the Club tab keeps playing audio when you switch tabs. -->
-  <div class="panels">
-    <div class="panel" class:active={tab === 'club'}>
-      <Player
-        canHear={isMember}
-        ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
-        onCta={() => {
-          if (auth.isLoggedIn) void doJoin()
-          else launchLogin()
-        }}
-        onended={() => onTrackEnded(groupId)}
-        onerror={(vid) => onTrackError(groupId, vid)}
-      />
-      <NowPlaying
-        onGoStage={goOnStage}
-        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
-      />
-      <ComingNext />
-    </div>
-
-    <div class="panel" class:active={tab === 'stage'}>
+  {#if tab === 'chat'}
+    <Chat
+      {groupId}
+      canChat={isMember}
+      {canModerate}
+      onauthor={(pubkey) => goUser(npubEncode(pubkey))}
+      ondelete={(id) => void deleteEvent(groupId, id)}
+    />
+  {:else}
+    <div class="panel">
       <Stage {groupId} {canModerate} {isMember} />
       {#if isMember}
         <Queue {groupId} />
       {/if}
     </div>
-
-    <div class="panel" class:active={tab === 'chat'}>
-      <Chat
-        {groupId}
-        canChat={isMember}
-        {canModerate}
-        onauthor={(pubkey) => goUser(npubEncode(pubkey))}
-        ondelete={(id) => void deleteEvent(groupId, id)}
-      />
-    </div>
-  </div>
+  {/if}
 
 </div>
 
@@ -454,6 +448,13 @@
   .dim {
     color: var(--text-dim);
   }
+  /* Player + now-playing + coming-up, always under the hero. */
+  .stream {
+    margin-top: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
   /* In-club tabs — underline style (no pills). */
   .club-tabs {
     display: flex;
@@ -483,22 +484,9 @@
     color: var(--accent);
     border-bottom-color: var(--accent);
   }
-  /* Panels: only the active one is in flow; inactive ones stay mounted but
-     off-screen so the Club tab's player keeps playing audio across tabs. */
-  .panels {
-    position: relative;
-  }
   .panel {
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
-  }
-  .panel:not(.active) {
-    position: absolute;
-    top: 0;
-    left: -9999px;
-    width: 100%;
-    visibility: hidden;
-    pointer-events: none;
   }
 </style>
