@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Animated neon disco light ring">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#020202"/>
+      <stop offset="55%" stop-color="#000000"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 1.2 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="heavyGlow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="11" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <linearGradient id="rainbowStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffe600"/>
+      <stop offset="25%" stop-color="#17ff36"/>
+      <stop offset="50%" stop-color="#00f5ff"/>
+      <stop offset="75%" stop-color="#8b2cff"/>
+      <stop offset="100%" stop-color="#ff00df"/>
+    </linearGradient>
+
+    <g id="beam">
+      <rect x="-4" y="-182" width="8" height="68" rx="4" fill="currentColor" opacity=".95"/>
+      <circle cx="0" cy="-105" r="5.5" fill="currentColor"/>
+      <rect x="-2.5" y="-92" width="5" height="34" rx="2.5" fill="currentColor" opacity=".32"/>
+    </g>
+
+    <g id="dot">
+      <circle cx="0" cy="-128" r="5" fill="currentColor"/>
+      <rect x="-3" y="-168" width="6" height="28" rx="3" fill="currentColor" opacity=".55"/>
+    </g>
+
+    <style>
+      .ring {
+        transform-origin: 256px 256px;
+        animation: spin 9s linear infinite;
+      }
+
+      .pulse {
+        animation: pulse 1.8s ease-in-out infinite;
+        transform-origin: center;
+      }
+
+      .flicker {
+        animation: flicker 2.4s infinite steps(1, end);
+      }
+
+      .beam {
+        filter: url(#softGlow);
+      }
+
+      .outerGlow {
+        animation: glowPulse 2.8s ease-in-out infinite;
+      }
+
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+
+      @keyframes pulse {
+        0%,100% { opacity: .55; transform: scale(.98); }
+        50%     { opacity: 1; transform: scale(1.035); }
+      }
+
+      @keyframes glowPulse {
+        0%,100% { opacity: .45; }
+        50%     { opacity: .9; }
+      }
+
+      @keyframes flicker {
+        0% { opacity: .8; }
+        12% { opacity: .35; }
+        18% { opacity: 1; }
+        33% { opacity: .65; }
+        47% { opacity: .95; }
+        65% { opacity: .5; }
+        77% { opacity: 1; }
+        100% { opacity: .8; }
+      }
+    </style>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- soft colored halo -->
+  <circle class="outerGlow" cx="256" cy="256" r="184" fill="none" stroke="url(#rainbowStroke)" stroke-width="28" opacity=".25" filter="url(#heavyGlow)"/>
+
+  <!-- rotating neon ring -->
+  <g class="ring" transform="translate(256 256)">
+    <!-- 48 beams, grouped by color zones -->
+    <g class="beam" style="color:#ffe600">
+      <use href="#beam" transform="rotate(0)"/>
+      <use href="#dot" transform="rotate(7.5)"/>
+      <use href="#beam" transform="rotate(15)"/>
+      <use href="#dot" transform="rotate(22.5)"/>
+      <use href="#beam" transform="rotate(30)"/>
+      <use href="#dot" transform="rotate(37.5)"/>
+      <use href="#beam" transform="rotate(45)"/>
+      <use href="#dot" transform="rotate(52.5)"/>
+    </g>
+
+    <g class="beam" style="color:#17ff36">
+      <use href="#beam" transform="rotate(60)"/>
+      <use href="#dot" transform="rotate(67.5)"/>
+      <use href="#beam" transform="rotate(75)"/>
+      <use href="#dot" transform="rotate(82.5)"/>
+      <use href="#beam" transform="rotate(90)"/>
+      <use href="#dot" transform="rotate(97.5)"/>
+      <use href="#beam" transform="rotate(105)"/>
+      <use href="#dot" transform="rotate(112.5)"/>
+    </g>
+
+    <g class="beam" style="color:#00f5ff">
+      <use href="#beam" transform="rotate(120)"/>
+      <use href="#dot" transform="rotate(127.5)"/>
+      <use href="#beam" transform="rotate(135)"/>
+      <use href="#dot" transform="rotate(142.5)"/>
+      <use href="#beam" transform="rotate(150)"/>
+      <use href="#dot" transform="rotate(157.5)"/>
+      <use href="#beam" transform="rotate(165)"/>
+      <use href="#dot" transform="rotate(172.5)"/>
+    </g>
+
+    <g class="beam" style="color:#1975ff">
+      <use href="#beam" transform="rotate(180)"/>
+      <use href="#dot" transform="rotate(187.5)"/>
+      <use href="#beam" transform="rotate(195)"/>
+      <use href="#dot" transform="rotate(202.5)"/>
+      <use href="#beam" transform="rotate(210)"/>
+      <use href="#dot" transform="rotate(217.5)"/>
+      <use href="#beam" transform="rotate(225)"/>
+      <use href="#dot" transform="rotate(232.5)"/>
+    </g>
+
+    <g class="beam" style="color:#8b2cff">
+      <use href="#beam" transform="rotate(240)"/>
+      <use href="#dot" transform="rotate(247.5)"/>
+      <use href="#beam" transform="rotate(255)"/>
+      <use href="#dot" transform="rotate(262.5)"/>
+      <use href="#beam" transform="rotate(270)"/>
+      <use href="#dot" transform="rotate(277.5)"/>
+      <use href="#beam" transform="rotate(285)"/>
+      <use href="#dot" transform="rotate(292.5)"/>
+    </g>
+
+    <g class="beam" style="color:#ff00df">
+      <use href="#beam" transform="rotate(300)"/>
+      <use href="#dot" transform="rotate(307.5)"/>
+      <use href="#beam" transform="rotate(315)"/>
+      <use href="#dot" transform="rotate(322.5)"/>
+      <use href="#beam" transform="rotate(330)"/>
+      <use href="#dot" transform="rotate(337.5)"/>
+      <use href="#beam" transform="rotate(345)"/>
+      <use href="#dot" transform="rotate(352.5)"/>
+    </g>
+  </g>
+
+  <!-- dark center like the reference -->
+  <circle cx="256" cy="256" r="86" fill="#000"/>
+  <circle class="pulse" cx="256" cy="256" r="6" fill="#00f5ff" filter="url(#softGlow)"/>
+  <circle class="flicker" cx="216" cy="270" r="4" fill="#00f5ff" filter="url(#softGlow)"/>
+  <circle class="flicker" cx="298" cy="232" r="4" fill="#17ff36" filter="url(#softGlow)"/>
+  <circle class="flicker" cx="252" cy="312" r="4" fill="#8b2cff" filter="url(#softGlow)"/>
+</svg>

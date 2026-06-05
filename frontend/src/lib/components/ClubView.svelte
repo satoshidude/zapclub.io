@@ -5,13 +5,15 @@
     leaveClub,
     removeUser,
     addModerator,
+    deleteEvent,
     parseClubMetadata,
     parseMembers,
     parseAdmins,
   } from '../nostr/groups'
-  import { goHome } from '../router.svelte'
+  import { goHome, goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
+  import { npubEncode } from 'nostr-tools/nip19'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import {
     stage,
@@ -25,11 +27,13 @@
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
+  import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
+  import Chat from './club/Chat.svelte'
   import type { Club, ClubMember } from '../nostr/types'
 
   let { groupId }: { groupId: string } = $props()
@@ -81,6 +85,13 @@
         if (kicked && kicked === me && stage.isOnStage(me)) void leaveStage(id)
       },
       onQueue: ingestQueue,
+      onChat: ingestChat,
+      onDeleteEvent: (ev) => {
+        // Only honor deletions from an admin/moderator (or the author themselves).
+        const target = ev.tags.find((t) => t[0] === 'e')?.[1]
+        if (!target) return
+        if (isModerator(ev.pubkey)) removeMessage(target)
+      },
     })
 
     // Conductor tick: only the conductor acts inside conductorTick(). Touch queues so the
@@ -96,6 +107,7 @@
       resetSync()
       resetStage()
       resetQueues()
+      resetChat()
     }
   })
 
@@ -176,7 +188,6 @@
     </div>
     <div class="info">
       <h1>{club?.name ?? 'Loading…'}</h1>
-      {#if club?.about}<p class="about">{club.about}</p>{/if}
       <div class="tags">
         {#if club?.open}<span class="tag">open</span>{/if}
         {#if club?.isPublic}<span class="tag">public</span>{/if}
@@ -215,30 +226,51 @@
     <ComingNext />
   </section>
 
-  <section class="members">
-    <h2>Members</h2>
-    {#if members.length === 0}
-      <p class="dim">No members yet.</p>
+  <Chat
+    {groupId}
+    canChat={isMember}
+    {canModerate}
+    onauthor={(pubkey) => goUser(npubEncode(pubkey))}
+    ondelete={(id) => void deleteEvent(groupId, id)}
+  />
+
+  <section class="about card">
+    <h3>About this club</h3>
+    {#if club?.about}
+      <p class="desc">{club.about}</p>
     {:else}
-      <ul>
-        {#each members as m (m.pubkey)}
-          {@const profile = useProfile(m.pubkey)}
-          <li>
-            <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
-            <span class="mname">{displayName(m.pubkey, profile)}</span>
-            {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
-            {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
-              <span class="mod-actions">
-                {#if isOwner && !m.roles.includes('moderator')}
-                  <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
-                {/if}
-                <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
-              </span>
-            {/if}
-          </li>
-        {/each}
-      </ul>
+      <p class="desc dim">No description yet.</p>
     {/if}
+
+    <details class="members-acc">
+      <summary>
+        <span class="sum-label">Members</span>
+        <span class="mcount">{members.length}</span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </summary>
+      {#if members.length === 0}
+        <p class="dim">No members yet.</p>
+      {:else}
+        <ul class="member-list">
+          {#each members as m (m.pubkey)}
+            {@const profile = useProfile(m.pubkey)}
+            <li>
+              <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
+              <span class="mname">{displayName(m.pubkey, profile)}</span>
+              {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
+              {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
+                <span class="mod-actions">
+                  {#if isOwner && !m.roles.includes('moderator')}
+                    <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
+                  {/if}
+                  <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
+                </span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </details>
   </section>
 
 </div>
@@ -287,11 +319,6 @@
     margin: 0;
     font-size: 1.4rem;
   }
-  .about {
-    margin: 0.3rem 0 0;
-    color: var(--text-dim);
-    font-size: 0.9rem;
-  }
   .tags {
     display: flex;
     gap: 0.4rem;
@@ -308,21 +335,68 @@
   .actions {
     flex: 0 0 auto;
   }
-  .members {
-    margin-top: 1.5rem;
+  .about.card {
+    margin-top: 0.9rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
   }
-  .members h2 {
-    font-size: 1.05rem;
+  .about h3 {
+    margin: 0 0 0.6rem;
+    font-size: 0.95rem;
   }
-  .members ul {
-    list-style: none;
+  .desc {
     margin: 0;
+    font-size: 0.9rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .desc.dim {
+    color: var(--text-dim);
+  }
+  .members-acc {
+    margin-top: 0.9rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
+  }
+  .members-acc summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    user-select: none;
+  }
+  .members-acc summary::-webkit-details-marker {
+    display: none;
+  }
+  .mcount {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+  }
+  .chevron {
+    margin-left: auto;
+    color: var(--text-dim);
+    transition: transform 0.18s ease;
+  }
+  .members-acc[open] .chevron {
+    transform: rotate(180deg);
+  }
+  .member-list {
+    list-style: none;
+    margin: 0.8rem 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
   }
-  .members li {
+  .member-list li {
     display: flex;
     align-items: center;
     gap: 0.6rem;

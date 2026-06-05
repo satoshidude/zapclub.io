@@ -1,5 +1,4 @@
 <script lang="ts">
-  import icon from './assets/zapclub-icon.png'
   import { router, goHome } from './lib/router.svelte'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
@@ -13,7 +12,21 @@
 <header class="topbar">
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
-    <img class="logo" src={icon} alt="zapclub" width="34" height="34" />
+    <svg class="logo" viewBox="0 0 36 36" width="32" height="32" role="img" aria-label="zapclub turntable">
+      <!-- spinning vinyl record (Nostr purple) -->
+      <g class="vinyl">
+        <circle cx="16" cy="20" r="13" fill="#1b0b33" stroke="#8e30eb" stroke-width="1.6" />
+        <circle cx="16" cy="20" r="9.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4" />
+        <circle cx="16" cy="20" r="6.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.3" />
+        <circle cx="16" cy="20" r="3.6" fill="#8e30eb" />
+        <!-- bright mark so the spin is visible -->
+        <circle cx="16" cy="11.5" r="1.1" fill="#d8b4fe" />
+        <circle cx="16" cy="20" r="1" fill="#1b0b33" />
+      </g>
+      <!-- static tonearm -->
+      <line x1="29" y1="7" x2="20.5" y2="15.5" stroke="#c084fc" stroke-width="1.7" stroke-linecap="round" />
+      <circle cx="29" cy="7" r="1.9" fill="#c084fc" />
+    </svg>
     <span>zapclub<span class="dim">.io</span></span>
   </div>
   <LoginButton />
@@ -64,26 +77,21 @@
   }
   .logo {
     flex: 0 0 auto;
-    object-fit: contain;
-    transform-origin: center;
-    animation: logo-pulse 1.6s ease-in-out infinite;
+    filter: drop-shadow(0 0 6px rgba(142, 48, 235, 0.55));
   }
-  /* Pulse: gentle scale + neon glow breathing (matches the bolt's purple/amber). */
-  @keyframes logo-pulse {
-    0%,
-    100% {
-      transform: scale(1);
-      filter: drop-shadow(0 0 4px rgba(177, 77, 255, 0.5));
-    }
-    50% {
-      transform: scale(1.12);
-      filter: drop-shadow(0 0 13px rgba(177, 77, 255, 0.9));
+  /* Turntable: the vinyl record spins, the tonearm stays put (Nostr purple). */
+  .logo .vinyl {
+    transform-origin: 16px 20px;
+    animation: vinyl-spin 2.4s linear infinite;
+  }
+  @keyframes vinyl-spin {
+    to {
+      transform: rotate(360deg);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .logo {
+    .logo .vinyl {
       animation: none;
-      filter: drop-shadow(0 0 6px rgba(177, 77, 255, 0.55));
     }
   }
   .brand .dim {
