@@ -8,8 +8,27 @@
   import Nav from './lib/components/Nav.svelte'
   import Turntable from './lib/components/Turntable.svelte'
   import UserProfile from './lib/components/UserProfile.svelte'
+  import PayModal from './lib/components/PayModal.svelte'
+  import { requestZapInvoice } from './lib/nostr/zaps.svelte'
+  import { showPay } from './lib/nostr/payModal.svelte'
 
   startConnectionWatch()
+
+  // Footer donation — plain LNURL payment to the project's lightning address.
+  const DONATE_LUD16 = 'zapclub@nsnip.io'
+  let donating = $state(false)
+  async function donate(sats: number) {
+    if (donating) return
+    donating = true
+    try {
+      const { invoice, verify } = await requestZapInvoice('', DONATE_LUD16, sats, 'zapclub donation')
+      showPay(invoice, sats, 'Tip zapclub', verify)
+    } catch {
+      /* ignore — user can retry */
+    } finally {
+      donating = false
+    }
+  }
 </script>
 
 <header class="topbar">
@@ -40,9 +59,18 @@
   {/if}
 </main>
 
+<footer class="footer">
+  <span class="tip-label">⚡ Tip zapclub</span>
+  {#each [100, 1000, 5000] as amt (amt)}
+    <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
+  {/each}
+  <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
+</footer>
+
 <Nav mobile />
 
 <LoginDialog />
+<PayModal />
 
 <style>
   .topbar {
@@ -78,10 +106,52 @@
     font-size: 0.8rem;
     padding: 0.4rem;
   }
+  .footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1.6rem 1rem 2rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+  .tip-label {
+    font-weight: 700;
+    color: var(--amber);
+  }
+  .tip {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .tip:hover:not(:disabled) {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .tip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .foot-note {
+    flex-basis: 100%;
+    text-align: center;
+    margin-top: 0.4rem;
+    font-size: 0.72rem;
+  }
   /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
   @media (max-width: 560px) {
     main {
-      padding-bottom: calc(3.6rem + env(safe-area-inset-bottom));
+      padding-bottom: 1rem;
+    }
+    .footer {
+      padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
     }
   }
 </style>

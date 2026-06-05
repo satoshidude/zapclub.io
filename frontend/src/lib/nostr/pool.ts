@@ -19,6 +19,14 @@ export const PROFILE_RELAYS = [
  */
 export const CLUB_RELAY = 'wss://relay.zapclub.io'
 
+/**
+ * Relays for NIP-57 zap receipts (kind 9735). The DJ's LNURL server publishes the
+ * receipt to the relays named in the zap request; the client reads them from the same
+ * list. Public relays — zap receipts are global, not club-scoped (the NIP-29 relay
+ * rejects events without an h-tag).
+ */
+export const ZAP_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band']
+
 /** Shared pool for profile and club relays. */
 export const pool = new SimplePool()
 

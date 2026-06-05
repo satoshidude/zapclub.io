@@ -28,12 +28,14 @@
   import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
+  import { subscribeZaps, resetZaps } from '../nostr/zaps.svelte'
   import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
   import Chat from './club/Chat.svelte'
+  import ZapButton from './club/ZapButton.svelte'
   import DiscoBall from './DiscoBall.svelte'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -112,7 +114,14 @@
       clearStageView()
       resetQueues()
       resetChat()
+      resetZaps()
     }
+  })
+
+  // Subscribe to zap receipts (9735) for the stage DJs → live score on the zap button.
+  $effect(() => {
+    const pks = stage.djs.map((d) => d.pubkey)
+    return subscribeZaps(pks)
   })
 
   // Owner (first admin) is the stage host = always conductor when on stage.
@@ -217,6 +226,14 @@
     </div>
 
     {#if club?.about}<p class="desc">{club.about}</p>{/if}
+
+    <div class="hero-now">
+      <NowPlaying
+        onGoStage={goOnStage}
+        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+      />
+      <ZapButton />
+    </div>
     <ComingNext />
   </header>
 
@@ -233,10 +250,6 @@
       }}
       onended={() => onTrackEnded(groupId)}
       onerror={(vid) => onTrackError(groupId, vid)}
-    />
-    <NowPlaying
-      onGoStage={goOnStage}
-      stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
     />
     <Stage {groupId} {canModerate} {isMember} />
   </section>
@@ -320,6 +333,12 @@
     display: flex;
     gap: 1rem;
     align-items: flex-start;
+  }
+  .hero-now {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    margin-top: 0.9rem;
   }
   .pic {
     width: 72px;

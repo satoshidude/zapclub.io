@@ -18,6 +18,7 @@ import { resetStage } from './stage.svelte'
 import { resetQueues } from './queue.svelte'
 import { resetChat } from './chat.svelte'
 import { resetPlaylists } from './playlists.svelte'
+import { resetZaps } from './zaps.svelte'
 import type { LoginMethod } from './types'
 
 // ── applesauce: account manager + signer wiring ─────────────────────────────
@@ -43,6 +44,7 @@ function resetSession(): void {
   resetQueues()
   resetChat()
   resetPlaylists()
+  resetZaps()
   goHome()
 }
 
