@@ -217,6 +217,7 @@
     </div>
 
     {#if club?.about}<p class="desc">{club.about}</p>{/if}
+    <ComingNext />
   </header>
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
@@ -238,7 +239,6 @@
       stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
     />
     <Stage {groupId} {canModerate} {isMember} />
-    <ComingNext />
   </section>
 
   <div class="club-tabs" role="tablist">

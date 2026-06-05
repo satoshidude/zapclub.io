@@ -1,5 +1,6 @@
 <script lang="ts">
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
+  import { sync } from '../../nostr/sync.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
@@ -20,7 +21,11 @@
   const djs = $derived(stage.djs)
   const onStage = $derived(stage.isOnStage(me))
   const conductor = $derived(stage.conductor)
+  // The DJ whose track is actually playing right now (pulsing highlight).
+  const liveDj = $derived(sync.live?.dj ?? '')
   const emptySlots = $derived(Math.max(0, MAX_DJS - djs.length))
+  // A free slot can be taken directly by a signed-in member who isn't on stage yet.
+  const canJoin = $derived(auth.canSign && isMember && !onStage && !stage.full)
 
   async function go() {
     busy = true
@@ -75,7 +80,7 @@
   <div class="slots">
     {#each djs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
-      <div class="slot filled" class:conductor={dj.pubkey === conductor}>
+      <div class="slot filled" class:live={dj.pubkey === liveDj}>
         <img class="avatar" src={avatarUrl(dj.pubkey, profile)} alt="" width="44" height="44" />
         <span class="name">{displayName(dj.pubkey, profile)}</span>
         {#if dj.pubkey === conductor}<span class="badge">conductor</span>{/if}
@@ -85,10 +90,16 @@
       </div>
     {/each}
     {#each Array(emptySlots) as _, i (i)}
-      <div class="slot empty">
+      <button
+        class="slot empty"
+        class:joinable={canJoin}
+        onclick={go}
+        disabled={!canJoin || busy}
+        title={canJoin ? 'Take this spot' : ''}
+      >
         <span class="plus">+</span>
-        <span class="name">Open</span>
-      </div>
+        <span class="name">{canJoin ? 'Join' : 'Open'}</span>
+      </button>
     {/each}
   </div>
 </div>
@@ -136,15 +147,48 @@
     border: 1px solid var(--border);
     background: var(--bg);
   }
-  .slot.conductor {
+  /* The active DJ (whose track is playing) gets a pulsing green frame. */
+  .slot.live {
     border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(74, 222, 94, 0.3);
+    animation: stage-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes stage-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 6px rgba(74, 222, 94, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(74, 222, 94, 0.7);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slot.live {
+      animation: none;
+      box-shadow: 0 0 0 1px var(--accent);
+    }
   }
   .slot.empty {
     border-style: dashed;
     opacity: 0.6;
     justify-content: center;
     min-height: 96px;
+    color: inherit;
+    font: inherit;
+  }
+  .slot.empty.joinable {
+    opacity: 1;
+    cursor: pointer;
+    transition: border-color 0.15s ease, opacity 0.15s ease;
+  }
+  .slot.empty.joinable:hover {
+    border-color: var(--accent);
+  }
+  .slot.empty.joinable:hover .plus,
+  .slot.empty.joinable:hover .name {
+    color: var(--accent);
+  }
+  .slot.empty:disabled {
+    cursor: default;
   }
   .avatar {
     width: 44px;

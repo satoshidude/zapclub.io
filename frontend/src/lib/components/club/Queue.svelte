@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, moveTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
   import { skipTrack, canSkip } from '../../nostr/sync.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
@@ -75,7 +75,7 @@
 
 <div class="queue card">
   <div class="head">
-    <h3>Your queue <span class="count">{tracks.length}</span></h3>
+    <h3>My set <span class="count">{tracks.length}</span></h3>
     <div class="head-actions">
       {#if canSkip()}
         <button class="btn btn-ghost btn-sm" onclick={() => skipTrack(groupId)} title="Skip current track">⏭ Skip</button>
@@ -84,16 +84,36 @@
         <button class="mini" onclick={() => shuffleQueue(groupId)} title="Shuffle">🔀</button>
       {/if}
       {#if tracks.length > 0}
-        <button class="mini" onclick={() => clearQueue(groupId)} title="Clear queue">🗑</button>
+        <button class="mini" onclick={() => clearQueue(groupId)} title="Clear set">🗑</button>
       {/if}
     </div>
   </div>
+
+  <!-- My tracks (top), drag-free reordering with the arrows -->
+  {#if tracks.length > 0}
+    <ul class="tracks">
+      {#each tracks as track, i (track.videoId + i)}
+        <li class:played={track.active === false}>
+          <span class="t-idx">{i + 1}</span>
+          <span class="t-title">{track.title}</span>
+          <span class="dur">{fmt(track.duration)}</span>
+          <span class="reorder">
+            <button class="ord" onclick={() => moveTrack(groupId, i, i - 1)} disabled={i === 0} title="Move up">▲</button>
+            <button class="ord" onclick={() => moveTrack(groupId, i, i + 1)} disabled={i === tracks.length - 1} title="Move down">▼</button>
+          </span>
+          <button class="rm" onclick={() => removeTrack(groupId, i)} title="Remove">✕</button>
+        </li>
+      {/each}
+    </ul>
+  {:else if onStage}
+    <p class="hint">Your set is empty — search below to add tracks.</p>
+  {/if}
 
   {#if !onStage}
     <p class="hint">Go on stage to add tracks to the round-robin.</p>
   {/if}
 
-  <!-- Search to add tracks -->
+  <!-- Search to add tracks (below the set) -->
   <form class="search" onsubmit={(e) => { e.preventDefault(); doSearch() }}>
     <input
       bind:value={query}
@@ -122,20 +142,6 @@
           <span class="r-title">{hit.title}</span>
           <span class="dur">{fmt(hit.duration)}</span>
           <button class="add" onclick={() => add(hit)} title="Add to queue">+ Add</button>
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
-  <!-- My tracks -->
-  {#if tracks.length > 0}
-    <ul class="tracks">
-      {#each tracks as track, i (track.videoId + i)}
-        <li class:played={track.active === false}>
-          <span class="t-idx">{i + 1}</span>
-          <span class="t-title">{track.title}</span>
-          <span class="dur">{fmt(track.duration)}</span>
-          <button class="rm" onclick={() => removeTrack(groupId, i)} title="Remove">✕</button>
         </li>
       {/each}
     </ul>
@@ -177,7 +183,9 @@
   .search {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 0.6rem;
+    margin: 0.9rem 0 0.6rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--border);
   }
   .search input {
     flex: 1;
@@ -212,9 +220,7 @@
     gap: 0.4rem;
   }
   .results {
-    margin-bottom: 0.7rem;
-    padding-bottom: 0.7rem;
-    border-bottom: 1px solid var(--border);
+    margin-top: 0.6rem;
   }
   .results li,
   .tracks li {
@@ -222,6 +228,35 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.85rem;
+  }
+  .reorder {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 0 0 auto;
+  }
+  .ord {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    width: 18px;
+    height: 13px;
+    font-size: 0.55rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ord:hover:not(:disabled) {
+    border-color: var(--accent-2);
+    color: var(--text);
+  }
+  .ord:disabled {
+    opacity: 0.3;
+    cursor: default;
   }
   .thumb {
     width: 48px;

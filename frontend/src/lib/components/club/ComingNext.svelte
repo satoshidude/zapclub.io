@@ -13,7 +13,7 @@
 </script>
 
 {#if next.length > 0}
-  <div class="cn card">
+  <div class="cn">
     <h3>Coming up</h3>
     <ol>
       {#each next as item, i (item.videoId + i)}
@@ -29,15 +29,15 @@
 {/if}
 
 <style>
+  /* Borderless — sits inside the hero card. */
   .cn {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.9rem 1rem;
+    margin-top: 0.9rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.8rem;
   }
   h3 {
     margin: 0 0 0.6rem;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
   }
   ol {
     list-style: none;
