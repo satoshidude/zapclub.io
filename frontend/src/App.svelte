@@ -119,7 +119,8 @@
     color: #fff;
   }
   .brand .tld {
-    color: #fff;
+    /* Nostr purple */
+    color: #8e30eb;
     font-weight: 700;
   }
   .reconnect {
