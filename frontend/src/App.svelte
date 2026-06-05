@@ -119,7 +119,7 @@
     color: #fff;
   }
   .brand .tld {
-    color: #22c55e;
+    color: #fff;
     font-weight: 700;
   }
   .reconnect {
