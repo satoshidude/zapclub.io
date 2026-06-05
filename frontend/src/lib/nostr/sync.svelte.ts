@@ -3,7 +3,7 @@ import { KIND_NOW_PLAYING, KIND_SKIP, publishClub, publishPlay } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
-import { posToSlot, nextPlayablePos, firstPlayablePos } from './roundrobin'
+import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
@@ -138,16 +138,10 @@ function startAt(groupId: string, pos: number, startedAtMs: number): void {
  */
 function reanchorPos(np: NowPlaying): NowPlaying {
   const djs = stage.djs.map((d) => d.pubkey)
-  const n = djs.length
-  const djIndex = djs.indexOf(np.dj)
-  if (n === 0 || djIndex < 0) return np
-  const { trackIndex } = posToSlot(np.pos, n)
-  const atPos = queues.trackAt(np.dj, trackIndex)
-  if (atPos && atPos.videoId === np.videoId) return np // still aligned — nothing to do
-  const tracks = queues.get(np.dj)?.tracks ?? []
-  const newIdx = tracks.findIndex((t) => t.videoId === np.videoId)
-  if (newIdx < 0) return np // playing track gone from queue → let advance() handle it
-  return { ...np, pos: djIndex + newIdx * n }
+  const pos = reanchoredPos(djs, np.dj, np.pos, np.videoId, (dj) =>
+    (queues.get(dj)?.tracks ?? []).map((t) => t.videoId),
+  )
+  return pos === np.pos ? np : { ...np, pos }
 }
 
 /** Heartbeat: re-send the same running track (only sent_at fresh), pos re-anchored. */

@@ -41,3 +41,30 @@ export function nextPlayablePos(
 export function firstPlayablePos(djCount: number, playable: boolean[][]): number {
   return nextPlayablePos(-1, djCount, playable)
 }
+
+/**
+ * Re-anchors `pos` to the index the CURRENTLY-PLAYING track now sits at in its DJ's queue.
+ * The round-robin is positional, so when a DJ reorders, the playing track may move to a
+ * different index; without re-anchoring the next advance would follow stale positions (a
+ * track moved before the play head would be skipped until a wrap). Returns the corrected
+ * pos — or the original if already aligned, the stage is empty, the DJ isn't on stage, or
+ * the playing track is no longer in the queue. `queueVideoIds(dj)` returns that DJ's track
+ * ids in order. Pure.
+ */
+export function reanchoredPos(
+  djs: string[],
+  dj: string,
+  pos: number,
+  videoId: string,
+  queueVideoIds: (dj: string) => string[],
+): number {
+  const n = djs.length
+  const djIndex = djs.indexOf(dj)
+  if (n === 0 || djIndex < 0) return pos
+  const { trackIndex } = posToSlot(pos, n)
+  const ids = queueVideoIds(dj)
+  if (ids[trackIndex] === videoId) return pos // still aligned — nothing to do
+  const newIdx = ids.indexOf(videoId)
+  if (newIdx < 0) return pos // playing track gone from queue → let advance() handle it
+  return djIndex + newIdx * n
+}

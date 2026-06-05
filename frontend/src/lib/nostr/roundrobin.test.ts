@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { posToSlot, nextPlayablePos, firstPlayablePos } from './roundrobin'
+import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
 
 // playable[dj][track] = true when that DJ has an ACTIVE track at that index.
 // Helper: all tracks active.
@@ -60,6 +60,38 @@ describe('firstPlayablePos', () => {
 
   it('is -1 for an empty stage', () => {
     expect(firstPlayablePos(0, [])).toBe(-1)
+  })
+})
+
+describe('reanchoredPos (reorder takes effect — the "refresh push" bug)', () => {
+  // queueVideoIds for a single DJ "A".
+  const q = (ids: string[]) => (dj: string) => (dj === 'A' ? ids : [])
+
+  it('returns the same pos when the playing track is still at that index', () => {
+    // single DJ, playing track "c" at index 2 (pos 2)
+    expect(reanchoredPos(['A'], 'A', 2, 'c', q(['a', 'b', 'c', 'd']))).toBe(2)
+  })
+
+  it('re-anchors when the playing track moved to a new index', () => {
+    // "c" was at index 2; reordered to index 0 → pos must become 0 so the NEXT advance
+    // continues from the new order instead of skipping ahead.
+    expect(reanchoredPos(['A'], 'A', 2, 'c', q(['c', 'a', 'b', 'd']))).toBe(0)
+  })
+
+  it('two DJs: pos accounts for the interleave (djIndex + newIdx*n)', () => {
+    // DJs [A, B], playing A's "x". A reordered so "x" is now at index 3.
+    // pos = djIndex(0) + newIdx(3)*n(2) = 6
+    const qids = (dj: string) => (dj === 'A' ? ['a', 'b', 'c', 'x'] : ['p', 'q'])
+    expect(reanchoredPos(['A', 'B'], 'A', 0, 'x', qids)).toBe(6)
+  })
+
+  it('leaves pos untouched when the playing track was removed from the queue', () => {
+    expect(reanchoredPos(['A'], 'A', 2, 'gone', q(['a', 'b', 'c']))).toBe(2)
+  })
+
+  it('leaves pos untouched for an empty stage or an off-stage DJ', () => {
+    expect(reanchoredPos([], 'A', 5, 'x', q(['x']))).toBe(5)
+    expect(reanchoredPos(['B'], 'A', 5, 'x', q(['x']))).toBe(5)
   })
 })
 
