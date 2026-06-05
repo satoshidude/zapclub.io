@@ -5,17 +5,20 @@
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
 
+  // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
+  let { pubkey = '' }: { pubkey?: string } = $props()
+
   const PRESETS = [21, 100, 500, 2100]
-  // Fallback payee when the DJ has no lightning address on their profile. The vote/score
-  // still belongs to the DJ (p-tag = DJ pubkey).
+  // Fallback payee when the recipient has no lightning address on their profile. The
+  // vote/score still belongs to them (p-tag = their pubkey).
   const FALLBACK_LUD16 = 'zapclub@nsnip.io'
 
   const np = $derived(sync.live)
-  const dj = $derived(np?.dj ?? '')
+  const dj = $derived(pubkey || np?.dj || '')
   const djProfile = $derived(dj ? useProfile(dj) : null)
   const lud16 = $derived((djProfile?.lud16 as string) || FALLBACK_LUD16)
   const isSelf = $derived(!!dj && dj === auth.pubkey)
-  const show = $derived(!!np && !isSelf)
+  const show = $derived(!!dj && !isSelf)
   // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
   const total = $derived(dj ? zaps.score(dj) : 0)
 

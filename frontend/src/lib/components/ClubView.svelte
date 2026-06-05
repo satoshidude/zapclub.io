@@ -36,6 +36,7 @@
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
+  import ZapButton from './club/ZapButton.svelte'
   import Chat from './club/Chat.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
@@ -272,6 +273,7 @@
               <img class="host-av" src={avatarUrl(owner, op)} alt="" width="14" height="14" />
               {displayName(owner, op)}
             </a>
+            <ZapButton pubkey={owner} />
           {/if}
           {#if clubZapTotal > 0}<span class="tag zaps">⚡ {clubZapTotal.toLocaleString()} sats</span>{/if}
         </div>
