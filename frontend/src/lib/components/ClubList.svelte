@@ -4,7 +4,8 @@
   import { goClub } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
-  import DiscoBall from './DiscoBall.svelte'
+  import { persistedStageGroup } from '../nostr/stage.svelte'
+  import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
 
   let clubs = $state<Club[]>([])
@@ -19,6 +20,15 @@
   let creating = $state(false)
 
   const myIds = $derived(new Set(myClubs.map((c) => c.id)))
+
+  // The club the user is currently DJing in → pin to the top + highlight.
+  const onStageClub = persistedStageGroup()
+  const displayClubs = $derived.by(() => {
+    if (!onStageClub) return clubs
+    const top = clubs.filter((c) => c.id === onStageClub)
+    const rest = clubs.filter((c) => c.id !== onStageClub)
+    return [...top, ...rest]
+  })
 
   async function load() {
     loading = true
@@ -100,11 +110,12 @@
     <p class="dim">No clubs yet. {auth.canSign ? 'Be the first to create one.' : 'Sign in to create one.'}</p>
   {:else}
     <div class="list">
-      {#each clubs as club (club.id)}
+      {#each displayClubs as club (club.id)}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="card row" role="button" tabindex="0" onclick={() => goClub(club.id)}>
-          <div class="pic" style:background-image={club.picture ? `url(${club.picture})` : 'none'}>
-            {#if !club.picture}<DiscoBall size={44} />{/if}
+        <div class="card row" class:onstage={club.id === onStageClub} role="button" tabindex="0" onclick={() => goClub(club.id)}>
+          {#if club.id === onStageClub}<span class="live-badge">● on stage</span>{/if}
+          <div class="pic">
+            <img class="pic-img" src={club.picture || clubAvatar(club.owner || club.id)} alt="" />
           </div>
           <div class="meta">
             <div class="name">{club.name}</div>
@@ -167,6 +178,7 @@
     gap: 0.7rem;
   }
   .row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.9rem;
@@ -179,17 +191,48 @@
   .row:active {
     transform: translateY(1px);
   }
+  /* The club the user is DJing in: pinned to the top, pulsing green. */
+  .row.onstage {
+    border-color: var(--accent);
+    animation: club-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes club-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(74, 222, 94, 0.25);
+    }
+    50% {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(74, 222, 94, 0.6);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row.onstage {
+      animation: none;
+    }
+  }
+  .live-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 0.64rem;
+    font-weight: 800;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
   .pic {
     width: 52px;
     height: 52px;
     flex: 0 0 52px;
     border-radius: 11px;
-    background-color: var(--bg-elev-2);
-    background-size: cover;
-    background-position: center;
-    display: grid;
-    place-items: center;
-    font-size: 1.4rem;
+    overflow: hidden;
+    background: var(--bg-elev-2);
+  }
+  .pic-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .meta {
     flex: 1;

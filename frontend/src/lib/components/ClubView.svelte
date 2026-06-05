@@ -6,6 +6,7 @@
     removeUser,
     addModerator,
     deleteEvent,
+    editClub,
     parseClubMetadata,
     parseMembers,
     parseAdmins,
@@ -35,7 +36,7 @@
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
   import Chat from './club/Chat.svelte'
-  import DiscoBall from './DiscoBall.svelte'
+  import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
   let { groupId }: { groupId: string } = $props()
@@ -197,13 +198,39 @@
     if (m.roles.includes('moderator')) return 'mod'
     return ''
   }
+
+  // Owner: edit the club (name / about / picture).
+  let editing = $state(false)
+  let eName = $state('')
+  let eAbout = $state('')
+  let ePic = $state('')
+  function openEdit() {
+    eName = club?.name ?? ''
+    eAbout = club?.about ?? ''
+    ePic = club?.picture ?? ''
+    editing = true
+  }
+  async function saveEdit() {
+    if (!eName.trim()) return
+    error = ''
+    try {
+      await editClub(groupId, {
+        name: eName.trim(),
+        about: eAbout.trim() || undefined,
+        picture: ePic.trim() || undefined,
+      })
+      editing = false
+    } catch (e) {
+      error = String((e as Error)?.message ?? e)
+    }
+  }
 </script>
 
 <div class="wrap">
   <header class="hero">
     <div class="hero-top">
-      <div class="pic" style:background-image={club?.picture ? `url(${club.picture})` : 'none'}>
-        {#if !club?.picture}<DiscoBall size={56} />{/if}
+      <div class="pic">
+        <img class="pic-img" src={club?.picture || clubAvatar(owner || groupId)} alt="" />
       </div>
       <div class="info">
         <h1>{club?.name ?? 'Loading…'}</h1>
@@ -214,6 +241,9 @@
         </div>
       </div>
       <div class="actions">
+        {#if isOwner}
+          <button class="btn btn-ghost btn-sm" onclick={openEdit} title="Edit club">✏️</button>
+        {/if}
         {#if auth.canSign}
           {#if isMember}
             <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
@@ -224,7 +254,28 @@
       </div>
     </div>
 
-    {#if club?.about}<p class="desc">{club.about}</p>{/if}
+    {#if editing}
+      <div class="edit-form">
+        <div class="field">
+          <label for="e-name">Club name</label>
+          <input id="e-name" bind:value={eName} maxlength="60" />
+        </div>
+        <div class="field">
+          <label for="e-about">About</label>
+          <textarea id="e-about" bind:value={eAbout} rows="2" maxlength="280"></textarea>
+        </div>
+        <div class="field">
+          <label for="e-pic">Image URL (leave empty for the generated one)</label>
+          <input id="e-pic" bind:value={ePic} placeholder="https://…" />
+        </div>
+        <div class="edit-actions">
+          <button class="btn btn-primary btn-sm" onclick={saveEdit} disabled={!eName.trim()}>Save</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)}>Cancel</button>
+        </div>
+      </div>
+    {:else if club?.about}
+      <p class="desc">{club.about}</p>
+    {/if}
 
     <div class="hero-now">
       <NowPlaying
@@ -335,17 +386,28 @@
   .hero-now {
     margin-top: 0.9rem;
   }
+  .edit-form {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--border);
+  }
+  .edit-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
   .pic {
     width: 72px;
     height: 72px;
     flex: 0 0 72px;
     border-radius: 14px;
-    background-color: var(--bg-elev-2);
-    background-size: cover;
-    background-position: center;
-    display: grid;
-    place-items: center;
-    font-size: 2rem;
+    overflow: hidden;
+    background: var(--bg-elev-2);
+  }
+  .pic-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .info {
     flex: 1;

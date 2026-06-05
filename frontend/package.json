@@ -19,6 +19,8 @@
     "vite": "^8.0.12"
   },
   "dependencies": {
+    "@dicebear/collection": "^9.4.2",
+    "@dicebear/core": "^9.4.2",
     "applesauce-accounts": "^6.0.0",
     "applesauce-core": "^6.1.0",
     "applesauce-relay": "^6.0.3",
