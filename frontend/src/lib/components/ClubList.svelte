@@ -148,8 +148,6 @@
             <div class="name">{club.name}</div>
             {#if club.about}<div class="about">{club.about}</div>{/if}
             <div class="tags">
-              {#if club.open}<span class="tag">open</span>{/if}
-              {#if club.isPublic}<span class="tag">public</span>{/if}
               <span class="tag">👥 {club.memberCount} member{club.memberCount === 1 ? '' : 's'}</span>
             </div>
             {#if club.owner}
