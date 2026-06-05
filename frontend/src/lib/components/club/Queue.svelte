@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive } from '../../nostr/queue.svelte'
   import { skipTrack, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
@@ -166,6 +166,9 @@
             <button class="ord" onclick={() => moveTrack(groupId, i, i - 1)} disabled={i === 0} title="Move up">▲</button>
             <button class="ord" onclick={() => moveTrack(groupId, i, i + 1)} disabled={i === tracks.length - 1} title="Move down">▼</button>
           </span>
+          {#if track.active === false}
+            <button class="reactivate" onclick={() => setTrackActive(groupId, track.videoId, true)} title="Play again — re-activate this track">↻</button>
+          {/if}
           <button class="rm" onclick={() => removeTrack(groupId, i)} title="Remove">✕</button>
         </li>
       {/each}
@@ -389,6 +392,18 @@
   }
   .rm:hover {
     color: var(--danger);
+  }
+  .reactivate {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+  .reactivate:hover {
+    filter: brightness(1.2);
   }
   .mini {
     background: var(--bg-elev-2);
