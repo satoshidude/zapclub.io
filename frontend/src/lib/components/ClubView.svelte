@@ -215,36 +215,6 @@
     </div>
 
     {#if club?.about}<p class="desc">{club.about}</p>{/if}
-
-    <details class="members-acc">
-      <summary>
-        <span class="sum-label">Members</span>
-        <span class="mcount">{members.length}</span>
-        <span class="chevron" aria-hidden="true">▾</span>
-      </summary>
-      {#if members.length === 0}
-        <p class="dim">No members yet.</p>
-      {:else}
-        <ul class="member-list">
-          {#each members as m (m.pubkey)}
-            {@const profile = useProfile(m.pubkey)}
-            <li>
-              <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
-              <span class="mname">{displayName(m.pubkey, profile)}</span>
-              {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
-              {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
-                <span class="mod-actions">
-                  {#if isOwner && !m.roles.includes('moderator')}
-                    <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
-                  {/if}
-                  <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
-                </span>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </details>
   </header>
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
@@ -278,13 +248,47 @@
   </div>
 
   {#if tab === 'chat'}
-    <Chat
-      {groupId}
-      canChat={isMember}
-      {canModerate}
-      onauthor={(pubkey) => goUser(npubEncode(pubkey))}
-      ondelete={(id) => void deleteEvent(groupId, id)}
-    />
+    <div class="panel">
+      <Chat
+        {groupId}
+        canChat={isMember}
+        {canModerate}
+        onauthor={(pubkey) => goUser(npubEncode(pubkey))}
+        ondelete={(id) => void deleteEvent(groupId, id)}
+      />
+
+      <section class="members card">
+        <details class="members-acc" open>
+          <summary>
+            <span class="sum-label">Members</span>
+            <span class="mcount">{members.length}</span>
+            <span class="chevron" aria-hidden="true">▾</span>
+          </summary>
+          {#if members.length === 0}
+            <p class="dim">No members yet.</p>
+          {:else}
+            <ul class="member-list">
+              {#each members as m (m.pubkey)}
+                {@const profile = useProfile(m.pubkey)}
+                <li>
+                  <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
+                  <span class="mname">{displayName(m.pubkey, profile)}</span>
+                  {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
+                  {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
+                    <span class="mod-actions">
+                      {#if isOwner && !m.roles.includes('moderator')}
+                        <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
+                      {/if}
+                      <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </details>
+      </section>
+    </div>
   {:else}
     <div class="panel">
       <Stage {groupId} {canModerate} {isMember} />
@@ -355,10 +359,14 @@
     color: var(--text-dim);
     line-height: 1.6;
   }
+  .members.card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
   .members-acc {
-    margin-top: 0.9rem;
-    border-top: 1px solid var(--border);
-    padding-top: 0.6rem;
+    margin: 0;
   }
   .members-acc summary {
     display: flex;
