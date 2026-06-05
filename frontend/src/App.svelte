@@ -13,7 +13,7 @@
 <header class="topbar">
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
-    <img class="logo" src={icon} alt="zapclub" width="26" height="34" />
+    <img class="logo" src={icon} alt="zapclub" width="34" height="34" />
     <span>zapclub<span class="dim">.io</span></span>
   </div>
   <LoginButton />
@@ -64,6 +64,7 @@
   }
   .logo {
     flex: 0 0 auto;
+    object-fit: contain;
     transform-origin: center;
     animation: logo-pulse 1.6s ease-in-out infinite;
   }
