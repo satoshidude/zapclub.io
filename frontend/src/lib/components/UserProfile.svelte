@@ -12,7 +12,10 @@
     moveTrackBetween,
     copyTrackTo,
   } from '../nostr/playlists.svelte'
-  import type { Playlist, QueueTrack } from '../nostr/types'
+  import { fetchUserClubActivity } from '../nostr/groups'
+  import { goClub } from '../router.svelte'
+  import { clubAvatar } from '../avatar'
+  import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
 
@@ -29,6 +32,8 @@
 
   let othersPlaylists = $state<Playlist[]>([])
   let loading = $state(true)
+  let hosting = $state<Club[]>([])
+  let djingIn = $state<Club[]>([])
 
   $effect(() => {
     const pk = pubkey
@@ -44,6 +49,13 @@
         .then((p) => (othersPlaylists = p))
         .finally(() => (loading = false))
     }
+    // Clubs this user hosts / is currently DJing in.
+    hosting = []
+    djingIn = []
+    void fetchUserClubActivity(pk).then((a) => {
+      hosting = a.hosting
+      djingIn = a.djingIn
+    })
   })
 
   const list = $derived(isMe ? playlists.mine : othersPlaylists)
@@ -88,6 +100,34 @@
       {#if profile?.about}<p class="pabout">{profile.about}</p>{/if}
     </div>
   </header>
+
+  {#if djingIn.length}
+    <section class="clubs">
+      <h2>On stage now <span class="live-dot" aria-hidden="true"></span></h2>
+      <div class="club-grid">
+        {#each djingIn as c (c.id)}
+          <button class="club-card live" onclick={() => goClub(c.id)}>
+            <img class="club-pic" src={c.picture || clubAvatar(c.owner || c.id)} alt="" />
+            <span class="club-name">{c.name}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if hosting.length}
+    <section class="clubs">
+      <h2>Hosting <span class="count">{hosting.length}</span></h2>
+      <div class="club-grid">
+        {#each hosting as c (c.id)}
+          <button class="club-card" onclick={() => goClub(c.id)}>
+            <img class="club-pic" src={c.picture || clubAvatar(c.owner || c.id)} alt="" />
+            <span class="club-name">{c.name}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <section class="pls">
     <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
@@ -194,6 +234,75 @@
     margin: 0.4rem 0 0;
     color: var(--text-dim);
     font-size: 0.9rem;
+  }
+  .clubs {
+    margin-top: 1.4rem;
+  }
+  .club-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+  .club-card {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.45rem 0.75rem 0.45rem 0.45rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.15s ease, transform 0.08s ease;
+  }
+  .club-card:hover {
+    border-color: var(--accent-2);
+  }
+  .club-card:active {
+    transform: translateY(1px);
+  }
+  .club-card.live {
+    border-color: var(--accent);
+    animation: club-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes club-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 6px rgba(74, 222, 94, 0.25);
+    }
+    50% {
+      box-shadow: 0 0 0 1px var(--accent), 0 0 16px rgba(74, 222, 94, 0.55);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .club-card.live {
+      animation: none;
+    }
+  }
+  .club-pic {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+    flex: 0 0 auto;
+  }
+  .club-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .live-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--accent);
+    animation: club-pulse 1.6s ease-in-out infinite;
   }
   .pls {
     margin-top: 1.4rem;

@@ -289,6 +289,42 @@ export async function fetchMyClubs(pubkey: string): Promise<MyClub[]> {
   })
 }
 
+// A DJ's stage event (30102) is considered "live" within this window of its last
+// heartbeat — matches the stage's own sticky STALE_MS.
+const STAGE_STALE_MS = 3_600_000
+
+/**
+ * A user's club activity for their profile: clubs they own (host) and the club they're
+ * currently DJing in (a fresh, non-"off" stage event). Both resolved to full Club cards.
+ */
+export async function fetchUserClubActivity(
+  pubkey: string,
+): Promise<{ hosting: Club[]; djingIn: Club[] }> {
+  const [clubs, stageEvents] = await Promise.all([
+    listClubs(),
+    pool.querySync(RELAYS, { kinds: [KIND_STAGE], authors: [pubkey] }, { maxWait: 4000 }),
+  ])
+  const byId = new Map(clubs.map((c) => [c.id, c]))
+  const hosting = clubs.filter((c) => c.owner === pubkey)
+
+  // Newest stage event per club; live if not stepped "off" and within the sticky window.
+  const newestByGroup = new Map<string, Event>()
+  for (const ev of stageEvents) {
+    const h = tagValue(ev, 'h')
+    if (!h) continue
+    const ex = newestByGroup.get(h)
+    if (!ex || ev.created_at > ex.created_at) newestByGroup.set(h, ev)
+  }
+  const nowMs = Date.now()
+  const djingIn: Club[] = []
+  for (const [h, ev] of newestByGroup) {
+    if (ev.content === 'off' || nowMs - ev.created_at * 1000 >= STAGE_STALE_MS) continue
+    const c = byId.get(h)
+    if (c) djingIn.push(c)
+  }
+  return { hosting, djingIn }
+}
+
 /** Fetch single club metadata (by d-tag). */
 export async function fetchClub(groupId: string): Promise<Club | null> {
   const ev = await pool.get(RELAYS, { kinds: [KIND_METADATA], '#d': [groupId] })
