@@ -4,7 +4,7 @@
   import { goClub } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
-  import Turntable from './Turntable.svelte'
+  import DiscoBall from './DiscoBall.svelte'
   import type { Club } from '../nostr/types'
 
   let clubs = $state<Club[]>([])
@@ -104,7 +104,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div class="card row" role="button" tabindex="0" onclick={() => goClub(club.id)}>
           <div class="pic" style:background-image={club.picture ? `url(${club.picture})` : 'none'}>
-            {#if !club.picture}<Turntable size={40} />{/if}
+            {#if !club.picture}<DiscoBall size={44} />{/if}
           </div>
           <div class="meta">
             <div class="name">{club.name}</div>
