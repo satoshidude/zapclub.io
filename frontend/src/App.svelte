@@ -50,7 +50,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
     <Turntable size={32} />
-    <span>zapclub<span class="tld">.io</span></span>
+    <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <Nav />
   <div class="account"><LoginButton /></div>
@@ -114,6 +114,9 @@
     font-size: 1.15rem;
     cursor: pointer;
     letter-spacing: -0.02em;
+  }
+  .brand .word {
+    color: #22c55e;
   }
   .brand .tld {
     /* Nostr purple */
