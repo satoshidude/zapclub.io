@@ -12,6 +12,26 @@ export const KIND_PLAYLIST = 30104
 
 const state = $state<{ mine: Playlist[]; loaded: boolean }>({ mine: [], loaded: false })
 
+// Local tombstones: ids the user deleted. NIP-09 deletions aren't reliably honored by
+// every public relay (indexers like nostr.band keep re-serving the event), so we also
+// hide deleted playlists client-side — persisted so they stay gone across reloads.
+const DELETED_KEY = 'zapclub:deletedPlaylists'
+function loadDeleted(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) || '[]') as string[])
+  } catch {
+    return new Set()
+  }
+}
+const deletedIds = loadDeleted()
+function persistDeleted(): void {
+  try {
+    localStorage.setItem(DELETED_KEY, JSON.stringify([...deletedIds]))
+  } catch {
+    /* ignore */
+  }
+}
+
 export const playlists = {
   get mine(): Playlist[] {
     return state.mine
@@ -61,15 +81,20 @@ async function publishPlaylist(pl: Playlist): Promise<void> {
   await Promise.allSettled(pool.publish(PROFILE_RELAYS, signed))
 }
 
-/** Deletes a playlist (NIP-09 + locally). */
+/** Deletes a playlist (local tombstone + NIP-09 request to the relays). */
 export async function deletePlaylist(id: string): Promise<void> {
+  deletedIds.add(id)
+  persistDeleted()
   state.mine = state.mine.filter((p) => p.id !== id)
   const me = auth.pubkey
   if (!me) return
   const signed = await signEvent({
     kind: 5,
     created_at: nowSec(),
-    tags: [['a', `${KIND_PLAYLIST}:${me}:${id}`]],
+    tags: [
+      ['a', `${KIND_PLAYLIST}:${me}:${id}`],
+      ['k', String(KIND_PLAYLIST)],
+    ],
     content: '',
   })
   await Promise.allSettled(pool.publish(PROFILE_RELAYS, signed))
@@ -85,7 +110,7 @@ export async function fetchPlaylists(pubkey: string): Promise<Playlist[]> {
   const byId = new Map<string, Playlist>()
   for (const ev of events) {
     const pl = parsePlaylist(ev)
-    if (!pl.id) continue
+    if (!pl.id || deletedIds.has(pl.id)) continue // skip locally-deleted (tombstoned)
     const ex = byId.get(pl.id)
     if (!ex || pl.updatedAt > ex.updatedAt) byId.set(pl.id, pl)
   }
