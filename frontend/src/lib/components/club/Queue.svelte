@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, moveTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
   import { skipTrack, canSkip } from '../../nostr/sync.svelte'
+  import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
-  import type { QueueTrack } from '../../nostr/types'
+  import type { QueueTrack, Playlist } from '../../nostr/types'
 
   let { groupId }: { groupId: string } = $props()
 
@@ -12,6 +13,25 @@
   const onStage = $derived(stage.isOnStage(me))
   const myQueue = $derived(me ? queues.get(me) : null)
   const tracks = $derived(myQueue?.tracks ?? [])
+
+  // Saved playlists (library): load once when signed in.
+  $effect(() => {
+    if (me && !playlists.loaded) void loadMyPlaylists()
+  })
+  let saving = $state(false)
+  let saveName = $state('')
+  let showLib = $state(false)
+
+  async function doSave() {
+    if (!saveName.trim() || tracks.length === 0) return
+    await savePlaylistAs(saveName, tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })))
+    saveName = ''
+    saving = false
+  }
+  async function loadPl(pl: Playlist) {
+    await setMyQueue(groupId, pl.tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })))
+    showLib = false
+  }
 
   let query = $state('')
   let results = $state<SearchHit[]>([])
@@ -88,6 +108,34 @@
       {/if}
     </div>
   </div>
+
+  <!-- Save / load playlists -->
+  <div class="lib">
+    {#if saving}
+      <input class="lib-name" bind:value={saveName} placeholder="Playlist name…" maxlength="60" autocomplete="off" />
+      <button class="btn btn-primary btn-sm" onclick={doSave} disabled={!saveName.trim() || tracks.length === 0}>Save</button>
+      <button class="mini" onclick={() => { saving = false; saveName = '' }} title="Cancel">✕</button>
+    {:else}
+      {#if tracks.length > 0}
+        <button class="mini wide" onclick={() => (saving = true)}>💾 Save as playlist</button>
+      {/if}
+      {#if playlists.mine.length > 0}
+        <button class="mini wide" onclick={() => (showLib = !showLib)}>📚 My playlists ({playlists.mine.length})</button>
+      {/if}
+    {/if}
+  </div>
+  {#if showLib && playlists.mine.length > 0}
+    <ul class="lib-list">
+      {#each playlists.mine as pl (pl.id)}
+        <li>
+          <span class="t-title">{pl.name}</span>
+          <span class="dur">{pl.tracks.length}</span>
+          <button class="add" onclick={() => loadPl(pl)} title="Load into my set">Load</button>
+          <button class="rm" onclick={() => deletePlaylist(pl.id)} title="Delete playlist">✕</button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   <!-- My tracks (top), drag-free reordering with the arrows -->
   {#if tracks.length > 0}
@@ -325,6 +373,43 @@
   .mini:hover {
     border-color: var(--accent-2);
     color: var(--text);
+  }
+  .mini.wide {
+    padding: 0.35rem 0.65rem;
+  }
+  .lib {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+  }
+  .lib-name {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .lib-name:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+  .lib-list {
+    list-style: none;
+    margin: 0 0 0.6rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .lib-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
   }
   .err {
     color: var(--danger);

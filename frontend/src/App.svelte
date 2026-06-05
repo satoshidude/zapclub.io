@@ -7,6 +7,7 @@
   import ClubView from './lib/components/ClubView.svelte'
   import Nav from './lib/components/Nav.svelte'
   import Turntable from './lib/components/Turntable.svelte'
+  import UserProfile from './lib/components/UserProfile.svelte'
 
   startConnectionWatch()
 </script>
@@ -31,9 +32,9 @@
       <ClubView groupId={router.route.id} />
     {/key}
   {:else if router.route.name === 'user'}
-    <div class="stub">
-      <p>Profiles are coming soon.</p>
-    </div>
+    {#key router.route.npub}
+      <UserProfile npub={router.route.npub} />
+    {/key}
   {:else}
     <ClubList />
   {/if}
@@ -76,17 +77,6 @@
     text-align: center;
     font-size: 0.8rem;
     padding: 0.4rem;
-  }
-  .stub {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 3rem 1rem;
-    text-align: center;
-    color: var(--text-dim);
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    align-items: center;
   }
   /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
   @media (max-width: 560px) {

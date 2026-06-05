@@ -71,6 +71,14 @@ export interface DjQueue {
   updatedAt: number
 }
 
+/** A named, reusable user playlist (kind:30104, user-global library). */
+export interface Playlist {
+  id: string
+  name: string
+  tracks: QueueTrack[]
+  updatedAt: number
+}
+
 /** now_playing sync state (kind:30100). */
 export interface NowPlaying {
   /** YouTube video id (from "yt:<id>"). */
