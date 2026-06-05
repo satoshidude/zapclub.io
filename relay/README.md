@@ -30,7 +30,34 @@ challenge on connect; public clubs stay readable without AUTH.
 `RELAY_SECRET_KEY` lives in `relay.env` (mode 600), never in the repo. Keep it
 persistent for idempotent deploys. See `relay.env.example`.
 
+## Run locally
+
+```sh
+export RELAY_SECRET_KEY=$(openssl rand -hex 32)
+export RELAY_DB=$(mktemp -d) RELAY_PORT=3334
+go run .                      # serves on 127.0.0.1:3334
+```
+
+## E2E test
+
+`grouptest.mjs` verifies the lessons code review can't catch: open-club
+auto-join, now_playing (30100) ReplaceEvent dedup, and non-member write
+rejection. Needs `nostr-tools` reachable (ESM ignores `NODE_PATH`, so symlink
+`node_modules` to an install that has it):
+
+```sh
+ln -sfn <path-to>/node_modules node_modules
+RELAY_URL=ws://127.0.0.1:3334 node grouptest.mjs   # expect "ALL PASSED"
+rm node_modules
+```
+
+Note: content events (30100/30102/30103/9) are queryable **only by `#h`**
+(the group), not by `#d` — the client reads `{kinds:[…],"#h":[club]}` and
+selects the `d`-address client-side.
+
 ## Status
 
-Skeleton only — Go module and `main.go` land in Phase 1 (needs Go installed
-locally first).
+Builds, boots, E2E green (Go 1.26). Roles: `owner` (creator) + `moderator`.
+DJ/stage is a content event (30102), not a relay role. `entryfee.go` (sats
+gate) intentionally not ported — not MVP. Next: deploy behind Caddy as a
+systemd service on `wss://relay.zapclub.io`.
