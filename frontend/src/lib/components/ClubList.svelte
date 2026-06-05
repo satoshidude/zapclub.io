@@ -3,6 +3,7 @@
   import { fetchMyClubs } from '../nostr/groups'
   import { goClub } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
+  import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import type { Club } from '../nostr/types'
 
   let clubs = $state<Club[]>([])
@@ -107,7 +108,18 @@
           <div class="meta">
             <div class="name">{club.name}</div>
             {#if club.about}<div class="about">{club.about}</div>{/if}
-            <div class="sub">{club.memberCount} member{club.memberCount === 1 ? '' : 's'}</div>
+            <div class="tags">
+              {#if club.open}<span class="tag">open</span>{/if}
+              {#if club.isPublic}<span class="tag">public</span>{/if}
+              <span class="tag">👥 {club.memberCount} member{club.memberCount === 1 ? '' : 's'}</span>
+            </div>
+            {#if club.owner}
+              {@const ownerProfile = useProfile(club.owner)}
+              <div class="host">
+                <img class="host-avatar" src={avatarUrl(club.owner, ownerProfile)} alt="" width="18" height="18" />
+                <span>Hosted by {displayName(club.owner, ownerProfile)}</span>
+              </div>
+            {/if}
           </div>
           {#if auth.canSign && !myIds.has(club.id)}
             <button class="btn btn-ghost btn-sm join" onclick={(e) => join(club.id, e)}>Join</button>
@@ -192,11 +204,37 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    margin-bottom: 0.35rem;
   }
-  .sub {
-    font-size: 0.76rem;
-    color: var(--text-dim);
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
     margin-top: 0.15rem;
+  }
+  .tag {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
+    white-space: nowrap;
+  }
+  .host {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    font-size: 0.74rem;
+    color: var(--text-dim);
+  }
+  .host-avatar {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
   }
   .join {
     flex: 0 0 auto;
