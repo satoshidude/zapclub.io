@@ -238,6 +238,13 @@
           {#if club?.open}<span class="tag">open</span>{/if}
           {#if club?.isPublic}<span class="tag">public</span>{/if}
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+          {#if owner}
+            {@const op = useProfile(owner)}
+            <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
+              <img class="host-av" src={avatarUrl(owner, op)} alt="" width="14" height="14" />
+              {displayName(owner, op)}
+            </a>
+          {/if}
         </div>
       </div>
       <div class="actions">
@@ -429,6 +436,24 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
+  }
+  .tag.host {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .tag.host:hover {
+    border-color: var(--accent-2);
+    color: var(--text);
+  }
+  .host-av {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
   }
   .actions {
     flex: 0 0 auto;

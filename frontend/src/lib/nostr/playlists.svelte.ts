@@ -81,6 +81,52 @@ async function publishPlaylist(pl: Playlist): Promise<void> {
   await Promise.allSettled(pool.publish(PROFILE_RELAYS, signed))
 }
 
+/** Saves an existing playlist (same id, replaceable) — used for reorder/move/copy. */
+export async function updatePlaylist(pl: Playlist): Promise<void> {
+  const updated: Playlist = { ...pl, updatedAt: nowSec() }
+  const i = state.mine.findIndex((p) => p.id === pl.id)
+  if (i >= 0) state.mine[i] = updated
+  else state.mine = [updated, ...state.mine]
+  await publishPlaylist(updated)
+}
+
+/** Reorders a track within a playlist (drag-and-drop). */
+export async function reorderTrack(playlistId: string, from: number, to: number): Promise<void> {
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl || to < 0 || to >= pl.tracks.length || from === to) return
+  const tracks = [...pl.tracks]
+  const [m] = tracks.splice(from, 1)
+  tracks.splice(to, 0, m)
+  await updatePlaylist({ ...pl, tracks })
+}
+
+export async function removeFromPlaylist(playlistId: string, videoId: string): Promise<void> {
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl) return
+  await updatePlaylist({ ...pl, tracks: pl.tracks.filter((t) => t.videoId !== videoId) })
+}
+
+/** Copies a track into another playlist (source untouched; deduped). */
+export async function copyTrackTo(toId: string, track: QueueTrack): Promise<void> {
+  const to = state.mine.find((p) => p.id === toId)
+  if (!to || to.tracks.some((t) => t.videoId === track.videoId)) return
+  await updatePlaylist({ ...to, tracks: [...to.tracks, track] })
+}
+
+/** Moves a track from one playlist to another (copy to target, remove from source). */
+export async function moveTrackBetween(fromId: string, toId: string, videoId: string): Promise<void> {
+  if (fromId === toId) return
+  const from = state.mine.find((p) => p.id === fromId)
+  const to = state.mine.find((p) => p.id === toId)
+  if (!from || !to) return
+  const track = from.tracks.find((t) => t.videoId === videoId)
+  if (!track) return
+  if (!to.tracks.some((t) => t.videoId === videoId)) {
+    await updatePlaylist({ ...to, tracks: [...to.tracks, track] })
+  }
+  await updatePlaylist({ ...from, tracks: from.tracks.filter((t) => t.videoId !== videoId) })
+}
+
 /** Deletes a playlist (local tombstone + NIP-09 request to the relays). */
 export async function deletePlaylist(id: string): Promise<void> {
   deletedIds.add(id)

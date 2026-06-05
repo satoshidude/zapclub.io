@@ -2,8 +2,17 @@
   import { decode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
-  import { playlists, fetchPlaylists, deletePlaylist, loadMyPlaylists } from '../nostr/playlists.svelte'
-  import type { Playlist } from '../nostr/types'
+  import {
+    playlists,
+    fetchPlaylists,
+    deletePlaylist,
+    loadMyPlaylists,
+    reorderTrack,
+    removeFromPlaylist,
+    moveTrackBetween,
+    copyTrackTo,
+  } from '../nostr/playlists.svelte'
+  import type { Playlist, QueueTrack } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
 
@@ -45,6 +54,29 @@
     const sec = Math.floor(s % 60)
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
+
+  // Drag-and-drop: reorder within a playlist, or move a track to another playlist.
+  let drag = $state<{ plId: string; index: number } | null>(null)
+  function onTrackDrop(plId: string, toIndex: number) {
+    if (!drag) return
+    if (drag.plId === plId) {
+      void reorderTrack(plId, drag.index, toIndex)
+    } else {
+      const from = list.find((p) => p.id === drag!.plId)
+      const track = from?.tracks[drag.index]
+      if (track) void moveTrackBetween(drag.plId, plId, track.videoId)
+    }
+    drag = null
+  }
+  function onMoveCopy(plId: string, track: QueueTrack, sel: HTMLSelectElement) {
+    const v = sel.value
+    sel.value = ''
+    if (!v) return
+    const [action, toId] = v.split(':')
+    if (action === 'move') void moveTrackBetween(plId, toId, track.videoId)
+    else if (action === 'copy')
+      void copyTrackTo(toId, { videoId: track.videoId, title: track.title, duration: track.duration })
+  }
 </script>
 
 <div class="wrap">
@@ -84,13 +116,35 @@
               </summary>
               {#if pl.tracks.length > 0}
                 <ol class="tracks">
-                  {#each pl.tracks as t (t.videoId)}
-                    <li>
+                  {#each pl.tracks as t, ti (t.videoId)}
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <li
+                      class:dragging={drag?.plId === pl.id && drag?.index === ti}
+                      draggable={isMe}
+                      ondragstart={() => isMe && (drag = { plId: pl.id, index: ti })}
+                      ondragover={(e) => isMe && e.preventDefault()}
+                      ondrop={() => isMe && onTrackDrop(pl.id, ti)}
+                      ondragend={() => (drag = null)}
+                    >
+                      {#if isMe}<span class="grip" aria-hidden="true">⠿</span>{/if}
                       <span class="t-title">{t.title}</span>
                       <span class="dim dur">{fmt(t.duration)}</span>
+                      {#if isMe}
+                        {#if list.length > 1}
+                          <select class="mc" title="Move or copy to another playlist" onchange={(e) => onMoveCopy(pl.id, t, e.currentTarget)}>
+                            <option value="">⋯</option>
+                            {#each list.filter((p) => p.id !== pl.id) as other (other.id)}
+                              <option value="move:{other.id}">→ Move to {other.name}</option>
+                              <option value="copy:{other.id}">⎘ Copy to {other.name}</option>
+                            {/each}
+                          </select>
+                        {/if}
+                        <button class="t-rm" title="Remove" onclick={() => removeFromPlaylist(pl.id, t.videoId)}>✕</button>
+                      {/if}
                     </li>
                   {/each}
                 </ol>
+                {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · drop onto another playlist’s tracks to move</p>{/if}
               {/if}
             </details>
           </li>
@@ -217,6 +271,44 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.85rem;
+  }
+  .tracks li[draggable='true'] {
+    cursor: grab;
+  }
+  .tracks li.dragging {
+    opacity: 0.45;
+  }
+  .grip {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    cursor: grab;
+    user-select: none;
+  }
+  .mc {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.2rem;
+    max-width: 5.5rem;
+  }
+  .t-rm {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .t-rm:hover {
+    color: var(--danger);
+  }
+  .dnd-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.7rem;
+    color: var(--text-dim);
   }
   .tracks li::before {
     counter-increment: t;
