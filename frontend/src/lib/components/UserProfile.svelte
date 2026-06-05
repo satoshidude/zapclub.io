@@ -11,7 +11,12 @@
     removeFromPlaylist,
     moveTrackBetween,
     copyTrackTo,
+    createPlaylist,
+    addTrackToPlaylist,
   } from '../nostr/playlists.svelte'
+  import { addTracks } from '../nostr/queue.svelte'
+  import { persistedStageGroup } from '../nostr/stage.svelte'
+  import { searchYouTube, type SearchHit } from '../player/youtube'
   import { fetchUserClubActivity } from '../nostr/groups'
   import { goClub, goUser, goHowto } from '../router.svelte'
   import { clubAvatar } from '../avatar'
@@ -135,6 +140,58 @@
     else if (action === 'copy')
       void copyTrackTo(toId, { videoId: track.videoId, title: track.title, duration: track.duration })
   }
+
+  // ── Create / fill playlists + push to the live stage set ─────────────────
+  // The club the user is currently a DJ in (if any) — target for "add to set".
+  const stageGroup = persistedStageGroup()
+  let newName = $state('')
+  let creating = $state(false)
+  async function doCreate() {
+    if (!newName.trim() || creating) return
+    creating = true
+    try {
+      await createPlaylist(newName.trim())
+      newName = ''
+    } finally {
+      creating = false
+    }
+  }
+
+  // Per-playlist YouTube search (to add tracks). Only one open at a time.
+  let searchPl = $state<string | null>(null)
+  let searchQ = $state('')
+  let searchHits = $state<SearchHit[]>([])
+  let searching = $state(false)
+  function openSearch(plId: string) {
+    searchPl = searchPl === plId ? null : plId
+    searchQ = ''
+    searchHits = []
+  }
+  async function runSearch() {
+    if (!searchQ.trim() || searching) return
+    searching = true
+    try {
+      searchHits = await searchYouTube(searchQ.trim())
+    } catch {
+      searchHits = []
+    } finally {
+      searching = false
+    }
+  }
+  function addHit(plId: string, h: SearchHit) {
+    void addTrackToPlaylist(plId, { videoId: h.videoId, title: h.title, duration: h.duration })
+  }
+
+  let addedTo = $state('')
+  function addToSet(pl: Playlist) {
+    if (!stageGroup || pl.tracks.length === 0) return
+    void addTracks(
+      stageGroup,
+      pl.tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })),
+    )
+    addedTo = pl.id
+    setTimeout(() => (addedTo = addedTo === pl.id ? '' : addedTo), 1800)
+  }
 </script>
 
 <div class="wrap">
@@ -235,7 +292,15 @@
   {/if}
 
   <section class="pls">
-    <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
+    <div class="pls-head">
+      <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
+      {#if isMe}
+        <form class="new-pl" onsubmit={(e) => { e.preventDefault(); void doCreate() }}>
+          <input class="in" bind:value={newName} placeholder="New playlist name…" maxlength="60" />
+          <button class="btn btn-primary btn-sm" disabled={!newName.trim() || creating}>＋ New</button>
+        </form>
+      {/if}
+    </div>
 
     {#if loading}
       <p class="dim">Loading playlists…</p>
@@ -290,6 +355,35 @@
                   {/each}
                 </ol>
                 {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · drop onto another playlist’s tracks to move</p>{/if}
+              {/if}
+
+              {#if isMe}
+                <div class="pl-actions">
+                  {#if stageGroup}
+                    <button class="btn btn-primary btn-sm" disabled={pl.tracks.length === 0} onclick={() => addToSet(pl)}>
+                      {addedTo === pl.id ? '✓ Added' : '▶ Add to my set on stage'}
+                    </button>
+                  {/if}
+                  <button class="btn btn-ghost btn-sm" onclick={() => openSearch(pl.id)}>
+                    {searchPl === pl.id ? 'Close' : '＋ Add tracks'}
+                  </button>
+                </div>
+                {#if searchPl === pl.id}
+                  <div class="pl-search">
+                    <form onsubmit={(e) => { e.preventDefault(); void runSearch() }}>
+                      <input class="in" bind:value={searchQ} placeholder="Search YouTube…" />
+                      <button class="btn btn-primary btn-sm" disabled={!searchQ.trim() || searching}>
+                        {searching ? '…' : 'Search'}
+                      </button>
+                    </form>
+                    {#each searchHits as h (h.videoId)}
+                      <button class="hit" onclick={() => addHit(pl.id, h)} title="Add to playlist">
+                        <span class="hit-title">{h.title}</span>
+                        <span class="hit-add">＋</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               {/if}
             </details>
           </li>
@@ -688,6 +782,69 @@
     margin: 0.5rem 0 0;
     font-size: 0.7rem;
     color: var(--text-dim);
+  }
+  .pls-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .new-pl {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .new-pl .in {
+    width: 11rem;
+    max-width: 48vw;
+  }
+  .pl-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.7rem;
+  }
+  .pl-search {
+    margin-top: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .pl-search form {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .pl-search .in {
+    flex: 1;
+    min-width: 0;
+  }
+  .hit {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+  }
+  .hit:hover {
+    border-color: var(--accent);
+  }
+  .hit-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84rem;
+  }
+  .hit-add {
+    flex: 0 0 auto;
+    color: var(--accent);
+    font-weight: 800;
   }
   .tracks li::before {
     counter-increment: t;
