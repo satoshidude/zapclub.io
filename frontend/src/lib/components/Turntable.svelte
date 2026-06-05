@@ -17,7 +17,7 @@
     <circle cx="16" cy="20" r="13" fill="#1b0b33" stroke="#8e30eb" stroke-width="1.6" />
     <circle cx="16" cy="20" r="9.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4" />
     <circle cx="16" cy="20" r="6.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.3" />
-    <circle cx="16" cy="20" r="3.6" fill="#8e30eb" />
+    <circle cx="16" cy="20" r="3.6" fill="#22c55e" />
     <circle cx="16" cy="11.5" r="1.1" fill="#d8b4fe" />
     <circle cx="16" cy="20" r="1" fill="#1b0b33" />
   </g>
