@@ -1,6 +1,6 @@
 <script lang="ts">
   import { sync } from '../../nostr/sync.svelte'
-  import { requestZapInvoice, zaps } from '../../nostr/zaps.svelte'
+  import { requestZapInvoice, zaps, subscribeZaps } from '../../nostr/zaps.svelte'
   import { showPay } from '../../nostr/payModal.svelte'
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -16,7 +16,19 @@
   const lud16 = $derived((djProfile?.lud16 as string) || FALLBACK_LUD16)
   const isSelf = $derived(!!dj && dj === auth.pubkey)
   const show = $derived(!!np && !isSelf)
-  const score = $derived(dj ? zaps.score(dj) : 0)
+  // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
+  const total = $derived(dj ? zaps.score(dj) : 0)
+
+  // Subscribe to the live DJ's zap receipts so the total is loaded even when they
+  // aren't on the stage (the stage subscription only covers stage DJs).
+  $effect(() => {
+    if (!dj) return
+    return subscribeZaps([dj])
+  })
+
+  function fmtSats(n: number): string {
+    return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n)
+  }
 
   let open = $state(false)
   let comment = $state('')
@@ -43,9 +55,10 @@
 </script>
 
 {#if show}
-  <button class="zap-mini" onclick={() => (open = !open)} disabled={!auth.canSign} title="Zap {displayName(dj, djProfile)}">
+  <button class="zap-mini" onclick={() => (open = !open)} disabled={!auth.canSign} title="Zap {displayName(dj, djProfile)} · {total} sats received">
     <span class="bolt">⚡</span>
-    {#if score > 0}<span class="score">{score}</span>{/if}
+    <span class="lbl">zap</span>
+    {#if total > 0}<span class="score">{fmtSats(total)}</span>{/if}
   </button>
 
   {#if open}
@@ -111,9 +124,16 @@
     font-size: 0.82rem;
     line-height: 1;
   }
+  .lbl {
+    font-size: 0.74rem;
+    font-weight: 800;
+  }
   .score {
     font-size: 0.72rem;
     font-weight: 700;
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    padding-left: 0.3rem;
+    margin-left: 0.05rem;
   }
   .backdrop {
     position: fixed;
