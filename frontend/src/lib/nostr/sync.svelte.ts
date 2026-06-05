@@ -128,9 +128,33 @@ function startAt(groupId: string, pos: number, startedAtMs: number): void {
   void publishPlay(groupId, dj, track.videoId, startedAtMs)
 }
 
-/** Heartbeat: re-send the same running track (only sent_at fresh). */
+/**
+ * Re-anchors `pos` to the index the CURRENTLY-PLAYING track now sits at in its DJ's queue.
+ * The round-robin is positional (`pos`→`trackIndex`), so when a DJ reorders, the playing
+ * track may move to a different index; without re-anchoring the next `advance()` would
+ * follow stale positions (and a track moved before the play head would be skipped until a
+ * wrap). We keep the playing track untouched — only correct `pos` — so reorders take
+ * effect on the NEXT track, in the new order.
+ */
+function reanchorPos(np: NowPlaying): NowPlaying {
+  const djs = stage.djs.map((d) => d.pubkey)
+  const n = djs.length
+  const djIndex = djs.indexOf(np.dj)
+  if (n === 0 || djIndex < 0) return np
+  const { trackIndex } = posToSlot(np.pos, n)
+  const atPos = queues.trackAt(np.dj, trackIndex)
+  if (atPos && atPos.videoId === np.videoId) return np // still aligned — nothing to do
+  const tracks = queues.get(np.dj)?.tracks ?? []
+  const newIdx = tracks.findIndex((t) => t.videoId === np.videoId)
+  if (newIdx < 0) return np // playing track gone from queue → let advance() handle it
+  return { ...np, pos: djIndex + newIdx * n }
+}
+
+/** Heartbeat: re-send the same running track (only sent_at fresh), pos re-anchored. */
 function heartbeat(groupId: string): void {
-  if (state.np) publishNp(groupId, state.np)
+  if (!state.np) return
+  state.np = reanchorPos(state.np)
+  publishNp(groupId, state.np)
 }
 
 /** Advances to the next round-robin track (or loops). Only on end/skip. */
@@ -244,7 +268,9 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
   const playable = queues.playable(djs)
-  let pos = state.np ? state.np.pos : -1
+  // Start from the re-anchored pos so a reorder shows in Up next immediately (before the
+  // conductor's next heartbeat corrects the published pos).
+  let pos = state.np ? reanchorPos(state.np).pos : -1
   const out: { dj: string; videoId: string; title: string }[] = []
   const seen = new Set<number>()
   if (state.np) seen.add(state.np.pos) // never list the running track as "next" (wrap)
