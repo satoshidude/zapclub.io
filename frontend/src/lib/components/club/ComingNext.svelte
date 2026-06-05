@@ -1,13 +1,16 @@
 <script lang="ts">
-  import { upcomingTracks } from '../../nostr/sync.svelte'
+  import { upcomingTracks, sync } from '../../nostr/sync.svelte'
   import { stage } from '../../nostr/stage.svelte'
   import { queues } from '../../nostr/queue.svelte'
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
 
-  // Recompute when stage or queues change (touch them so the deriveds track).
+  // Recompute when the running track, the stage, OR any DJ's queue changes. `void queues`
+  // alone does NOT track queue edits (it's a constant object ref) — explicitly touch each
+  // DJ's queue `updatedAt` so a reorder/add updates "Up next" immediately.
   const next = $derived.by(() => {
-    void stage.djs
-    void queues
+    void sync.nowPlaying
+    const djs = stage.djs
+    for (const d of djs) void queues.get(d.pubkey)?.updatedAt
     return upcomingTracks(6)
   })
   const firstProfile = $derived(next[0] ? useProfile(next[0].dj) : null)

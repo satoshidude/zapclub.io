@@ -284,10 +284,11 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
   const playable = queues.playable(djs)
   // Start from the re-anchored pos so a reorder shows in Up next immediately (before the
   // conductor's next heartbeat corrects the published pos).
-  let pos = state.np ? reanchorPos(state.np).pos : -1
+  const np = state.np ? reanchorPos(state.np) : null
+  let pos = np ? np.pos : -1
   const out: { dj: string; videoId: string; title: string }[] = []
   const seen = new Set<number>()
-  if (state.np) seen.add(state.np.pos) // never list the running track as "next" (wrap)
+  if (np) seen.add(np.pos) // never list the running track as "next" (wrap)
   for (let i = 0; i < max; i++) {
     let next = nextPlayablePos(pos, djs.length, playable)
     // Like the real round-robin: loop at the end → DJs with shorter playlists (whose
