@@ -1,10 +1,17 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import { likes, likeTrack } from '../../nostr/likes.svelte'
+  import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
 
   // Optional "go on stage" action shown in the idle (lobby) state.
-  let { onGoStage, stageLabel = '' }: { onGoStage?: () => void; stageLabel?: string } = $props()
+  let {
+    onGoStage,
+    stageLabel = '',
+    clubId = '',
+    clubName = '',
+  }: { onGoStage?: () => void; stageLabel?: string; clubId?: string; clubName?: string } = $props()
 
   // Reactive clock so the progress bar advances between now_playing events.
   let nowMs = $state(Date.now())
@@ -21,6 +28,11 @@
     return np ? targetPosition() : 0
   })
   const pct = $derived(np && np.duration > 0 ? Math.min(100, (pos / np.duration) * 100) : 0)
+
+  const liked = $derived(!!np && likes.has(np.videoId))
+  function like() {
+    if (np) void likeTrack({ videoId: np.videoId, title: np.title || np.videoId, clubId, clubName })
+  }
 
   function fmt(s: number): string {
     if (!s || s < 0) return '0:00'
@@ -44,7 +56,16 @@
         </div>
       </div>
       <div class="right">
-        <ZapButton />
+        <div class="right-actions">
+          <button
+            class="like"
+            class:on={liked}
+            onclick={like}
+            disabled={!auth.canSign || liked}
+            title={liked ? 'Liked' : 'Like this track'}
+          >🔥</button>
+          <ZapButton />
+        </div>
         <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
       </div>
     </div>
@@ -110,6 +131,35 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 0.3rem;
+  }
+  .right-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .like {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.12rem 0.4rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    filter: grayscale(1);
+    opacity: 0.7;
+  }
+  .like:hover:not(:disabled) {
+    filter: none;
+    opacity: 1;
+    border-color: var(--amber);
+  }
+  .like.on {
+    filter: none;
+    opacity: 1;
+    border-color: var(--amber);
+  }
+  .like:disabled {
+    cursor: default;
   }
   .time {
     font-size: 0.78rem;

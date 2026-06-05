@@ -293,6 +293,8 @@
       <NowPlaying
         onGoStage={goOnStage}
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+        clubId={groupId}
+        clubName={club?.name ?? ''}
       />
     </div>
     <Player
