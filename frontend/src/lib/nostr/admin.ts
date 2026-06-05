@@ -1,7 +1,7 @@
 import { pool, CLUB_RELAY } from './pool'
 import { signEvent } from './nostrLogin'
 import { auth } from './auth.svelte'
-import { parseClubMetadata, parseMembers, parseAdmins } from './groups'
+import { parseClubMetadata, parseMembers, parseAdmins, parseOwner } from './groups'
 import type { Club, ClubMember } from './types'
 
 // The superadmin (satoshidude). Only this pubkey may open the dashboard and the relay
@@ -76,7 +76,11 @@ export async function loadAdminData(): Promise<AdminClub[]> {
   const membersById = new Map<string, ClubMember[]>()
   for (const ev of members) membersById.set(dTag(ev), parseMembers(ev))
   const adminsById = new Map<string, string[]>()
-  for (const ev of admins) adminsById.set(dTag(ev), parseAdmins(ev))
+  const ownerById = new Map<string, string>()
+  for (const ev of admins) {
+    adminsById.set(dTag(ev), parseAdmins(ev))
+    ownerById.set(dTag(ev), parseOwner(ev))
+  }
 
   const npById = new Map<string, { title: string; videoId: string; dj: string }>()
   for (const ev of np) {
@@ -116,7 +120,7 @@ export async function loadAdminData(): Promise<AdminClub[]> {
       return {
         ...c,
         memberCount: ms.length,
-        owner: ad[0] || undefined,
+        owner: ownerById.get(c.id) || undefined,
         admins: ad,
         members: ms,
         nowPlaying: npById.get(c.id) ?? null,

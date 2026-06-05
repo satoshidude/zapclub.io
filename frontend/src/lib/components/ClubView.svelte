@@ -10,6 +10,7 @@
     parseClubMetadata,
     parseMembers,
     parseAdmins,
+    parseOwner,
   } from '../nostr/groups'
   import { goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
@@ -46,12 +47,14 @@
   let club = $state<Club | null>(null)
   let members = $state<ClubMember[]>([])
   let admins = $state<string[]>([])
+  let ownerPk = $state('')
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
   let tab = $state<'station' | 'chat'>('station')
 
-  const owner = $derived(admins[0] ?? '')
+  // Owner = the 'owner'-role admin, NOT admins[0] (tag order isn't owner-first).
+  const owner = $derived(ownerPk)
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
   const isMod = $derived(
     !!auth.pubkey && members.some((m) => m.pubkey === auth.pubkey && m.roles.includes('moderator')),
@@ -82,7 +85,10 @@
     const stop = subscribeClub(id, {
       onMeta: (ev) => (club = parseClubMetadata(ev)),
       onMembers: (ev) => (members = parseMembers(ev)),
-      onAdmins: (ev) => (admins = parseAdmins(ev)),
+      onAdmins: (ev) => {
+        admins = parseAdmins(ev)
+        ownerPk = parseOwner(ev)
+      },
       // Hijack protection: only accept now_playing from the current conductor (or until
       // a conductor is known) — a rogue client can't steer playback.
       onNowPlaying: (ev) => {

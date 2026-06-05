@@ -215,6 +215,18 @@ export function parseAdmins(ev: Event): string[] {
 }
 
 /**
+ * The club OWNER (creator). Identified by the `owner` role in the 39001 admins event —
+ * NOT by tag position: relay29 does not guarantee the owner is the first p-tag (a
+ * moderator can be listed first), and the order can differ between clients. Picking by
+ * position made different clients disagree on the owner → wrong conductor (owner-override)
+ * → duplicate now_playing writers. Falls back to the first admin if no role is tagged.
+ */
+export function parseOwner(ev: Event): string {
+  const ownerTag = ev.tags.find((t) => t[0] === 'p' && t[1] && t.slice(2).includes('owner'))
+  return ownerTag?.[1] ?? ev.tags.find((t) => t[0] === 'p' && t[1])?.[1] ?? ''
+}
+
+/**
  * List of all clubs (kind:39000), enriched with member counts (kind:39002) and owner
  * (kind:39001). Active clubs (more members) first; empty (0 members) clubs are hidden
  * so orphaned/test clubs don't clutter the home page.
@@ -234,7 +246,7 @@ export async function listClubs(): Promise<Club[]> {
   const owners = new Map<string, string>()
   for (const ev of adminEvents) {
     const id = tagValue(ev, 'd')
-    if (id) owners.set(id, parseAdmins(ev)[0] ?? '')
+    if (id) owners.set(id, parseOwner(ev))
   }
   return metaEvents
     .map(parseClubMetadata)

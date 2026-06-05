@@ -106,6 +106,18 @@ export async function removeFromPlaylist(playlistId: string, videoId: string): P
   await updatePlaylist({ ...pl, tracks: pl.tracks.filter((t) => t.videoId !== videoId) })
 }
 
+/** Creates a new, empty named playlist. Returns it. */
+export async function createPlaylist(name: string): Promise<Playlist> {
+  return savePlaylistAs(name, [])
+}
+
+/** Appends a track to a playlist (deduped by videoId). */
+export async function addTrackToPlaylist(playlistId: string, track: QueueTrack): Promise<void> {
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl || pl.tracks.some((t) => t.videoId === track.videoId)) return
+  await updatePlaylist({ ...pl, tracks: [...pl.tracks, track] })
+}
+
 /** Copies a track into another playlist (source untouched; deduped). */
 export async function copyTrackTo(toId: string, track: QueueTrack): Promise<void> {
   const to = state.mine.find((p) => p.id === toId)
