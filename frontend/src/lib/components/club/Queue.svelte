@@ -18,6 +18,14 @@
   let searching = $state(false)
   let searchError = $state('')
 
+  // Clear the results (and error) when the search field is emptied — no wasted space.
+  $effect(() => {
+    if (!query.trim()) {
+      results = []
+      searchError = ''
+    }
+  })
+
   async function doSearch() {
     const q = query.trim()
     if (!q) return

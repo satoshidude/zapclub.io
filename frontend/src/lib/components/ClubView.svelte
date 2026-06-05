@@ -44,6 +44,7 @@
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
+  let tab = $state<'club' | 'stage' | 'chat'>('stage')
 
   const owner = $derived(admins[0] ?? '')
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -205,6 +206,7 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
+  <!-- Player + now-playing stay mounted across tabs so audio never stops. -->
   <section class="stream">
     <Player
       canHear={isMember}
@@ -217,21 +219,37 @@
       onerror={(vid) => onTrackError(groupId, vid)}
     />
     <NowPlaying />
-    <Stage {groupId} {canModerate} {isMember} />
-    {#if isMember}
-      <Queue {groupId} />
-    {/if}
-    <ComingNext />
   </section>
 
-  <Chat
-    {groupId}
-    canChat={isMember}
-    {canModerate}
-    onauthor={(pubkey) => goUser(npubEncode(pubkey))}
-    ondelete={(id) => void deleteEvent(groupId, id)}
-  />
+  <div class="club-tabs" role="tablist">
+    <button class="ctab" class:active={tab === 'club'} role="tab" aria-selected={tab === 'club'} onclick={() => (tab = 'club')}>
+      🪩 Club
+    </button>
+    <button class="ctab" class:active={tab === 'stage'} role="tab" aria-selected={tab === 'stage'} onclick={() => (tab = 'stage')}>
+      🎧 Stage
+    </button>
+    <button class="ctab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} onclick={() => (tab = 'chat')}>
+      💬 Chat
+    </button>
+  </div>
 
+  {#if tab === 'stage'}
+    <div class="panel">
+      <Stage {groupId} {canModerate} {isMember} />
+      {#if isMember}
+        <Queue {groupId} />
+      {/if}
+      <ComingNext />
+    </div>
+  {:else if tab === 'chat'}
+    <Chat
+      {groupId}
+      canChat={isMember}
+      {canModerate}
+      onauthor={(pubkey) => goUser(npubEncode(pubkey))}
+      ondelete={(id) => void deleteEvent(groupId, id)}
+    />
+  {:else}
   <section class="about card">
     <h3>About this club</h3>
     {#if club?.about}
@@ -270,6 +288,7 @@
       {/if}
     </details>
   </section>
+  {/if}
 
 </div>
 
@@ -439,6 +458,44 @@
   }
   .stream {
     margin-top: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  /* In-club tab bar (Club / Stage / Chat) — sits under the player. */
+  .club-tabs {
+    display: flex;
+    gap: 0.3rem;
+    margin: 1.1rem 0 0.9rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.3rem;
+  }
+  .ctab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    background: none;
+    border: none;
+    border-radius: 999px;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .ctab:hover {
+    color: var(--text);
+  }
+  .ctab.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+  }
+  .panel {
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
