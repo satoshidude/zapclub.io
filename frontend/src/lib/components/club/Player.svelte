@@ -18,8 +18,9 @@
   let lobbyFailed = false
 
   /** Lobby track: loops (muted) while nothing is playing in the club. The lobby overlay
-   *  covers it visually; if it's not embeddable, onError just stops it (clean lobby). */
-  const IDLE_VIDEO = 'n61ULEU7CO0' // "Best of lofi" (regular, embeddable)
+   *  covers it visually; if it's not embeddable, onError just stops it (clean lobby).
+   *  playlister's placeholder tune (Christian Bruhn). */
+  const IDLE_VIDEO = 'w8NRrAOS6s0'
 
   const elementId = 'yt-player'
   let player: YouTubePlayer | null = null
