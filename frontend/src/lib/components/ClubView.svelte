@@ -20,7 +20,7 @@
     ingestStage,
     ingestStageKick,
     setStageHost,
-    resetStage,
+    clearStageView,
     joinStage,
     leaveStage,
     persistedStageGroup,
@@ -45,7 +45,7 @@
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
-  let tab = $state<'stage' | 'chat'>('stage')
+  let tab = $state<'station' | 'chat'>('station')
 
   const owner = $derived(admins[0] ?? '')
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -107,7 +107,9 @@
       stop()
       clearInterval(tick)
       resetSync()
-      resetStage()
+      // Only clear the stage DISPLAY — keep my own presence + heartbeat so navigating
+      // doesn't drop me off the stage (WebKit). Full reset happens on logout.
+      clearStageView()
       resetQueues()
       resetChat()
     }
@@ -134,10 +136,10 @@
 
   const onStageNow = $derived(stage.isOnStage(auth.pubkey))
 
-  /** From the lobby "go on stage" link: hop on the stage and open the Stage tab. */
+  /** From the lobby "go on stage" link: hop on the stage and open the DJ Station tab. */
   function goOnStage() {
     if (!onStageNow) void joinStage(groupId)
-    tab = 'stage'
+    tab = 'station'
   }
 
   async function doJoin() {
@@ -235,12 +237,13 @@
       onGoStage={goOnStage}
       stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
     />
+    <Stage {groupId} {canModerate} {isMember} />
     <ComingNext />
   </section>
 
   <div class="club-tabs" role="tablist">
-    <button class="ctab" class:active={tab === 'stage'} role="tab" aria-selected={tab === 'stage'} onclick={() => (tab = 'stage')}>
-      🎧 Stage
+    <button class="ctab" class:active={tab === 'station'} role="tab" aria-selected={tab === 'station'} onclick={() => (tab = 'station')}>
+      🎛️ DJ Station
     </button>
     <button class="ctab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} onclick={() => (tab = 'chat')}>
       💬 Chat
@@ -291,9 +294,10 @@
     </div>
   {:else}
     <div class="panel">
-      <Stage {groupId} {canModerate} {isMember} />
       {#if isMember}
         <Queue {groupId} />
+      {:else}
+        <section class="join-hint">Join the club to step on stage and queue tracks.</section>
       {/if}
     </div>
   {/if}
@@ -496,5 +500,14 @@
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
+  }
+  .join-hint {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.3rem;
+    color: var(--text-dim);
+    text-align: center;
+    font-size: 0.9rem;
   }
 </style>

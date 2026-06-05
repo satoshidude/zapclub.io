@@ -211,6 +211,9 @@ async function postStage(groupId: string, on: boolean): Promise<void> {
 
 /** Go on stage: post on-stage + start the heartbeat. */
 export async function joinStage(groupId: string): Promise<void> {
+  // Switching to a different stage → step off the old one first (you can only DJ in one
+  // club at a time). Same club = idempotent re-join (e.g. reload-resume), no off needed.
+  if (myGroupId && myGroupId !== groupId) void postStage(myGroupId, false)
   myGroupId = groupId
   // On reload-resume reuse the SAME `since` (stable DJ order across all clients), else
   // fresh on a real stage join.
@@ -244,6 +247,19 @@ export async function leaveStage(groupId?: string): Promise<void> {
     resolveConductor()
   }
   if (gid) await postStage(gid, false)
+}
+
+/**
+ * Clears only the stage DISPLAY (other DJs, kicks, conductor) — used when navigating
+ * between clubs. Crucially does NOT post 'off' and does NOT stop the heartbeat, so you
+ * stay on your current stage while browsing around (sticky until you switch stages or log
+ * out). Without this, leaving the club view dropped you off the stage (visible on WebKit).
+ */
+export function clearStageView(): void {
+  state.djs = {}
+  state.kicks = {}
+  state.conductorPk = null
+  hostPk = null
 }
 
 export function resetStage(): void {

@@ -98,6 +98,12 @@ export function addTrack(groupId: string, track: QueueTrack): Promise<void> {
   return publishMyQueue(groupId, [...myTracks(), track])
 }
 
+/** Appends several tracks at once (one publish) — e.g. a YouTube playlist import. */
+export function addTracks(groupId: string, tracks: QueueTrack[]): Promise<void> {
+  if (tracks.length === 0) return Promise.resolve()
+  return publishMyQueue(groupId, [...myTracks(), ...tracks])
+}
+
 /** Replaces my own club queue. */
 export function setMyQueue(groupId: string, tracks: QueueTrack[]): Promise<void> {
   return publishMyQueue(groupId, tracks)

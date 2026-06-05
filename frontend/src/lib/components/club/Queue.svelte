@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { queues, addTrack, removeTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
   import { skipTrack, canSkip } from '../../nostr/sync.svelte'
-  import { searchYouTube, type SearchHit } from '../../player/youtube'
+  import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
   import type { QueueTrack } from '../../nostr/types'
@@ -17,12 +17,14 @@
   let results = $state<SearchHit[]>([])
   let searching = $state(false)
   let searchError = $state('')
+  let isPlaylist = $state(false) // results came from a pasted playlist link
 
   // Clear the results (and error) when the search field is emptied — no wasted space.
   $effect(() => {
     if (!query.trim()) {
       results = []
       searchError = ''
+      isPlaylist = false
     }
   })
 
@@ -32,9 +34,16 @@
     searching = true
     searchError = ''
     results = []
+    // A pasted YouTube playlist link → import the whole playlist; otherwise keyword search.
+    const listId = parseYouTubePlaylistId(q)
+    isPlaylist = !!listId
     try {
-      results = await searchYouTube(q)
-      if (results.length === 0) searchError = 'No results (or search is unavailable).'
+      results = listId ? await fetchYouTubePlaylist(listId) : await searchYouTube(q)
+      if (results.length === 0) {
+        searchError = isPlaylist
+          ? 'Empty playlist (or search is unavailable).'
+          : 'No results (or search is unavailable).'
+      }
     } catch (e) {
       searchError = String((e as Error)?.message ?? e)
     } finally {
@@ -46,6 +55,14 @@
     const track: QueueTrack = { videoId: hit.videoId, title: hit.title, duration: hit.duration }
     await addTrack(groupId, track)
     results = results.filter((r) => r.videoId !== hit.videoId)
+  }
+
+  async function addAll() {
+    const all: QueueTrack[] = results.map((r) => ({ videoId: r.videoId, title: r.title, duration: r.duration }))
+    await addTracks(groupId, all)
+    results = []
+    query = ''
+    isPlaylist = false
   }
 
   function fmt(s: number): string {
@@ -80,8 +97,8 @@
   <form class="search" onsubmit={(e) => { e.preventDefault(); doSearch() }}>
     <input
       bind:value={query}
-      placeholder="Search YouTube to add a track…"
-      maxlength="120"
+      placeholder="Search YouTube or paste a playlist link…"
+      maxlength="200"
       autocomplete="off"
     />
     <button class="btn btn-primary btn-sm" type="submit" disabled={searching || !query.trim()}>
@@ -89,6 +106,13 @@
     </button>
   </form>
   {#if searchError}<p class="err">{searchError}</p>{/if}
+
+  {#if isPlaylist && results.length > 0}
+    <div class="pl-bar">
+      <span>Playlist · {results.length} tracks</span>
+      <button class="btn btn-primary btn-sm" onclick={addAll}>+ Add all</button>
+    </div>
+  {/if}
 
   {#if results.length > 0}
     <ul class="results">
@@ -168,6 +192,15 @@
   .search input:focus {
     outline: none;
     border-color: var(--accent-2);
+  }
+  .pl-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.82rem;
+    color: var(--text-dim);
   }
   .results,
   .tracks {
