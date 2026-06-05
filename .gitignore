@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Relay (Go)
+relay/zapclub-relay
+relay/*.test
+relay/db/
+relay/badger/
+
+# Secrets — NEVER commit
+relay/relay.env
+*.env
+!*.env.example
+
+# OS / editor
+.DS_Store
+*.swp
