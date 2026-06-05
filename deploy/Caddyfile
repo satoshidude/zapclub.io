@@ -12,6 +12,12 @@
 zapclub.io {
 	root * /var/www/zapclub
 	encode zstd gzip
+
+	# YouTube search/playlist proxy → relay (yt-dlp). Same-origin so the frontend
+	# avoids CORS; the relay rate-limits these per IP.
+	@yt path /yt-search /yt-playlist
+	reverse_proxy @yt 127.0.0.1:3334
+
 	# SPA fallback: history-router routes like /club/<id> serve index.html.
 	try_files {path} /index.html
 	file_server

@@ -15,3 +15,29 @@ export function safeImageUrl(url: string | undefined | null, fallback: string): 
     return fallback
   }
 }
+
+/** YouTube video id: exactly 11 chars from [A-Za-z0-9_-]. */
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/
+export function isValidVideoId(id: string): boolean {
+  return VIDEO_ID_RE.test(id)
+}
+
+/** Extracts a YouTube video id from a URL or bare id, or null. */
+export function parseVideoId(input: string): string | null {
+  const s = input.trim()
+  if (isValidVideoId(s)) return s
+  try {
+    const u = new URL(s)
+    if (u.hostname === 'youtu.be') {
+      const id = u.pathname.slice(1)
+      return isValidVideoId(id) ? id : null
+    }
+    if (u.hostname.endsWith('youtube.com')) {
+      const v = u.searchParams.get('v')
+      if (v && isValidVideoId(v)) return v
+    }
+  } catch {
+    /* not a url */
+  }
+  return null
+}

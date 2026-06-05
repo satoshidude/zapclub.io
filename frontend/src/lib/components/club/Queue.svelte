@@ -1,0 +1,258 @@
+<script lang="ts">
+  import { queues, addTrack, removeTrack, clearQueue, shuffleQueue } from '../../nostr/queue.svelte'
+  import { skipTrack, canSkip } from '../../nostr/sync.svelte'
+  import { searchYouTube, type SearchHit } from '../../player/youtube'
+  import { auth } from '../../nostr/auth.svelte'
+  import { stage } from '../../nostr/stage.svelte'
+  import type { QueueTrack } from '../../nostr/types'
+
+  let { groupId }: { groupId: string } = $props()
+
+  const me = $derived(auth.pubkey)
+  const onStage = $derived(stage.isOnStage(me))
+  const myQueue = $derived(me ? queues.get(me) : null)
+  const tracks = $derived(myQueue?.tracks ?? [])
+
+  let query = $state('')
+  let results = $state<SearchHit[]>([])
+  let searching = $state(false)
+  let searchError = $state('')
+
+  async function doSearch() {
+    const q = query.trim()
+    if (!q) return
+    searching = true
+    searchError = ''
+    results = []
+    try {
+      results = await searchYouTube(q)
+      if (results.length === 0) searchError = 'No results (or search is unavailable).'
+    } catch (e) {
+      searchError = String((e as Error)?.message ?? e)
+    } finally {
+      searching = false
+    }
+  }
+
+  async function add(hit: SearchHit) {
+    const track: QueueTrack = { videoId: hit.videoId, title: hit.title, duration: hit.duration }
+    await addTrack(groupId, track)
+    results = results.filter((r) => r.videoId !== hit.videoId)
+  }
+
+  function fmt(s: number): string {
+    if (!s) return ''
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+</script>
+
+<div class="queue card">
+  <div class="head">
+    <h3>Your queue <span class="count">{tracks.length}</span></h3>
+    <div class="head-actions">
+      {#if canSkip()}
+        <button class="btn btn-ghost btn-sm" onclick={() => skipTrack(groupId)} title="Skip current track">⏭ Skip</button>
+      {/if}
+      {#if tracks.length > 1}
+        <button class="mini" onclick={() => shuffleQueue(groupId)} title="Shuffle">🔀</button>
+      {/if}
+      {#if tracks.length > 0}
+        <button class="mini" onclick={() => clearQueue(groupId)} title="Clear queue">🗑</button>
+      {/if}
+    </div>
+  </div>
+
+  {#if !onStage}
+    <p class="hint">Go on stage to add tracks to the round-robin.</p>
+  {/if}
+
+  <!-- Search to add tracks -->
+  <form class="search" onsubmit={(e) => { e.preventDefault(); doSearch() }}>
+    <input
+      bind:value={query}
+      placeholder="Search YouTube to add a track…"
+      maxlength="120"
+      autocomplete="off"
+    />
+    <button class="btn btn-primary btn-sm" type="submit" disabled={searching || !query.trim()}>
+      {searching ? '…' : 'Search'}
+    </button>
+  </form>
+  {#if searchError}<p class="err">{searchError}</p>{/if}
+
+  {#if results.length > 0}
+    <ul class="results">
+      {#each results as hit (hit.videoId)}
+        <li>
+          <img class="thumb" src={`https://i.ytimg.com/vi/${hit.videoId}/default.jpg`} alt="" width="48" height="36" loading="lazy" />
+          <span class="r-title">{hit.title}</span>
+          <span class="dur">{fmt(hit.duration)}</span>
+          <button class="add" onclick={() => add(hit)} title="Add to queue">+ Add</button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  <!-- My tracks -->
+  {#if tracks.length > 0}
+    <ul class="tracks">
+      {#each tracks as track, i (track.videoId + i)}
+        <li class:played={track.active === false}>
+          <span class="t-idx">{i + 1}</span>
+          <span class="t-title">{track.title}</span>
+          <span class="dur">{fmt(track.duration)}</span>
+          <button class="rm" onclick={() => removeTrack(groupId, i)} title="Remove">✕</button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+</div>
+
+<style>
+  .queue {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.7rem;
+  }
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .count {
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .hint {
+    margin: 0 0 0.7rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .search {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.7rem;
+    color: var(--text);
+    font-size: 0.88rem;
+  }
+  .search input:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+  .results,
+  .tracks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .results {
+    margin-bottom: 0.7rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .results li,
+  .tracks li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+  }
+  .thumb {
+    width: 48px;
+    height: 36px;
+    border-radius: 5px;
+    object-fit: cover;
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+  }
+  .r-title,
+  .t-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tracks li.played .t-title {
+    color: var(--text-dim);
+    text-decoration: line-through;
+  }
+  .t-idx {
+    flex: 0 0 1.4rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .dur {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .add {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    border-radius: 7px;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .add:hover {
+    border-color: var(--accent);
+  }
+  .rm {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .rm:hover {
+    color: var(--danger);
+  }
+  .mini {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 7px;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .mini:hover {
+    border-color: var(--accent-2);
+    color: var(--text);
+  }
+  .err {
+    color: var(--danger);
+    font-size: 0.8rem;
+    margin: 0 0 0.5rem;
+  }
+</style>

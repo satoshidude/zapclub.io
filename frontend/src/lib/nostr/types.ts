@@ -45,3 +45,47 @@ export interface ChatMessage {
   content: string
   createdAt: number
 }
+
+// ── Phase 3: stage / queue / sync ─────────────────────────────────────────
+
+/** A DJ on the stage (from kind:30102). */
+export interface StageDj {
+  pubkey: string
+  /** Stage join time (created_at of first on-stage) — ordering / round-robin. */
+  since: number
+}
+
+/** A track in a DJ queue. */
+export interface QueueTrack {
+  videoId: string
+  title: string
+  duration: number
+  /** false = already played/disabled → out of rotation (greyed). undefined/true = active. */
+  active?: boolean
+}
+
+/** A DJ's queue (kind:30103, replaceable per DJ/club). */
+export interface DjQueue {
+  dj: string
+  tracks: QueueTrack[]
+  updatedAt: number
+}
+
+/** now_playing sync state (kind:30100). */
+export interface NowPlaying {
+  /** YouTube video id (from "yt:<id>"). */
+  videoId: string
+  /** Track start in Unix-ms (conductor clock). */
+  startedAt: number
+  /** Event send time in Unix-ms — for offset calibration. */
+  sentAt: number
+  /** Track length in seconds (0 = unknown). */
+  duration: number
+  status: 'playing' | 'paused'
+  /** pubkey of the DJ whose track is playing (round-robin). */
+  dj: string
+  /** Round-robin position (djIndex = pos%n, trackIndex = pos/n). */
+  pos: number
+  /** "Artist – Title" (display). */
+  title: string
+}

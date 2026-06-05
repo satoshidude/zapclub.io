@@ -13,6 +13,9 @@ import { auth, setLoggedIn, setLoggedOut, setProfile, setProfileLoading } from '
 import { fetchProfile } from './pool'
 import { goHome } from '../router.svelte'
 import { openLoginDialog, closeLoginDialog } from './loginDialog.svelte'
+import { resetSync } from './sync.svelte'
+import { resetStage } from './stage.svelte'
+import { resetQueues } from './queue.svelte'
 import type { LoginMethod } from './types'
 
 // ── applesauce: account manager + signer wiring ─────────────────────────────
@@ -33,6 +36,9 @@ registerCommonAccountTypes(manager)
 
 /** Clears all user-bound session state. On logout AND on user switch. */
 function resetSession(): void {
+  resetSync()
+  resetStage()
+  resetQueues()
   goHome()
 }
 

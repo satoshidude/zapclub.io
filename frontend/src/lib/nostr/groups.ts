@@ -17,6 +17,13 @@ export const KIND_METADATA = 39000
 export const KIND_ADMINS = 39001
 export const KIND_MEMBERS = 39002
 
+// Phase 3 — playback content events (all carry the #h group tag).
+export const KIND_NOW_PLAYING = 30100 // replaceable per club (d=club): the conductor's track
+export const KIND_STAGE = 30102 // replaceable per DJ/club: "I'm a DJ here" heartbeat
+export const KIND_QUEUE = 30103 // replaceable per DJ/club: that DJ's track queue
+export const KIND_STAGE_KICK = 30106 // replaceable per DJ: owner/mod kicks a DJ off stage
+export const KIND_PLAY = 1313 // non-replaceable play record (1 per real track start)
+
 const RELAYS = [CLUB_RELAY]
 
 /** NIP-42 AUTH handler: signs the relay challenge via the active signer. */
@@ -148,6 +155,39 @@ export async function deleteEvent(groupId: string, eventId: string): Promise<voi
   })
 }
 
+/** Kicks a DJ off the stage (owner/moderator). Clients only honor kicks from admins. */
+export async function kickFromStage(groupId: string, djPubkey: string): Promise<void> {
+  await publishClub({
+    kind: KIND_STAGE_KICK,
+    created_at: now(),
+    tags: [
+      ['h', groupId],
+      ['d', djPubkey],
+      ['p', djPubkey],
+    ],
+    content: '',
+  })
+}
+
+/** Publishes a play record (one real track start). Called by the conductor. */
+export async function publishPlay(
+  groupId: string,
+  djPubkey: string,
+  videoId: string,
+  startedAt: number,
+): Promise<void> {
+  await publishClub({
+    kind: KIND_PLAY,
+    created_at: now(),
+    tags: [
+      ['h', groupId],
+      ['p', djPubkey],
+      ['started_at', String(startedAt)],
+    ],
+    content: videoId,
+  })
+}
+
 // ── Read / parse ──────────────────────────────────────────────────────────────
 
 export function parseClubMetadata(ev: Event): Club {
@@ -263,6 +303,10 @@ export interface ClubSubHandlers {
   onAdmins?: (ev: Event) => void
   onChat?: (ev: Event) => void
   onDeleteEvent?: (ev: Event) => void
+  onNowPlaying?: (ev: Event) => void
+  onStage?: (ev: Event) => void
+  onStageKick?: (ev: Event) => void
+  onQueue?: (ev: Event) => void
 }
 
 /**
@@ -272,7 +316,17 @@ export interface ClubSubHandlers {
  */
 export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
   const metaFilter: Filter = { kinds: [KIND_METADATA, KIND_MEMBERS, KIND_ADMINS], '#d': [groupId] }
-  const contentFilter: Filter = { kinds: [KIND_CHAT, KIND_DELETE_EVENT], '#h': [groupId] }
+  const contentFilter: Filter = {
+    kinds: [
+      KIND_CHAT,
+      KIND_DELETE_EVENT,
+      KIND_NOW_PLAYING,
+      KIND_STAGE,
+      KIND_STAGE_KICK,
+      KIND_QUEUE,
+    ],
+    '#h': [groupId],
+  }
 
   const metaSub = pool.subscribe(RELAYS, metaFilter, {
     onauth,
@@ -288,6 +342,10 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
     onevent(ev) {
       if (ev.kind === KIND_CHAT) h.onChat?.(ev)
       else if (ev.kind === KIND_DELETE_EVENT) h.onDeleteEvent?.(ev)
+      else if (ev.kind === KIND_NOW_PLAYING) h.onNowPlaying?.(ev)
+      else if (ev.kind === KIND_STAGE) h.onStage?.(ev)
+      else if (ev.kind === KIND_STAGE_KICK) h.onStageKick?.(ev)
+      else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
     },
   })
 

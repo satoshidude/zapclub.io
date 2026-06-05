@@ -11,7 +11,25 @@
   } from '../nostr/groups'
   import { goHome } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
+  import { launchLogin } from '../nostr/nostrLogin'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
+  import {
+    stage,
+    ingestStage,
+    ingestStageKick,
+    setStageHost,
+    resetStage,
+    joinStage,
+    leaveStage,
+    persistedStageGroup,
+  } from '../nostr/stage.svelte'
+  import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
+  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
+  import Player from './club/Player.svelte'
+  import Stage from './club/Stage.svelte'
+  import Queue from './club/Queue.svelte'
+  import NowPlaying from './club/NowPlaying.svelte'
+  import ComingNext from './club/ComingNext.svelte'
   import type { Club, ClubMember } from '../nostr/types'
 
   let { groupId }: { groupId: string } = $props()
@@ -21,6 +39,7 @@
   let admins = $state<string[]>([])
   let busy = $state(false)
   let error = $state('')
+  let stageResumed = false
 
   const owner = $derived(admins[0] ?? '')
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -30,18 +49,73 @@
   const isMember = $derived(!!auth.pubkey && members.some((m) => m.pubkey === auth.pubkey))
   const canModerate = $derived(isOwner || isMod)
 
+  /** Is a pubkey an admin/moderator (allowed to kick from stage)? */
+  function isModerator(pubkey: string): boolean {
+    return (
+      pubkey === owner ||
+      members.some((m) => m.pubkey === pubkey && m.roles.includes('moderator'))
+    )
+  }
+
   $effect(() => {
     // (re)subscribe whenever groupId changes
     const id = groupId
     club = null
     members = []
     admins = []
+    stageResumed = false
+    const me = auth.pubkey
     const stop = subscribeClub(id, {
       onMeta: (ev) => (club = parseClubMetadata(ev)),
       onMembers: (ev) => (members = parseMembers(ev)),
       onAdmins: (ev) => (admins = parseAdmins(ev)),
+      // Hijack protection: only accept now_playing from the current conductor (or until
+      // a conductor is known) — a rogue client can't steer playback.
+      onNowPlaying: (ev) => {
+        if (!stage.conductor || ev.pubkey === stage.conductor) ingestNowPlaying(ev)
+      },
+      onStage: ingestStage,
+      onStageKick: (ev) => {
+        if (!isModerator(ev.pubkey)) return // only honor admin/mod kicks
+        const kicked = ingestStageKick(ev)
+        if (kicked && kicked === me && stage.isOnStage(me)) void leaveStage(id)
+      },
+      onQueue: ingestQueue,
     })
-    return stop
+
+    // Conductor tick: only the conductor acts inside conductorTick(). Touch queues so the
+    // effect re-evaluates when queue lengths change (reactivity).
+    const tick = setInterval(() => {
+      void queues
+      conductorTick(id)
+    }, 8000)
+
+    return () => {
+      stop()
+      clearInterval(tick)
+      resetSync()
+      resetStage()
+      resetQueues()
+    }
+  })
+
+  // Owner (first admin) is the stage host = always conductor when on stage.
+  $effect(() => {
+    setStageHost(owner || null)
+  })
+
+  // Reload-resume: if the user was on this club's stage before reload, rejoin.
+  $effect(() => {
+    if (stageResumed || !auth.canSign) return
+    if (persistedStageGroup() !== groupId) return
+    stageResumed = true
+    void joinStage(groupId)
+  })
+
+  // When MY track is the live one, mark it as played (greyed out, out of rotation).
+  $effect(() => {
+    const np = sync.live
+    if (np && np.dj === auth.pubkey && np.videoId) void markPlayed(groupId, np.videoId)
   })
 
   async function doJoin() {
@@ -122,6 +196,25 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
+  <section class="stream">
+    <Player
+      canHear={isMember}
+      ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
+      onCta={() => {
+        if (auth.isLoggedIn) void doJoin()
+        else launchLogin()
+      }}
+      onended={() => onTrackEnded(groupId)}
+      onerror={(vid) => onTrackError(groupId, vid)}
+    />
+    <NowPlaying />
+    <Stage {groupId} {canModerate} {isMember} />
+    {#if isMember}
+      <Queue {groupId} />
+    {/if}
+    <ComingNext />
+  </section>
+
   <section class="members">
     <h2>Members</h2>
     {#if members.length === 0}
@@ -148,9 +241,6 @@
     {/if}
   </section>
 
-  <p class="phase-note">
-    🎧 The stage, synced playback and zaps land in the next phase.
-  </p>
 </div>
 
 <style>
@@ -284,13 +374,10 @@
   .dim {
     color: var(--text-dim);
   }
-  .phase-note {
-    margin-top: 2rem;
-    padding: 0.9rem;
-    border: 1px dashed var(--border);
-    border-radius: var(--radius);
-    color: var(--text-dim);
-    font-size: 0.85rem;
-    text-align: center;
+  .stream {
+    margin-top: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
   }
 </style>
