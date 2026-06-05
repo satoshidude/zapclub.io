@@ -30,6 +30,7 @@
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps } from '../nostr/zaps.svelte'
+  import { registerActiveClub } from '../nostr/miniplay.svelte'
   import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
@@ -127,6 +128,12 @@
   // Owner (first admin) is the stage host = always conductor when on stage.
   $effect(() => {
     setStageHost(owner || null)
+  })
+
+  // This club is now the active audio source. The global mini-player keeps it playing
+  // when the user navigates to other (non-club) pages — until they enter another club.
+  $effect(() => {
+    registerActiveClub(groupId, club?.name ?? '')
   })
 
   // Reload-resume: if the user was on this club's stage before reload, rejoin.

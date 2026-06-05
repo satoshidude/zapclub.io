@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Spinning vinyl turntable in Nostr purple. Reused as the header logo and as the
+  // Spinning vinyl turntable in zapclub green. Reused as the header logo and as the
   // club placeholder image. The record spins; the tonearm stays put.
   let { size = 32, glow = true }: { size?: number; glow?: boolean } = $props()
 </script>
@@ -14,15 +14,15 @@
   aria-label="turntable"
 >
   <g class="vinyl">
-    <circle cx="16" cy="20" r="13" fill="#1b0b33" stroke="#8e30eb" stroke-width="1.6" />
-    <circle cx="16" cy="20" r="9.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4" />
-    <circle cx="16" cy="20" r="6.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.3" />
-    <circle cx="16" cy="20" r="3.6" fill="#8e30eb" />
-    <circle cx="16" cy="11.5" r="1.1" fill="#d8b4fe" />
-    <circle cx="16" cy="20" r="1" fill="#1b0b33" />
+    <circle cx="16" cy="20" r="13" fill="#06210f" stroke="#22c55e" stroke-width="1.6" />
+    <circle cx="16" cy="20" r="9.5" fill="none" stroke="#4ade80" stroke-width="0.5" opacity="0.4" />
+    <circle cx="16" cy="20" r="6.5" fill="none" stroke="#4ade80" stroke-width="0.5" opacity="0.3" />
+    <circle cx="16" cy="20" r="3.6" fill="#22c55e" />
+    <circle cx="16" cy="11.5" r="1.1" fill="#bbf7d0" />
+    <circle cx="16" cy="20" r="1" fill="#06210f" />
   </g>
-  <line x1="29" y1="7" x2="20.5" y2="15.5" stroke="#c084fc" stroke-width="1.7" stroke-linecap="round" />
-  <circle cx="29" cy="7" r="1.9" fill="#c084fc" />
+  <line x1="29" y1="7" x2="20.5" y2="15.5" stroke="#86efac" stroke-width="1.7" stroke-linecap="round" />
+  <circle cx="29" cy="7" r="1.9" fill="#86efac" />
 </svg>
 
 <style>
@@ -31,7 +31,7 @@
     flex: 0 0 auto;
   }
   .turntable.glow {
-    filter: drop-shadow(0 0 6px rgba(142, 48, 235, 0.55));
+    filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.55));
   }
   .vinyl {
     transform-origin: 16px 20px;

@@ -10,11 +10,24 @@
   import UserProfile from './lib/components/UserProfile.svelte'
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
+  import MiniPlayer from './lib/components/MiniPlayer.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
+  import { registerActiveClub, persistedActiveClub } from './lib/nostr/miniplay.svelte'
+  import { fetchClub } from './lib/nostr/groups'
 
   startConnectionWatch()
+
+  // Reload-resume: pick up the club whose audio was playing and keep it going in the
+  // mini-player (unless we land straight back on that club's page, which has its own).
+  {
+    const resumeId = persistedActiveClub()
+    if (resumeId && !(router.route.name === 'club' && router.route.id === resumeId)) {
+      registerActiveClub(resumeId, '')
+      void fetchClub(resumeId).then((c) => c?.name && registerActiveClub(resumeId, c.name))
+    }
+  }
 
   // Footer donation — plain LNURL payment to the project's lightning address.
   const DONATE_LUD16 = 'zapclub@nsnip.io'
@@ -76,6 +89,7 @@
 
 <Nav mobile />
 
+<MiniPlayer />
 <LoginDialog />
 <PayModal />
 
@@ -102,8 +116,8 @@
     letter-spacing: -0.02em;
   }
   .brand .tld {
-    /* same purple as the turntable logo */
-    color: #a855f7;
+    /* same green as the turntable logo */
+    color: #22c55e;
     font-weight: 700;
   }
   .reconnect {
