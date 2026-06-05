@@ -1,4 +1,5 @@
 <script lang="ts">
+  import icon from './assets/zapclub-icon.png'
   import { router, goHome } from './lib/router.svelte'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
@@ -12,17 +13,7 @@
 <header class="topbar">
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
-    <svg class="turntable" viewBox="0 0 32 32" width="30" height="30" role="img" aria-label="zapclub turntable">
-      <!-- platter / record -->
-      <circle cx="14" cy="18" r="11" fill="#0c0c11" stroke="currentColor" stroke-width="1.5" />
-      <circle class="groove" cx="14" cy="18" r="7.6" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.45" />
-      <!-- label -->
-      <circle cx="14" cy="18" r="3.2" fill="currentColor" opacity="0.9" />
-      <circle cx="14" cy="18" r="0.9" fill="#0c0c11" />
-      <!-- tonearm -->
-      <line x1="26" y1="6" x2="18.5" y2="13.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-      <circle cx="26" cy="6" r="1.7" fill="currentColor" />
-    </svg>
+    <img class="logo" src={icon} alt="zapclub" width="26" height="34" />
     <span>zapclub<span class="dim">.io</span></span>
   </div>
   <LoginButton />
@@ -71,28 +62,27 @@
     cursor: pointer;
     letter-spacing: -0.02em;
   }
-  .turntable {
-    color: var(--accent);
+  .logo {
     flex: 0 0 auto;
     transform-origin: center;
-    animation: turntable-pulse 1.6s ease-in-out infinite;
+    animation: logo-pulse 1.6s ease-in-out infinite;
   }
-  /* Pulse: gentle scale + neon glow breathing. */
-  @keyframes turntable-pulse {
+  /* Pulse: gentle scale + neon glow breathing (matches the bolt's purple/amber). */
+  @keyframes logo-pulse {
     0%,
     100% {
       transform: scale(1);
-      filter: drop-shadow(0 0 4px rgba(74, 222, 94, 0.45));
+      filter: drop-shadow(0 0 4px rgba(177, 77, 255, 0.5));
     }
     50% {
       transform: scale(1.12);
-      filter: drop-shadow(0 0 12px rgba(74, 222, 94, 0.85));
+      filter: drop-shadow(0 0 13px rgba(177, 77, 255, 0.9));
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .turntable {
+    .logo {
       animation: none;
-      filter: drop-shadow(0 0 6px rgba(74, 222, 94, 0.5));
+      filter: drop-shadow(0 0 6px rgba(177, 77, 255, 0.55));
     }
   }
   .brand .dim {
