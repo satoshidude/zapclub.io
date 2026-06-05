@@ -41,10 +41,12 @@
             <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
             {displayName(dj, profile)}
           </a>
-          <ZapButton />
         </div>
       </div>
-      <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
+      <div class="right">
+        <ZapButton />
+        <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
+      </div>
     </div>
     <div class="bar"><div class="fill" style:width="{pct}%"></div></div>
   {:else}
@@ -102,8 +104,14 @@
     object-fit: cover;
     background: var(--bg-elev-2);
   }
-  .time {
+  .right {
     flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.3rem;
+  }
+  .time {
     font-size: 0.78rem;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
