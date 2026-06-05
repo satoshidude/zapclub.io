@@ -66,7 +66,7 @@ describe('firstPlayablePos', () => {
 describe('round-robin full walk (regression: every DJ gets played)', () => {
   it('a 2-DJ rotation visits both DJs alternately', () => {
     const p = allActive([2, 2])
-    const visited: Array<{ dj: number; track: number }> = []
+    const visited = []
     let pos = firstPlayablePos(2, p)
     while (pos >= 0 && visited.length < 4) {
       visited.push(posToSlot(pos, 2))
@@ -77,6 +77,6 @@ describe('round-robin full walk (regression: every DJ gets played)', () => {
       { djIndex: 1, trackIndex: 0 },
       { djIndex: 0, trackIndex: 1 },
       { djIndex: 1, trackIndex: 1 },
-    ] as unknown as typeof visited)
+    ])
   })
 })

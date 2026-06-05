@@ -1,11 +1,12 @@
 import type { Event } from 'nostr-tools/pure'
 import { KIND_STAGE, publishClub } from './groups'
 import { auth } from './auth.svelte'
+import { selectActiveDjs, pickConductor, MAX_DJS } from './conductor'
 import type { StageDj } from './types'
 
-// zapclub: open stage — any member may take a free slot, up to 5 DJs. The stage is a
+// zapclub: open stage — any member may take a free slot, up to MAX_DJS. The stage is a
 // content event (30102), NOT a relay role; there is no dj-policy gate.
-export const MAX_DJS = 5
+export { MAX_DJS }
 
 // Remembers (pubkey-bound) "I'm on stage in club X" → after a reload the client re-joins
 // itself (the heartbeat would otherwise stop). Cleared on explicit leave/logout, NOT on
@@ -55,14 +56,10 @@ export function persistedStageGroup(): string | null {
   }
 }
 
-// Heartbeat every 5 min — the 1h window (STALE_MS) has huge headroom, so an infrequent
-// keep-alive suffices (join/leave are posted immediately, plus an instant refresh when the
-// tab returns). Keeps relay load/DB small.
+// Heartbeat every 5 min — the 1h window (STALE_MS in conductor.ts) has huge headroom, so
+// an infrequent keep-alive suffices (join/leave are posted immediately, plus an instant
+// refresh when the tab returns). Keeps relay load/DB small.
 const HEARTBEAT_MS = 300_000
-// "Sticky stage": a DJ stays up to 1 hour after their last heartbeat — even if the app is
-// backgrounded/suspended and no timers run. You only come down via: leave stage, logout,
-// owner kick, or 1h without a sign of life.
-const STALE_MS = 3_600_000
 
 interface StageState {
   /** pubkey → last state. */
@@ -94,18 +91,7 @@ export function setStageHost(pk: string | null): void {
  * (oldest `since`) take over.
  */
 function resolveConductor(): void {
-  const active = activeDjs()
-  if (active.length === 0) {
-    state.conductorPk = null
-    return
-  }
-  // Owner on stage → they lead, regardless of join order.
-  if (hostPk && active.some((d) => d.pubkey === hostPk)) {
-    state.conductorPk = hostPk
-    return
-  }
-  if (state.conductorPk && active.some((d) => d.pubkey === state.conductorPk)) return // sticky
-  state.conductorPk = active[0].pubkey
+  state.conductorPk = pickConductor(activeDjs(), hostPk, state.conductorPk)
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null
@@ -122,17 +108,7 @@ function ensureTicking(): void {
  * kick), sorted by stage join, max MAX_DJS.
  */
 function activeDjs(): StageDj[] {
-  const now = state.tick || Date.now()
-  return Object.entries(state.djs)
-    .filter(
-      ([pk, d]) =>
-        d.on &&
-        now - d.lastSeen < STALE_MS &&
-        d.lastSeen > (state.kicks[pk] ?? 0),
-    )
-    .map(([pubkey, d]) => ({ pubkey, since: d.since }))
-    .sort((a, b) => a.since - b.since || a.pubkey.localeCompare(b.pubkey))
-    .slice(0, MAX_DJS)
+  return selectActiveDjs(state.djs, state.kicks, state.tick || Date.now())
 }
 
 export const stage = {
@@ -142,12 +118,9 @@ export const stage = {
   get full(): boolean {
     return activeDjs().length >= MAX_DJS
   },
-  /** Conductor (time authority) — sticky: first DJ leads, next on leave. */
+  /** Conductor (time authority): owner-on-stage, else sticky current, else oldest. */
   get conductor(): string | null {
-    if (state.conductorPk && activeDjs().some((d) => d.pubkey === state.conductorPk)) {
-      return state.conductorPk
-    }
-    return activeDjs()[0]?.pubkey ?? null
+    return pickConductor(activeDjs(), hostPk, state.conductorPk)
   },
   isOnStage(pubkey: string | null): boolean {
     return !!pubkey && activeDjs().some((d) => d.pubkey === pubkey)
