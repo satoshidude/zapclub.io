@@ -45,7 +45,7 @@
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
-  let tab = $state<'club' | 'stage' | 'chat'>('stage')
+  let tab = $state<'club' | 'stage' | 'chat'>('club')
 
   const owner = $derived(admins[0] ?? '')
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -207,21 +207,6 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <!-- Player + now-playing stay mounted across tabs so audio never stops. -->
-  <section class="stream">
-    <Player
-      canHear={isMember}
-      ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
-      onCta={() => {
-        if (auth.isLoggedIn) void doJoin()
-        else launchLogin()
-      }}
-      onended={() => onTrackEnded(groupId)}
-      onerror={(vid) => onTrackError(groupId, vid)}
-    />
-    <NowPlaying />
-  </section>
-
   <div class="club-tabs" role="tablist">
     <button class="ctab" class:active={tab === 'club'} role="tab" aria-selected={tab === 'club'} onclick={() => (tab = 'club')}>
       🪩 Club
@@ -234,62 +219,80 @@
     </button>
   </div>
 
-  {#if tab === 'stage'}
-    <div class="panel">
+  <!-- All panels stay mounted; inactive ones are moved off-screen (not unmounted) so
+       the player in the Club tab keeps playing audio when you switch tabs. -->
+  <div class="panels">
+    <div class="panel" class:active={tab === 'club'}>
+      <Player
+        canHear={isMember}
+        ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
+        onCta={() => {
+          if (auth.isLoggedIn) void doJoin()
+          else launchLogin()
+        }}
+        onended={() => onTrackEnded(groupId)}
+        onerror={(vid) => onTrackError(groupId, vid)}
+      />
+      <NowPlaying />
+      <ComingNext />
+
+      <section class="about card">
+        <h3>About this club</h3>
+        {#if club?.about}
+          <p class="desc">{club.about}</p>
+        {:else}
+          <p class="desc dim">No description yet.</p>
+        {/if}
+
+        <details class="members-acc">
+          <summary>
+            <span class="sum-label">Members</span>
+            <span class="mcount">{members.length}</span>
+            <span class="chevron" aria-hidden="true">▾</span>
+          </summary>
+          {#if members.length === 0}
+            <p class="dim">No members yet.</p>
+          {:else}
+            <ul class="member-list">
+              {#each members as m (m.pubkey)}
+                {@const profile = useProfile(m.pubkey)}
+                <li>
+                  <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
+                  <span class="mname">{displayName(m.pubkey, profile)}</span>
+                  {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
+                  {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
+                    <span class="mod-actions">
+                      {#if isOwner && !m.roles.includes('moderator')}
+                        <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
+                      {/if}
+                      <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </details>
+      </section>
+    </div>
+
+    <div class="panel" class:active={tab === 'stage'}>
       <Stage {groupId} {canModerate} {isMember} />
       {#if isMember}
         <Queue {groupId} />
       {/if}
-      <ComingNext />
     </div>
-  {:else if tab === 'chat'}
-    <Chat
-      {groupId}
-      canChat={isMember}
-      {canModerate}
-      onauthor={(pubkey) => goUser(npubEncode(pubkey))}
-      ondelete={(id) => void deleteEvent(groupId, id)}
-    />
-  {:else}
-  <section class="about card">
-    <h3>About this club</h3>
-    {#if club?.about}
-      <p class="desc">{club.about}</p>
-    {:else}
-      <p class="desc dim">No description yet.</p>
-    {/if}
 
-    <details class="members-acc">
-      <summary>
-        <span class="sum-label">Members</span>
-        <span class="mcount">{members.length}</span>
-        <span class="chevron" aria-hidden="true">▾</span>
-      </summary>
-      {#if members.length === 0}
-        <p class="dim">No members yet.</p>
-      {:else}
-        <ul class="member-list">
-          {#each members as m (m.pubkey)}
-            {@const profile = useProfile(m.pubkey)}
-            <li>
-              <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
-              <span class="mname">{displayName(m.pubkey, profile)}</span>
-              {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
-              {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
-                <span class="mod-actions">
-                  {#if isOwner && !m.roles.includes('moderator')}
-                    <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
-                  {/if}
-                  <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
-                </span>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </details>
-  </section>
-  {/if}
+    <div class="panel" class:active={tab === 'chat'}>
+      <Chat
+        {groupId}
+        canChat={isMember}
+        {canModerate}
+        onauthor={(pubkey) => goUser(npubEncode(pubkey))}
+        ondelete={(id) => void deleteEvent(groupId, id)}
+      />
+    </div>
+  </div>
 
 </div>
 
@@ -457,48 +460,51 @@
   .dim {
     color: var(--text-dim);
   }
-  .stream {
-    margin-top: 1.2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-  }
-  /* In-club tab bar (Club / Stage / Chat) — sits under the player. */
+  /* In-club tabs — underline style (no pills). */
   .club-tabs {
     display: flex;
-    gap: 0.3rem;
-    margin: 1.1rem 0 0.9rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.3rem;
+    gap: 0.2rem;
+    margin: 1.2rem 0 1rem;
+    border-bottom: 1px solid var(--border);
   }
   .ctab {
-    flex: 1;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
     gap: 0.4rem;
     background: none;
     border: none;
-    border-radius: 999px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
     color: var(--text-dim);
     cursor: pointer;
-    padding: 0.5rem 0.6rem;
-    font-size: 0.9rem;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.92rem;
     font-weight: 600;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color 0.15s ease, border-color 0.15s ease;
   }
   .ctab:hover {
     color: var(--text);
   }
   .ctab.active {
-    color: var(--accent-ink);
-    background: var(--accent);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  /* Panels: only the active one is in flow; inactive ones stay mounted but
+     off-screen so the Club tab's player keeps playing audio across tabs. */
+  .panels {
+    position: relative;
   }
   .panel {
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
+  }
+  .panel:not(.active) {
+    position: absolute;
+    top: 0;
+    left: -9999px;
+    width: 100%;
+    visibility: hidden;
+    pointer-events: none;
   }
 </style>
