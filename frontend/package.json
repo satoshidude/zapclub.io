@@ -17,5 +17,13 @@
     "svelte-check": "^4.4.8",
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "applesauce-accounts": "^6.0.0",
+    "applesauce-core": "^6.1.0",
+    "applesauce-relay": "^6.0.3",
+    "applesauce-signers": "^6.0.1",
+    "nostr-tools": "^2.23.5",
+    "qrcode-generator": "^1.5.2"
   }
 }

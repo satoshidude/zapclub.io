@@ -1,89 +1,91 @@
-<script>
-  import svelteLogo from './assets/svelte.svg'
-  import viteLogo from './assets/vite.svg'
-  import heroImg from './assets/hero.png'
-  import Counter from './lib/Counter.svelte'
+<script lang="ts">
+  import bolt from './assets/bolt.png'
+  import { router, goHome } from './lib/router.svelte'
+  import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
+  import LoginButton from './lib/components/LoginButton.svelte'
+  import LoginDialog from './lib/components/LoginDialog.svelte'
+  import ClubList from './lib/components/ClubList.svelte'
+  import ClubView from './lib/components/ClubView.svelte'
+
+  startConnectionWatch()
 </script>
 
-<section id="center">
-  <div class="hero">
-    <img src={heroImg} class="base" width="170" height="179" alt="" />
-    <img src={svelteLogo} class="framework" alt="Svelte logo" />
-    <img src={viteLogo} class="vite" alt="Vite logo" />
+<header class="topbar">
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+  <div class="brand" role="button" tabindex="0" onclick={goHome}>
+    <img src={bolt} alt="" width="30" height="30" />
+    <span>zapclub<span class="dim">.io</span></span>
   </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/App.svelte</code> and save to test <code>HMR</code></p>
-  </div>
-  <Counter />
-</section>
+  <LoginButton />
+</header>
 
-<div class="ticks"></div>
+{#if connection.known && !connection.clubConnected}
+  <div class="reconnect">Reconnecting to the club relay…</div>
+{/if}
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true">
-      <use href="/icons.svg#documentation-icon"></use>
-    </svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank" rel="noreferrer">
-          <img class="logo" src={viteLogo} alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://svelte.dev/" target="_blank" rel="noreferrer">
-          <img class="button-icon" src={svelteLogo} alt="" />
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true">
-      <use href="/icons.svg#social-icon"></use>
-    </svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li>
-        <a href="https://github.com/vitejs/vite" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#github-icon"></use>
-          </svg>
-          GitHub
-        </a>
-      </li>
-      <li>
-        <a href="https://chat.vite.dev/" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#discord-icon"></use>
-          </svg>
-          Discord
-        </a>
-      </li>
-      <li>
-        <a href="https://x.com/vite_js" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#x-icon"></use>
-          </svg>
-          X.com
-        </a>
-      </li>
-      <li>
-        <a href="https://bsky.app/profile/vite.dev" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#bluesky-icon"></use>
-          </svg>
-          Bluesky
-        </a>
-      </li>
-    </ul>
-  </div>
-</section>
+<main>
+  {#if router.route.name === 'club'}
+    {#key router.route.id}
+      <ClubView groupId={router.route.id} />
+    {/key}
+  {:else if router.route.name === 'user'}
+    <div class="stub">
+      <p>Profiles are coming soon.</p>
+      <button class="btn btn-ghost btn-sm" onclick={goHome}>← Back to clubs</button>
+    </div>
+  {:else}
+    <ClubList />
+  {/if}
+</main>
 
-<div class="ticks"></div>
-<section id="spacer"></section>
+<LoginDialog />
+
+<style>
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 1rem;
+    background: rgba(7, 7, 10, 0.8);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 800;
+    font-size: 1.15rem;
+    cursor: pointer;
+    letter-spacing: -0.02em;
+  }
+  .brand img {
+    filter: drop-shadow(0 0 10px rgba(74, 222, 94, 0.5));
+  }
+  .brand .dim {
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+  .reconnect {
+    background: var(--bg-elev-2);
+    border-bottom: 1px solid var(--border);
+    color: var(--amber);
+    text-align: center;
+    font-size: 0.8rem;
+    padding: 0.4rem;
+  }
+  .stub {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+  }
+</style>
