@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { sync, targetPosition } from '../../nostr/sync.svelte'
+  import { sync, targetPosition, requestSkip } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
   import { likes, likeTrack } from '../../nostr/likes.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -11,7 +11,14 @@
     stageLabel = '',
     clubId = '',
     clubName = '',
-  }: { onGoStage?: () => void; stageLabel?: string; clubId?: string; clubName?: string } = $props()
+    canSkip = false,
+  }: {
+    onGoStage?: () => void
+    stageLabel?: string
+    clubId?: string
+    clubName?: string
+    canSkip?: boolean
+  } = $props()
 
   // Reactive clock so the progress bar advances between now_playing events.
   let nowMs = $state(Date.now())
@@ -57,6 +64,9 @@
       </div>
       <div class="right">
         <div class="right-actions">
+          {#if canSkip}
+            <button class="skip" onclick={() => requestSkip(clubId)} title="Skip this track">⏭</button>
+          {/if}
           <button
             class="like"
             class:on={liked}
@@ -160,6 +170,20 @@
   }
   .like:disabled {
     cursor: default;
+  }
+  .skip {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.12rem 0.45rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .skip:hover {
+    color: var(--text);
+    border-color: var(--accent-2);
   }
   .time {
     font-size: 0.78rem;

@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure'
-import { KIND_NOW_PLAYING, publishClub, publishPlay } from './groups'
+import { KIND_NOW_PLAYING, KIND_SKIP, publishClub, publishPlay } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
@@ -16,9 +16,11 @@ interface SyncState {
   np: NowPlaying | null
   /** offset = conductor clock − local clock (ms), recalibrated per event. */
   offsetMs: number
+  /** Latest skip request (from an owner/mod without the conductor role). */
+  skipIntent: { pos: number; author: string; at: number } | null
 }
 
-const state = $state<SyncState>({ np: null, offsetMs: 0 })
+const state = $state<SyncState>({ np: null, offsetMs: 0, skipIntent: null })
 
 export const sync = {
   get nowPlaying() {
@@ -34,6 +36,9 @@ export const sync = {
   },
   get isPlaying() {
     return state.np?.status === 'playing'
+  },
+  get skipIntent() {
+    return state.skipIntent
   },
 }
 
@@ -192,9 +197,46 @@ export function skipTrack(groupId: string): void {
   advance(groupId, state.np.pos)
 }
 
-/** Whether the local user may skip (leading DJ + something is playing). */
-export function canSkip(): boolean {
-  return !!auth.pubkey && auth.pubkey === stage.conductor && !!sync.live
+/**
+ * Skip the current track. The conductor does it directly. An owner/moderator who is NOT
+ * the conductor (maybe not even on stage) publishes a skip request that the conductor
+ * enacts — only the conductor writes now_playing, so this is the safe path.
+ */
+export async function requestSkip(groupId: string): Promise<void> {
+  const me = auth.pubkey
+  if (!me || !state.np) return
+  if (me === stage.conductor) {
+    skipTrack(groupId)
+    return
+  }
+  await publishClub({
+    kind: KIND_SKIP,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId],
+      ['d', groupId],
+      ['pos', String(state.np.pos)],
+    ],
+    content: '',
+  })
+}
+
+/** A skip request seen on the relay (the conductor validates the author's role). */
+export function ingestSkipIntent(ev: Event): void {
+  const pos = Number(ev.tags.find((t) => t[0] === 'pos')?.[1])
+  if (Number.isNaN(pos)) return
+  const at = ev.created_at * 1000
+  if (state.skipIntent && state.skipIntent.at >= at) return
+  state.skipIntent = { pos, author: ev.pubkey, at }
+}
+
+export function clearSkipIntent(): void {
+  state.skipIntent = null
+}
+
+/** Whether the local user may skip — the conductor, OR an owner/moderator. */
+export function canSkip(canModerate = false): boolean {
+  return !!auth.pubkey && !!sync.live && (auth.pubkey === stage.conductor || canModerate)
 }
 
 /** Preview of the next round-robin tracks (across all DJs), max `max`. */
@@ -259,4 +301,5 @@ export function onTrackError(groupId: string, videoId: string): void {
 export function resetSync(): void {
   state.np = null
   state.offsetMs = 0
+  state.skipIntent = null
 }

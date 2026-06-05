@@ -111,12 +111,12 @@
     align-items: center;
     gap: 0.5rem;
     font-weight: 800;
-    font-size: 1.15rem;
+    font-size: 1.4rem;
     cursor: pointer;
     letter-spacing: -0.02em;
   }
   .brand .word {
-    color: #22c55e;
+    color: #fff;
   }
   .brand .tld {
     /* Nostr purple */

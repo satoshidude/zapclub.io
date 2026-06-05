@@ -27,7 +27,7 @@
     persistedStageGroup,
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
-  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
+  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps } from '../nostr/zaps.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
@@ -90,6 +90,7 @@
         if (kicked && kicked === me && stage.isOnStage(me)) void leaveStage(id)
       },
       onQueue: ingestQueue,
+      onSkip: ingestSkipIntent,
       onChat: ingestChat,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
@@ -134,6 +135,24 @@
   // when the user navigates to other (non-club) pages — until they enter another club.
   $effect(() => {
     registerActiveClub(groupId, club?.name ?? '')
+  })
+
+  // Only the conductor writes now_playing, so it's the conductor that ENACTS a skip
+  // requested by an owner/moderator (who may not be on stage). Validate the requester's
+  // role here, match it to the running track's pos, then skip.
+  $effect(() => {
+    const intent = sync.skipIntent
+    if (!intent) return
+    if (auth.pubkey !== stage.conductor) return
+    const authorized =
+      intent.author === owner || isModerator(intent.author) || intent.author === stage.conductor
+    const fresh = Date.now() - intent.at < 60_000
+    if (authorized && fresh && sync.live && intent.pos === sync.live.pos) {
+      clearSkipIntent()
+      skipTrack(groupId)
+    } else if (!sync.live || (sync.live && intent.pos !== sync.live.pos)) {
+      clearSkipIntent() // stale request (track already moved on)
+    }
   })
 
   // Reload-resume: if the user was on this club's stage before reload, rejoin.
@@ -295,6 +314,7 @@
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
         clubId={groupId}
         clubName={club?.name ?? ''}
+        canSkip={canSkip(canModerate)}
       />
     </div>
     <Player
