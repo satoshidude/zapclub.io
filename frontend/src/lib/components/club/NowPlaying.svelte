@@ -1,6 +1,7 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import ZapButton from './ZapButton.svelte'
 
   // Optional "go on stage" action shown in the idle (lobby) state.
   let { onGoStage, stageLabel = '' }: { onGoStage?: () => void; stageLabel?: string } = $props()
@@ -35,10 +36,13 @@
       <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
       <div class="info">
         <div class="title">{np.title || np.videoId}</div>
-        <a class="dj" href={`/user/${dj}`} onclick={(e) => e.preventDefault()}>
-          <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-          {displayName(dj, profile)}
-        </a>
+        <div class="dj-row">
+          <a class="dj" href={`/user/${dj}`} onclick={(e) => e.preventDefault()}>
+            <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
+            {displayName(dj, profile)}
+          </a>
+          <ZapButton />
+        </div>
       </div>
       <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
     </div>
@@ -76,14 +80,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .dj-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.2rem;
+  }
   .dj {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    margin-top: 0.2rem;
     font-size: 0.78rem;
     color: var(--text-dim);
     text-decoration: none;
+    min-width: 0;
   }
   .avatar {
     width: 18px;

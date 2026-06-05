@@ -35,7 +35,6 @@
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
   import Chat from './club/Chat.svelte'
-  import ZapButton from './club/ZapButton.svelte'
   import DiscoBall from './DiscoBall.svelte'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -228,13 +227,10 @@
     {#if club?.about}<p class="desc">{club.about}</p>{/if}
 
     <div class="hero-now">
-      <div class="now-col">
-        <NowPlaying
-          onGoStage={goOnStage}
-          stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
-        />
-      </div>
-      <ZapButton />
+      <NowPlaying
+        onGoStage={goOnStage}
+        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+      />
     </div>
     <ComingNext />
   </header>
@@ -337,20 +333,7 @@
     align-items: flex-start;
   }
   .hero-now {
-    display: flex;
-    gap: 0.8rem;
-    align-items: center;
     margin-top: 0.9rem;
-  }
-  .now-col {
-    flex: 1;
-    min-width: 0;
-  }
-  @media (max-width: 560px) {
-    .hero-now {
-      flex-direction: column;
-      align-items: stretch;
-    }
   }
   .pic {
     width: 72px;

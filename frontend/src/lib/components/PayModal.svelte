@@ -1,6 +1,32 @@
 <script lang="ts">
   import qrcode from 'qrcode-generator'
-  import { payModal, hidePay } from '../nostr/payModal.svelte'
+  import { payModal, hidePay, markPaid } from '../nostr/payModal.svelte'
+
+  // WebLN (Alby browser extension / Alby Hub on desktop) for one-click payment.
+  interface WebLN {
+    enable(): Promise<void>
+    sendPayment(invoice: string): Promise<{ preimage: string }>
+  }
+  const webln = $derived(
+    typeof window !== 'undefined' ? ((window as unknown as { webln?: WebLN }).webln ?? null) : null,
+  )
+  let paying = $state(false)
+  let payErr = $state('')
+
+  async function payWithExtension() {
+    if (!webln || paying) return
+    paying = true
+    payErr = ''
+    try {
+      await webln.enable()
+      await webln.sendPayment(payModal.invoice)
+      markPaid()
+    } catch (e) {
+      payErr = String((e as Error)?.message ?? e)
+    } finally {
+      paying = false
+    }
+  }
 
   const qrSrc = $derived.by(() => {
     if (!payModal.invoice) return ''
@@ -40,9 +66,18 @@
             <img class="qr" src={qrSrc} alt="invoice QR" width="220" height="220" />
           </a>
         {/if}
-        <a class="btn btn-primary big" href={`lightning:${payModal.invoice}`}>⚡ Open in wallet</a>
+        {#if webln}
+          <button class="btn btn-primary big" onclick={payWithExtension} disabled={paying}>
+            {paying ? 'Paying…' : '⚡ Pay now'}
+          </button>
+          {#if payErr}<p class="err">⚠ {payErr}</p>{/if}
+        {/if}
+        <!-- lightning: scheme → opens Alby Go on mobile (and the Alby extension on desktop). -->
+        <a class="btn {webln ? 'btn-ghost' : 'btn-primary'} big" href={`lightning:${payModal.invoice}`}>
+          📲 Open in Alby Go
+        </a>
         <button class="copy" onclick={copy}>{copied ? '✓ Copied' : 'Copy invoice'}</button>
-        <p class="hint">Scan or open in any Lightning wallet (e.g. Alby Go).</p>
+        <p class="hint">Pay with the Alby extension, scan the QR, or tap “Open in Alby Go” on mobile.</p>
         <button class="cancel" onclick={hidePay}>Cancel</button>
       {/if}
     </div>
@@ -116,6 +151,11 @@
     margin: 0;
     font-size: 0.74rem;
     color: var(--text-dim);
+  }
+  .err {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--danger);
   }
   .cancel {
     background: none;

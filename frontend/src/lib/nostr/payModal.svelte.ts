@@ -42,6 +42,10 @@ export function showPay(invoice: string, sats: number, label: string, verify?: s
   }
 }
 
+export function markPaid(): void {
+  state.paid = true
+}
+
 export function hidePay(): void {
   state.invoice = ''
   state.sats = 0

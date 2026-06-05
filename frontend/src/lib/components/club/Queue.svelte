@@ -33,6 +33,13 @@
     showLib = false
   }
 
+  // Drag-and-drop reordering of my set.
+  let dragIndex = $state<number | null>(null)
+  function onDrop(i: number) {
+    if (dragIndex !== null && dragIndex !== i) void moveTrack(groupId, dragIndex, i)
+    dragIndex = null
+  }
+
   let query = $state('')
   let results = $state<SearchHit[]>([])
   let searching = $state(false)
@@ -141,7 +148,17 @@
   {#if tracks.length > 0}
     <ul class="tracks">
       {#each tracks as track, i (track.videoId + i)}
-        <li class:played={track.active === false}>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <li
+          class:played={track.active === false}
+          class:dragging={dragIndex === i}
+          draggable="true"
+          ondragstart={() => (dragIndex = i)}
+          ondragover={(e) => e.preventDefault()}
+          ondrop={() => onDrop(i)}
+          ondragend={() => (dragIndex = null)}
+        >
+          <span class="grip" aria-hidden="true">⠿</span>
           <span class="t-idx">{i + 1}</span>
           <span class="t-title">{track.title}</span>
           <span class="dur">{fmt(track.duration)}</span>
@@ -276,6 +293,18 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.85rem;
+  }
+  .tracks li {
+    cursor: grab;
+  }
+  .tracks li.dragging {
+    opacity: 0.45;
+  }
+  .grip {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    cursor: grab;
+    user-select: none;
   }
   .reorder {
     display: inline-flex;

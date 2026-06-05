@@ -43,13 +43,10 @@
 </script>
 
 {#if show}
-  <div class="zap-wrap">
-    <button class="zap-btn" onclick={() => (open = !open)} disabled={!auth.canSign}>
-      <span class="bolt">⚡</span>
-      <span class="lbl">Zap {dj ? displayName(dj, djProfile) : 'the DJ'}</span>
-      {#if score > 0}<span class="score">{score} sats</span>{/if}
-    </button>
-  </div>
+  <button class="zap-mini" onclick={() => (open = !open)} disabled={!auth.canSign} title="Zap {displayName(dj, djProfile)}">
+    <span class="bolt">⚡</span>
+    {#if score > 0}<span class="score">{score}</span>{/if}
+  </button>
 
   {#if open}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -75,26 +72,23 @@
 {/if}
 
 <style>
-  .zap-wrap {
-    display: flex;
-    flex: 0 0 auto;
-  }
-  /* Compact pulsing zap button. */
-  .zap-btn {
+  /* Small inline zap chip — sits next to the DJ name. */
+  .zap-mini {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.2rem;
+    flex: 0 0 auto;
     border: none;
     border-radius: 999px;
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
-    font-weight: 700;
+    padding: 0.12rem 0.45rem;
+    font-size: 0.78rem;
+    font-weight: 800;
     color: #1a1205;
     cursor: pointer;
     background: linear-gradient(95deg, var(--amber), #ffd24a);
     animation: zap-pulse 1.6s ease-in-out infinite;
   }
-  .zap-btn:disabled {
+  .zap-mini:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     animation: none;
@@ -102,27 +96,23 @@
   @keyframes zap-pulse {
     0%,
     100% {
-      transform: scale(1);
-      box-shadow: 0 0 0 0 rgba(255, 154, 31, 0.55), 0 0 14px rgba(255, 154, 31, 0.45);
+      box-shadow: 0 0 0 0 rgba(255, 154, 31, 0.5), 0 0 6px rgba(255, 154, 31, 0.4);
     }
     50% {
-      transform: scale(1.04);
-      box-shadow: 0 0 0 8px rgba(255, 154, 31, 0), 0 0 26px rgba(255, 154, 31, 0.8);
+      box-shadow: 0 0 0 5px rgba(255, 154, 31, 0), 0 0 14px rgba(255, 154, 31, 0.7);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .zap-btn {
+    .zap-mini {
       animation: none;
     }
   }
   .bolt {
-    font-size: 1rem;
+    font-size: 0.82rem;
+    line-height: 1;
   }
   .score {
-    background: rgba(0, 0, 0, 0.22);
-    border-radius: 999px;
-    padding: 0.1rem 0.55rem;
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     font-weight: 700;
   }
   .backdrop {
