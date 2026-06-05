@@ -1,0 +1,33 @@
+[Unit]
+Description=zapclub.io NIP-29 relay (khatru + relay29)
+Documentation=https://github.com/satoshidude/zapclub.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zapclub
+Group=zapclub
+EnvironmentFile=/etc/zapclub/relay.env
+ExecStart=/opt/zapclub/zapclub-relay
+WorkingDirectory=/var/lib/zapclub-relay
+Restart=on-failure
+RestartSec=3
+
+# Hardening — relay only needs to listen on loopback and write its badger DB.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadWritePaths=/var/lib/zapclub-relay
+
+[Install]
+WantedBy=multi-user.target

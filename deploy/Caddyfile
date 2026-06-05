@@ -1,0 +1,35 @@
+# zapclub.io — Caddy reverse proxy / static host
+# www.zapclub.io currently points to a different IP, so it is intentionally
+# NOT included here (ACME cert would fail). Add it once DNS points at this box.
+#
+# The NIP-29 relay (relay.zapclub.io) listens on 127.0.0.1:3334 and will be
+# proxied here once it is deployed — block stubbed below, commented out.
+
+{
+	email admin@zapclub.io
+}
+
+zapclub.io {
+	root * /var/www/zapclub
+	file_server
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+relay.zapclub.io {
+	# Nostr relay — WebSocket upgrade is handled transparently by reverse_proxy.
+	reverse_proxy 127.0.0.1:3334
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+	}
+}
