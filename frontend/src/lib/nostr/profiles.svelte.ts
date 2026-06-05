@@ -23,6 +23,11 @@ export function useProfile(pubkey: string): ProfileMetadata | null {
   return cache[pubkey] ?? null
 }
 
+/** Updates the cache so views re-render after the user edits their own profile. */
+export function setProfileCache(pubkey: string, profile: ProfileMetadata | null): void {
+  cache[pubkey] = profile
+}
+
 export function displayName(pubkey: string, profile: ProfileMetadata | null): string {
   return profile?.display_name || profile?.name || npubEncode(pubkey).slice(0, 12) + '…'
 }

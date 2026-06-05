@@ -6,6 +6,7 @@ export type Route =
   | { name: 'club'; id: string }
   | { name: 'user'; npub: string }
   | { name: 'admin' }
+  | { name: 'howto' }
 
 function parse(path: string): Route {
   const club = path.match(/^\/club\/([\w-]+)\/?$/)
@@ -13,6 +14,7 @@ function parse(path: string): Route {
   const user = path.match(/^\/user\/(npub1[\w]+)\/?$/)
   if (user) return { name: 'user', npub: user[1] }
   if (/^\/admin\/?$/.test(path)) return { name: 'admin' }
+  if (/^\/howto\/?$/.test(path)) return { name: 'howto' }
   return { name: 'home' }
 }
 
@@ -49,4 +51,8 @@ export function goUser(npub: string): void {
 
 export function goAdmin(): void {
   navigate('/admin')
+}
+
+export function goHowto(): void {
+  navigate('/howto')
 }

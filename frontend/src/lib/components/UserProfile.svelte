@@ -13,8 +13,11 @@
     copyTrackTo,
   } from '../nostr/playlists.svelte'
   import { fetchUserClubActivity } from '../nostr/groups'
-  import { goClub } from '../router.svelte'
+  import { goClub, goUser, goHowto } from '../router.svelte'
   import { clubAvatar } from '../avatar'
+  import { npubEncode } from 'nostr-tools/nip19'
+  import { publishMyProfile } from '../nostr/profileEdit'
+  import { fetchReceivedZaps, type ReceivedZaps } from '../nostr/zaps.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
@@ -34,6 +37,7 @@
   let loading = $state(true)
   let hosting = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
+  let received = $state<ReceivedZaps | null>(null)
 
   $effect(() => {
     const pk = pubkey
@@ -56,7 +60,49 @@
       hosting = a.hosting
       djingIn = a.djingIn
     })
+    // Zaps received (all-time), grouped by sender.
+    received = null
+    void fetchReceivedZaps(pk).then((r) => (received = r))
   })
+
+  // ── Profile editor (own profile only) ──────────────────────────────────
+  let editing = $state(false)
+  let eName = $state('')
+  let eAbout = $state('')
+  let ePic = $state('')
+  let eLud16 = $state('')
+  let eNip05 = $state('')
+  let saving = $state(false)
+  let saveErr = $state('')
+
+  function openEditor() {
+    eName = profile?.display_name || profile?.name || ''
+    eAbout = profile?.about || ''
+    ePic = profile?.picture || ''
+    eLud16 = (profile?.lud16 as string) || ''
+    eNip05 = profile?.nip05 || ''
+    saveErr = ''
+    editing = true
+  }
+
+  async function saveProfile() {
+    saving = true
+    saveErr = ''
+    try {
+      await publishMyProfile({
+        display_name: eName.trim(),
+        about: eAbout.trim(),
+        picture: ePic.trim(),
+        lud16: eLud16.trim(),
+        nip05: eNip05.trim(),
+      })
+      editing = false
+    } catch (e) {
+      saveErr = String((e as Error)?.message ?? e)
+    } finally {
+      saving = false
+    }
+  }
 
   const list = $derived(isMe ? playlists.mine : othersPlaylists)
 
@@ -98,8 +144,62 @@
       <h1>{displayName(pubkey, profile)}</h1>
       <span class="npub">{npub.slice(0, 18)}…</span>
       {#if profile?.about}<p class="pabout">{profile.about}</p>{/if}
+      {#if profile?.lud16}
+        <p class="plud">⚡ {profile.lud16}</p>
+      {:else if isMe}
+        <p class="plud missing">⚡ No lightning address yet — add one to receive sats.</p>
+      {/if}
     </div>
+    {#if isMe}
+      <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
+    {/if}
   </header>
+
+  {#if editing}
+    <div class="card editor">
+      <h2>Edit profile</h2>
+      <label class="fld">Display name
+        <input class="in" bind:value={eName} maxlength="60" placeholder="Your name" />
+      </label>
+      <label class="fld">About
+        <textarea class="in" bind:value={eAbout} rows="2" maxlength="280" placeholder="A short bio"></textarea>
+      </label>
+      <label class="fld">Picture URL
+        <input class="in" bind:value={ePic} placeholder="https://…" />
+      </label>
+      <label class="fld">⚡ Lightning address (lud16)
+        <input class="in" bind:value={eLud16} placeholder="you@walletofsatoshi.com" autocomplete="off" />
+        <span class="fhint">Needed to receive zaps. No address? See the <a href="/howto" onclick={(e) => { e.preventDefault(); goHowto() }}>How-to</a> for one-click providers.</span>
+      </label>
+      <label class="fld">NIP-05 (optional)
+        <input class="in" bind:value={eNip05} placeholder="you@domain.com" autocomplete="off" />
+      </label>
+      {#if saveErr}<p class="err">⚠ {saveErr}</p>{/if}
+      <div class="editor-actions">
+        <button class="btn btn-primary btn-sm" onclick={saveProfile} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+        <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)} disabled={saving}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
+  {#if received && received.total > 0}
+    <section class="card zaps-recv">
+      <h2>⚡ Received <span class="recv-total">{received.total.toLocaleString()} sats</span>
+        <span class="count">from {received.bySender.length} {received.bySender.length === 1 ? 'person' : 'people'}</span>
+      </h2>
+      <ul class="senders">
+        {#each received.bySender.slice(0, 12) as s (s.sender)}
+          {@const sp = useProfile(s.sender)}
+          <li>
+            <img class="av" src={avatarUrl(s.sender, sp)} alt="" width="22" height="22" />
+            <a class="who" href={`/user/${npubEncode(s.sender)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(s.sender)) }}>{displayName(s.sender, sp)}</a>
+            <span class="s-sats">{s.sats.toLocaleString()} sats</span>
+            <span class="s-count">{s.count}×</span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   {#snippet clubRow(c: Club, live: boolean)}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -227,6 +327,7 @@
   }
   .pinfo {
     min-width: 0;
+    flex: 1;
   }
   h1 {
     margin: 0;
@@ -241,6 +342,131 @@
     margin: 0.4rem 0 0;
     color: var(--text-dim);
     font-size: 0.9rem;
+  }
+  .plud {
+    margin: 0.35rem 0 0;
+    font-size: 0.82rem;
+    color: var(--amber);
+    font-weight: 600;
+  }
+  .plud.missing {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-style: italic;
+  }
+  .edit-btn {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .edit-btn:hover {
+    border-color: var(--accent-2);
+    color: var(--text);
+  }
+  .editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    margin-top: 1rem;
+  }
+  .editor h2 {
+    margin: 0;
+    font-size: 1.05rem;
+  }
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .in {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.7rem;
+    color: var(--text);
+    font-size: 0.88rem;
+    font-family: inherit;
+  }
+  .in:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+  .fhint {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  .editor-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .err {
+    color: var(--danger);
+    font-size: 0.82rem;
+    margin: 0;
+  }
+  .zaps-recv {
+    margin-top: 1rem;
+  }
+  .zaps-recv h2 {
+    margin: 0 0 0.6rem;
+    font-size: 1.05rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .recv-total {
+    color: var(--amber);
+  }
+  .senders {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .senders li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .senders .av {
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+    flex: 0 0 auto;
+  }
+  .senders .who {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .senders .who:hover {
+    color: var(--accent-2);
+  }
+  .s-sats {
+    color: var(--amber);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .s-count {
+    color: var(--text-dim);
+    font-size: 0.74rem;
   }
   .clubs {
     margin-top: 1.4rem;

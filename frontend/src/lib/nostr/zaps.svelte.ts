@@ -121,7 +121,9 @@ export async function pollPaid(verifyUrl: string, stillOpen: () => boolean): Pro
   return false
 }
 
-function parseReceipt(ev: Event): { dj: string; sats: number } | null {
+// Parses a 9735 zap receipt to {recipient, sender, sats}, verifying the embedded 9734
+// request. sender = the zap-request author (the person who zapped).
+function parseReceiptDetail(ev: Event): { recipient: string; sender: string; sats: number } | null {
   const recipient = ev.tags.find((t) => t[0] === 'p')?.[1]
   const desc = ev.tags.find((t) => t[0] === 'description')?.[1]
   if (!recipient || !desc) return null
@@ -136,7 +138,47 @@ function parseReceipt(ev: Event): { dj: string; sats: number } | null {
   const amountTag = req.tags.find((t) => t[0] === 'amount')?.[1]
   const sats = amountTag ? Math.round(Number(amountTag) / 1000) : 0
   if (!sats || sats <= 0) return null
-  return { dj: recipient, sats }
+  return { recipient, sender: req.pubkey, sats }
+}
+
+function parseReceipt(ev: Event): { dj: string; sats: number } | null {
+  const d = parseReceiptDetail(ev)
+  return d ? { dj: d.recipient, sats: d.sats } : null
+}
+
+export interface ReceivedZaps {
+  total: number
+  count: number
+  bySender: { sender: string; sats: number; count: number }[]
+}
+
+/** Aggregates all zaps a user has RECEIVED (9735 with #p = pubkey), grouped by sender. */
+export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
+  const evs = await pool.querySync(
+    ZAP_RELAYS,
+    { kinds: [KIND_ZAP_RECEIPT], '#p': [pubkey] },
+    { maxWait: 5000 },
+  )
+  const map = new Map<string, { sats: number; count: number }>()
+  let total = 0
+  let count = 0
+  const dedup = new Set<string>()
+  for (const ev of evs) {
+    if (dedup.has(ev.id)) continue
+    dedup.add(ev.id)
+    const d = parseReceiptDetail(ev)
+    if (!d || d.recipient !== pubkey) continue
+    total += d.sats
+    count++
+    const cur = map.get(d.sender) ?? { sats: 0, count: 0 }
+    cur.sats += d.sats
+    cur.count++
+    map.set(d.sender, cur)
+  }
+  const bySender = [...map.entries()]
+    .map(([sender, v]) => ({ sender, ...v }))
+    .sort((a, b) => b.sats - a.sats)
+  return { total, count, bySender }
 }
 
 const seen = new Set<string>()

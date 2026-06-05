@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome } from './lib/router.svelte'
+  import { router, goHome, goHowto } from './lib/router.svelte'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
   import LoginDialog from './lib/components/LoginDialog.svelte'
@@ -9,6 +9,7 @@
   import Turntable from './lib/components/Turntable.svelte'
   import UserProfile from './lib/components/UserProfile.svelte'
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
+  import HowTo from './lib/components/HowTo.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
@@ -57,6 +58,8 @@
     {/key}
   {:else if router.route.name === 'admin'}
     <AdminDashboard />
+  {:else if router.route.name === 'howto'}
+    <HowTo />
   {:else}
     <ClubList />
   {/if}
@@ -67,6 +70,7 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
+  <button class="howto-link" onclick={goHowto}>How-to</button>
   <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
 </footer>
 
@@ -98,7 +102,8 @@
     letter-spacing: -0.02em;
   }
   .brand .tld {
-    color: var(--accent);
+    /* same purple as the turntable logo */
+    color: #a855f7;
     font-weight: 700;
   }
   .reconnect {
@@ -141,6 +146,18 @@
   .tip:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .howto-link {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+    text-decoration: underline;
+    padding: 0.2rem 0.4rem;
+  }
+  .howto-link:hover {
+    color: var(--accent);
   }
   .foot-note {
     flex-basis: 100%;
