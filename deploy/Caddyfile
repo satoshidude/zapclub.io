@@ -10,17 +10,25 @@
 }
 
 zapclub.io {
-	root * /var/www/zapclub
 	encode zstd gzip
 
 	# YouTube search/playlist proxy → relay (yt-dlp). Same-origin so the frontend
-	# avoids CORS; the relay rate-limits these per IP.
-	@yt path /yt-search /yt-playlist
-	reverse_proxy @yt 127.0.0.1:3334
+	# avoids CORS; the relay rate-limits these per IP. `handle` blocks are mutually
+	# exclusive and ordered, so these win over the SPA fallback (try_files would
+	# otherwise rewrite /yt-search → /index.html before any reverse_proxy matcher).
+	handle /yt-search* {
+		reverse_proxy 127.0.0.1:3334
+	}
+	handle /yt-playlist* {
+		reverse_proxy 127.0.0.1:3334
+	}
 
-	# SPA fallback: history-router routes like /club/<id> serve index.html.
-	try_files {path} /index.html
-	file_server
+	# Everything else: static SPA with history-router fallback.
+	handle {
+		root * /var/www/zapclub
+		try_files {path} /index.html
+		file_server
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
