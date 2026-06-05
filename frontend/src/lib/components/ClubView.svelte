@@ -288,13 +288,6 @@
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
       />
     </div>
-    <ComingNext />
-  </header>
-
-  {#if error}<p class="err">⚠ {error}</p>{/if}
-
-  <!-- Player + now-playing + coming-up: always visible under the hero. -->
-  <section class="stream">
     <Player
       canHear={isMember}
       ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
@@ -305,6 +298,13 @@
       onended={() => onTrackEnded(groupId)}
       onerror={(vid) => onTrackError(groupId, vid)}
     />
+    <ComingNext />
+  </header>
+
+  {#if error}<p class="err">⚠ {error}</p>{/if}
+
+  <!-- Stage: always visible under the hero. -->
+  <section class="stream">
     <Stage {groupId} {canModerate} {isMember} />
   </section>
 
