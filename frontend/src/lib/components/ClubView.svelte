@@ -34,6 +34,7 @@
   import NowPlaying from './club/NowPlaying.svelte'
   import ComingNext from './club/ComingNext.svelte'
   import Chat from './club/Chat.svelte'
+  import Turntable from './Turntable.svelte'
   import type { Club, ClubMember } from '../nostr/types'
 
   let { groupId }: { groupId: string } = $props()
@@ -183,7 +184,7 @@
 <div class="wrap">
   <header class="hero">
     <div class="pic" style:background-image={club?.picture ? `url(${club.picture})` : 'none'}>
-      {#if !club?.picture}🪩{/if}
+      {#if !club?.picture}<Turntable size={52} />{/if}
     </div>
     <div class="info">
       <h1>{club?.name ?? 'Loading…'}</h1>
