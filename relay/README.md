@@ -38,12 +38,24 @@ export RELAY_DB=$(mktemp -d) RELAY_PORT=3334
 go run .                      # serves on 127.0.0.1:3334
 ```
 
-## E2E test
+## E2E test (self-contained)
+
+```sh
+cd relay && ./e2e.sh     # builds + boots a throwaway relay, runs grouptest.mjs, tears down
+```
+
+`e2e.sh` generates fresh keys, boots a temp-DB relay with `RELAY_SUPERADMIN` set to the
+test admin key, and runs the full suite — **including the admin NIP-98 path**: ban (+
+event purge), banned-member write rejection, NIP-98 token replay → 401, unban, and
+delete-club (metadata gone). No manual setup. Expect `ALL PASSED`.
+
+## E2E test (manual, against a running relay)
 
 `grouptest.mjs` verifies the lessons code review can't catch: open-club
 auto-join, now_playing (30100) ReplaceEvent dedup, and non-member write
-rejection. Needs `nostr-tools` reachable (ESM ignores `NODE_PATH`, so symlink
-`node_modules` to an install that has it):
+rejection (plus the admin tests when `ADMIN_SK`/`ADMIN_URL` are set). Needs
+`nostr-tools` reachable (ESM ignores `NODE_PATH`, so symlink `node_modules` to
+an install that has it):
 
 ```sh
 ln -sfn <path-to>/node_modules node_modules
