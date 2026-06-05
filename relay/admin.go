@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fiatjaf/eventstore/badger"
+	"github.com/fiatjaf/relay29"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -133,8 +134,9 @@ func verifyAdmin(r *http.Request) bool {
 
 // adminAPI exposes superadmin-only relay management over HTTP (NIP-98 authenticated).
 type adminAPI struct {
-	db   *badger.BadgerBackend
-	bans *banStore
+	db    *badger.BadgerBackend
+	bans  *banStore
+	state *relay29.State
 }
 
 func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +212,9 @@ func (a *adminAPI) deleteClub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// Evict the live group from relay29's in-memory map FIRST — otherwise the relay keeps
+	// regenerating/serving its 39000/39002 metadata and the club reappears after purging.
+	a.state.Groups.Delete(body.GroupID)
 	// All club content + management events carry an h-tag = group id.
 	n := a.purgeFilter(ctx, nostr.Filter{Tags: nostr.TagMap{"h": []string{body.GroupID}}})
 	// Relay-signed metadata/admins/members are addressable (d = group id).
@@ -217,7 +222,7 @@ func (a *adminAPI) deleteClub(w http.ResponseWriter, r *http.Request) {
 		Tags:  nostr.TagMap{"d": []string{body.GroupID}},
 		Kinds: []int{39000, 39001, 39002, 39003},
 	})
-	log.Printf("admin: deleted club %s, purged %d events (in-memory group clears on restart)", body.GroupID, n)
+	log.Printf("admin: deleted club %s (evicted from memory), purged %d events", body.GroupID, n)
 	a.writeJSON(w, map[string]any{"ok": true, "purged": n})
 }
 

@@ -116,8 +116,8 @@
     letter-spacing: -0.02em;
   }
   .brand .tld {
-    /* same green as the turntable logo */
-    color: #22c55e;
+    /* Nostr purple */
+    color: #8e30eb;
     font-weight: 700;
   }
   .reconnect {

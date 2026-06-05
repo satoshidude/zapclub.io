@@ -137,7 +137,7 @@ func main() {
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans}
+	admin := &adminAPI{db: db, bans: bans, state: state}
 	relay.Router().HandleFunc("/admin/bans", admin.handle)
 	relay.Router().HandleFunc("/admin/ban", admin.handle)
 	relay.Router().HandleFunc("/admin/unban", admin.handle)
