@@ -10,7 +10,7 @@
     parseMembers,
     parseAdmins,
   } from '../nostr/groups'
-  import { goHome, goUser } from '../router.svelte'
+  import { goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
   import { npubEncode } from 'nostr-tools/nip19'
@@ -180,11 +180,9 @@
 </script>
 
 <div class="wrap">
-  <button class="back" onclick={goHome}>← All clubs</button>
-
   <header class="hero">
     <div class="pic" style:background-image={club?.picture ? `url(${club.picture})` : 'none'}>
-      {#if !club?.picture}⚡{/if}
+      {#if !club?.picture}🪩{/if}
     </div>
     <div class="info">
       <h1>{club?.name ?? 'Loading…'}</h1>
@@ -280,15 +278,6 @@
     max-width: 680px;
     margin: 0 auto;
     padding: 1.2rem 1rem 4rem;
-  }
-  .back {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    font-size: 0.85rem;
-    margin-bottom: 1rem;
   }
   .hero {
     display: flex;

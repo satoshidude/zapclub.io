@@ -5,6 +5,7 @@
   import LoginDialog from './lib/components/LoginDialog.svelte'
   import ClubList from './lib/components/ClubList.svelte'
   import ClubView from './lib/components/ClubView.svelte'
+  import Nav from './lib/components/Nav.svelte'
 
   startConnectionWatch()
 </script>
@@ -29,7 +30,8 @@
     </svg>
     <span>zapclub<span class="dim">.io</span></span>
   </div>
-  <LoginButton />
+  <Nav />
+  <div class="account"><LoginButton /></div>
 </header>
 
 {#if connection.known && !connection.clubConnected}
@@ -44,12 +46,13 @@
   {:else if router.route.name === 'user'}
     <div class="stub">
       <p>Profiles are coming soon.</p>
-      <button class="btn btn-ghost btn-sm" onclick={goHome}>← Back to clubs</button>
     </div>
   {:else}
     <ClubList />
   {/if}
 </main>
+
+<Nav mobile />
 
 <LoginDialog />
 
@@ -116,5 +119,11 @@
     flex-direction: column;
     gap: 1rem;
     align-items: center;
+  }
+  /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
+  @media (max-width: 560px) {
+    main {
+      padding-bottom: calc(3.6rem + env(safe-area-inset-bottom));
+    }
   }
 </style>
