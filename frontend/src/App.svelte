@@ -8,6 +8,7 @@
   import Nav from './lib/components/Nav.svelte'
   import Turntable from './lib/components/Turntable.svelte'
   import UserProfile from './lib/components/UserProfile.svelte'
+  import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
@@ -35,7 +36,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
     <Turntable size={32} />
-    <span>zapclub<span class="dim">.io</span></span>
+    <span>zapclub<span class="tld">.io</span></span>
   </div>
   <Nav />
   <div class="account"><LoginButton /></div>
@@ -54,6 +55,8 @@
     {#key router.route.npub}
       <UserProfile npub={router.route.npub} />
     {/key}
+  {:else if router.route.name === 'admin'}
+    <AdminDashboard />
   {:else}
     <ClubList />
   {/if}
@@ -94,8 +97,8 @@
     cursor: pointer;
     letter-spacing: -0.02em;
   }
-  .brand .dim {
-    color: var(--text-dim);
+  .brand .tld {
+    color: var(--accent);
     font-weight: 700;
   }
   .reconnect {

@@ -83,6 +83,19 @@ func main() {
 	relay.Info.Name = "zapclub"
 	relay.Info.Description = "NIP-29 relay for zapclub.io — collaborative, decentralized music"
 
+	// Relay-wide ban list (superadmin-managed). A banned pubkey can read public clubs but
+	// can no longer write ANY event — so it's locked out of joining/DJing/chatting. Checked
+	// first (cheapest reject). Their existing events are purged when the ban is issued.
+	bans := newBanStore(env("RELAY_BANLIST", "./banned.json"))
+	relay.RejectEvent = append(relay.RejectEvent,
+		func(_ context.Context, evt *nostr.Event) (bool, string) {
+			if bans.isBanned(evt.PubKey) {
+				return true, "blocked: banned by the relay administrator"
+			}
+			return false, ""
+		},
+	)
+
 	// Chat (kind 9): streng — Burst 6, Auffüllung 1 alle 3 s (~20/min). Stoppt
 	// gescriptete Floods, erlaubt normales Chatten. Kind 9 ist persistent → Spam-Vektor.
 	chatLimiter := newKindLimiter(6, 1.0/3.0, "rate-limited: too many chat messages", 9)
@@ -121,6 +134,14 @@ func main() {
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
+
+	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
+	// before the "/" catch-all so the exact paths win.
+	admin := &adminAPI{db: db, bans: bans}
+	relay.Router().HandleFunc("/admin/bans", admin.handle)
+	relay.Router().HandleFunc("/admin/ban", admin.handle)
+	relay.Router().HandleFunc("/admin/unban", admin.handle)
+	relay.Router().HandleFunc("/admin/delete-club", admin.handle)
 
 	relay.Router().HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "zapclub relay — NIP-29. Use a zapclub/nostr client to connect.")

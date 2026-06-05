@@ -1,9 +1,10 @@
 <script lang="ts">
   import { npubEncode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
-  import { router, goHome, goUser } from '../router.svelte'
+  import { router, goHome, goUser, goAdmin } from '../router.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
   import { useProfile, avatarUrl } from '../nostr/profiles.svelte'
+  import { isSuperadmin } from '../nostr/admin'
 
   // Mounted twice: once in the header (desktop tabs) and once at top level
   // (mobile fixed bottom bar). `mobile` selects which one this instance is —
@@ -13,6 +14,7 @@
 
   const onHome = $derived(router.route.name === 'home')
   const onProfile = $derived(router.route.name === 'user')
+  const onAdmin = $derived(router.route.name === 'admin')
   const myProfile = $derived(auth.pubkey ? useProfile(auth.pubkey) : null)
 
   function openProfile() {
@@ -36,6 +38,13 @@
       <span class="lbl">Sign in</span>
     {/if}
   </button>
+
+  {#if isSuperadmin()}
+    <button class="tab" class:active={onAdmin} onclick={goAdmin}>
+      <span class="ico" aria-hidden="true">⚙️</span>
+      <span class="lbl">Admin</span>
+    </button>
+  {/if}
 </nav>
 
 <style>

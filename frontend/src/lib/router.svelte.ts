@@ -1,16 +1,18 @@
-// Minimal history router for zapclub. Routes: "/", "/club/<id>", "/user/<npub>".
+// Minimal history router for zapclub. Routes: "/", "/club/<id>", "/user/<npub>", "/admin".
 // Caddy serves index.html for all paths (SPA fallback).
 
 export type Route =
   | { name: 'home' }
   | { name: 'club'; id: string }
   | { name: 'user'; npub: string }
+  | { name: 'admin' }
 
 function parse(path: string): Route {
   const club = path.match(/^\/club\/([\w-]+)\/?$/)
   if (club) return { name: 'club', id: club[1] }
   const user = path.match(/^\/user\/(npub1[\w]+)\/?$/)
   if (user) return { name: 'user', npub: user[1] }
+  if (/^\/admin\/?$/.test(path)) return { name: 'admin' }
   return { name: 'home' }
 }
 
@@ -43,4 +45,8 @@ export function goClub(id: string): void {
 
 export function goUser(npub: string): void {
   navigate(`/user/${npub}`)
+}
+
+export function goAdmin(): void {
+  navigate('/admin')
 }
