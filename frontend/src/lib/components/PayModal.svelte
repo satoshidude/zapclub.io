@@ -40,6 +40,13 @@
     }
   })
 
+  // Once paid (WebLN success, verify poll, or manual confirm) flash "Paid!" then close.
+  $effect(() => {
+    if (!payModal.paid) return
+    const t = setTimeout(hidePay, 1600)
+    return () => clearTimeout(t)
+  })
+
   let copied = $state(false)
   async function copy() {
     try {
@@ -78,6 +85,8 @@
         </a>
         <button class="copy" onclick={copy}>{copied ? '✓ Copied' : 'Copy invoice'}</button>
         <p class="hint">Pay with the Alby extension, scan the QR, or tap “Open in Alby Go” on mobile.</p>
+        <!-- No reliable auto-detect (LNURL endpoint has no verify URL) → confirm manually. -->
+        <button class="btn btn-ghost done" onclick={markPaid}>✓ I’ve paid</button>
         <button class="cancel" onclick={hidePay}>Cancel</button>
       {/if}
     </div>
@@ -141,6 +150,11 @@
   .copy:hover {
     border-color: var(--accent-2);
     color: var(--text);
+  }
+  .done {
+    width: 100%;
+    justify-content: center;
+    color: var(--accent);
   }
   .paid {
     color: var(--accent);

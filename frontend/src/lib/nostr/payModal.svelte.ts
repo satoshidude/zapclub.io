@@ -1,4 +1,4 @@
-import { pollPaid } from './zaps.svelte'
+import { pollPaid, creditZap } from './zaps.svelte'
 
 // Global "pay this Lightning invoice" modal — shared by the DJ zap button and the
 // footer donation. Shows a QR + "open in wallet" + copy, and auto-closes (paid state)
@@ -8,9 +8,11 @@ interface PayState {
   sats: number
   label: string
   paid: boolean
+  /** Zap recipient (DJ pubkey) — credited locally on payment. Empty for donations. */
+  dj: string
 }
 
-const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false })
+const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '' })
 
 export const payModal = {
   get open() {
@@ -30,20 +32,29 @@ export const payModal = {
   },
 }
 
-export function showPay(invoice: string, sats: number, label: string, verify?: string): void {
+export function showPay(
+  invoice: string,
+  sats: number,
+  label: string,
+  opts: { verify?: string; dj?: string } = {},
+): void {
   state.invoice = invoice
   state.sats = sats
   state.label = label
   state.paid = false
-  if (verify) {
-    void pollPaid(verify, () => state.invoice === invoice).then((ok) => {
-      if (ok && state.invoice === invoice) state.paid = true
+  state.dj = opts.dj ?? ''
+  if (opts.verify) {
+    void pollPaid(opts.verify, () => state.invoice === invoice).then((ok) => {
+      if (ok && state.invoice === invoice) markPaid()
     })
   }
 }
 
+/** Marks the current invoice paid and optimistically credits the DJ's zap score. */
 export function markPaid(): void {
+  if (state.paid) return
   state.paid = true
+  if (state.dj && state.invoice) creditZap(state.dj, state.sats, state.invoice)
 }
 
 export function hidePay(): void {
@@ -51,4 +62,5 @@ export function hidePay(): void {
   state.sats = 0
   state.label = ''
   state.paid = false
+  state.dj = ''
 }

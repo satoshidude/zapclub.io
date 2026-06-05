@@ -235,8 +235,6 @@
       <div class="info">
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
-          {#if club?.open}<span class="tag">open</span>{/if}
-          {#if club?.isPublic}<span class="tag">public</span>{/if}
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
           {#if owner}
             {@const op = useProfile(owner)}

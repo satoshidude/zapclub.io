@@ -45,7 +45,7 @@
       open = false
       comment = ''
       custom = ''
-      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, verify)
+      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj })
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {

@@ -140,13 +140,40 @@ function parseReceipt(ev: Event): { dj: string; sats: number } | null {
 }
 
 const seen = new Set<string>()
+// bolt11 invoices already counted — so an optimistic local credit and the later 9735
+// receipt for the SAME zap don't double-count (and vice versa).
+const creditedInvoices = new Set<string>()
+
+function applyZap(dj: string, sats: number): void {
+  state.scoreByDj[dj] = (state.scoreByDj[dj] ?? 0) + sats
+  state.lastZap = { dj, sats, at: Date.now() }
+}
+
 export function ingestZapReceipt(ev: Event): void {
   if (seen.has(ev.id)) return
   seen.add(ev.id)
   const r = parseReceipt(ev)
   if (!r) return
-  state.scoreByDj[r.dj] = (state.scoreByDj[r.dj] ?? 0) + r.sats
-  state.lastZap = { dj: r.dj, sats: r.sats, at: Date.now() }
+  const inv = ev.tags.find((t) => t[0] === 'bolt11')?.[1]
+  if (inv) {
+    if (creditedInvoices.has(inv)) return // already credited optimistically
+    creditedInvoices.add(inv)
+  }
+  applyZap(r.dj, r.sats)
+}
+
+/**
+ * Optimistically credits a confirmed zap locally, without waiting for the 9735 receipt
+ * (which is slow/unreliable on public relays). Idempotent per invoice, so the receipt —
+ * if it ever lands — won't double-count. Lets the zapper see their zap immediately.
+ */
+export function creditZap(dj: string, sats: number, invoice?: string): void {
+  if (!dj || sats <= 0) return
+  if (invoice) {
+    if (creditedInvoices.has(invoice)) return
+    creditedInvoices.add(invoice)
+  }
+  applyZap(dj, sats)
 }
 
 /** Subscribes to zap receipts (9735) for the stage DJs on the public relays. */
@@ -164,4 +191,5 @@ export function resetZaps(): void {
   state.scoreByDj = {}
   state.lastZap = null
   seen.clear()
+  creditedInvoices.clear()
 }

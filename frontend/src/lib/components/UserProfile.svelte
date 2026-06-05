@@ -101,16 +101,28 @@
     </div>
   </header>
 
+  {#snippet clubRow(c: Club, live: boolean)}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="club-row" class:live role="button" tabindex="0" onclick={() => goClub(c.id)}>
+      {#if live}<span class="live-badge">● on stage</span>{/if}
+      <div class="club-pic"><img src={c.picture || clubAvatar(c.owner || c.id)} alt="" /></div>
+      <div class="club-meta">
+        <div class="club-name">{c.name}</div>
+        {#if c.about}<div class="club-about">{c.about}</div>{/if}
+        <div class="club-tags">
+          {#if c.open}<span class="ctag">open</span>{/if}
+          {#if c.isPublic}<span class="ctag">public</span>{/if}
+          <span class="ctag">👥 {c.memberCount ?? 0} member{(c.memberCount ?? 0) === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+    </div>
+  {/snippet}
+
   {#if djingIn.length}
     <section class="clubs">
       <h2>On stage now <span class="live-dot" aria-hidden="true"></span></h2>
-      <div class="club-grid">
-        {#each djingIn as c (c.id)}
-          <button class="club-card live" onclick={() => goClub(c.id)}>
-            <img class="club-pic" src={c.picture || clubAvatar(c.owner || c.id)} alt="" />
-            <span class="club-name">{c.name}</span>
-          </button>
-        {/each}
+      <div class="club-list">
+        {#each djingIn as c (c.id)}{@render clubRow(c, true)}{/each}
       </div>
     </section>
   {/if}
@@ -118,13 +130,8 @@
   {#if hosting.length}
     <section class="clubs">
       <h2>Hosting <span class="count">{hosting.length}</span></h2>
-      <div class="club-grid">
-        {#each hosting as c (c.id)}
-          <button class="club-card" onclick={() => goClub(c.id)}>
-            <img class="club-pic" src={c.picture || clubAvatar(c.owner || c.id)} alt="" />
-            <span class="club-name">{c.name}</span>
-          </button>
-        {/each}
+      <div class="club-list">
+        {#each hosting as c (c.id)}{@render clubRow(c, false)}{/each}
       </div>
     </section>
   {/if}
@@ -238,31 +245,32 @@
   .clubs {
     margin-top: 1.4rem;
   }
-  .club-grid {
+  .club-list {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.6rem;
     margin-top: 0.6rem;
   }
-  .club-card {
+  .club-row {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.9rem;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 0.45rem 0.75rem 0.45rem 0.45rem;
+    padding: 0.8rem;
     cursor: pointer;
     color: var(--text);
     transition: border-color 0.15s ease, transform 0.08s ease;
   }
-  .club-card:hover {
+  .club-row:hover {
     border-color: var(--accent-2);
   }
-  .club-card:active {
+  .club-row:active {
     transform: translateY(1px);
   }
-  .club-card.live {
+  .club-row.live {
     border-color: var(--accent);
     animation: club-pulse 1.6s ease-in-out infinite;
   }
@@ -276,24 +284,62 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .club-card.live {
+    .club-row.live {
       animation: none;
     }
   }
+  .live-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 0.64rem;
+    font-weight: 800;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
   .club-pic {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    object-fit: cover;
+    width: 52px;
+    height: 52px;
+    flex: 0 0 52px;
+    border-radius: 11px;
+    overflow: hidden;
     background: var(--bg-elev-2);
-    flex: 0 0 auto;
+  }
+  .club-pic img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .club-meta {
+    flex: 1;
+    min-width: 0;
   }
   .club-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    max-width: 12rem;
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .club-about {
+    font-size: 0.82rem;
+    color: var(--text-dim);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 0.35rem;
+  }
+  .club-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.15rem;
+  }
+  .ctag {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
     white-space: nowrap;
   }
   .live-dot {

@@ -22,7 +22,7 @@
     donating = true
     try {
       const { invoice, verify } = await requestZapInvoice('', DONATE_LUD16, sats, 'zapclub donation')
-      showPay(invoice, sats, 'Tip zapclub', verify)
+      showPay(invoice, sats, 'Tip zapclub', { verify })
     } catch {
       /* ignore — user can retry */
     } finally {
