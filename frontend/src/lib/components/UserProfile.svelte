@@ -24,6 +24,7 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { publishMyProfile } from '../nostr/profileEdit'
   import { fetchReceivedZaps, type ReceivedZaps } from '../nostr/zaps.svelte'
+  import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
@@ -44,6 +45,16 @@
   let hosting = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
   let received = $state<ReceivedZaps | null>(null)
+  let likedTracks = $state<UserLike[]>([])
+
+  // Clubs the user is currently on stage in (relay-derived djingIn; on the own profile also
+  // the locally-persisted stage marker) → green "on stage" border in BOTH sections, like home.
+  const onStageIds = $derived(
+    new Set<string>([
+      ...djingIn.map((c) => c.id),
+      ...(isMe && persistedStageGroup() ? [persistedStageGroup() as string] : []),
+    ]),
+  )
 
   $effect(() => {
     const pk = pubkey
@@ -52,6 +63,9 @@
       return
     }
     loading = true
+    // Tracks this user liked (🔥), newest first.
+    likedTracks = []
+    void fetchUserLikes(pk).then((l) => (likedTracks = l))
     if (isMe) {
       void loadMyPlaylists().finally(() => (loading = false))
     } else {
@@ -208,6 +222,12 @@
     isPlaylist = false
   }
 
+  // Remove a like (own profile only): optimistic drop + NIP-09 delete of the reaction(s).
+  function removeLike(l: UserLike) {
+    likedTracks = likedTracks.filter((x) => x.videoId !== l.videoId)
+    void unlikeTrack(l.videoId, l.eventIds)
+  }
+
   let addedTo = $state('')
   function addToSet(pl: Playlist) {
     if (!stageGroup || pl.tracks.length === 0) return
@@ -284,6 +304,30 @@
     </section>
   {/if}
 
+  {#if likedTracks.length > 0}
+    <section class="card liked">
+      <h2>🔥 {isMe ? 'Tracks you liked' : 'Liked tracks'} <span class="count">{likedTracks.length}</span></h2>
+      <ol class="liked-list">
+        {#each likedTracks as t (t.videoId)}
+          <li>
+            <a class="lt-thumb" href={`https://youtu.be/${t.videoId}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube">
+              <img src={`https://i.ytimg.com/vi/${t.videoId}/default.jpg`} alt="" loading="lazy" />
+            </a>
+            <div class="lt-meta">
+              <div class="lt-title">{t.title}</div>
+              {#if t.clubId}
+                <button class="lt-club" onclick={() => goClub(t.clubId)}>played in {t.clubName || 'a club'}</button>
+              {/if}
+            </div>
+            {#if isMe}
+              <button class="lt-remove" onclick={() => removeLike(t)} title="Remove like">✕</button>
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    </section>
+  {/if}
+
   {#snippet clubRow(c: Club, live: boolean)}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="club-row" class:live role="button" tabindex="0" onclick={() => goClub(c.id)}>
@@ -312,7 +356,7 @@
     <section class="clubs">
       <h2>Hosting <span class="count">{hosting.length}</span></h2>
       <div class="club-list">
-        {#each hosting as c (c.id)}{@render clubRow(c, false)}{/each}
+        {#each hosting as c (c.id)}{@render clubRow(c, onStageIds.has(c.id))}{/each}
       </div>
     </section>
   {/if}
@@ -593,6 +637,80 @@
   .s-count {
     color: var(--text-dim);
     font-size: 0.74rem;
+  }
+  .liked {
+    margin-top: 1rem;
+  }
+  .liked h2 {
+    margin: 0 0 0.6rem;
+    font-size: 1.05rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .liked-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .liked-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+  }
+  .lt-thumb {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 38px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+  }
+  .lt-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .lt-meta {
+    flex: 1;
+    min-width: 0;
+  }
+  .lt-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lt-club {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font-size: 0.76rem;
+    cursor: pointer;
+  }
+  .lt-club:hover {
+    text-decoration: underline;
+  }
+  .lt-remove {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 7px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .lt-remove:hover {
+    color: var(--danger);
+    border-color: var(--danger);
   }
   .clubs {
     margin-top: 1.4rem;

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { sync, targetPosition, requestSkip } from '../../nostr/sync.svelte'
+  import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
-  import { likes, likeTrack } from '../../nostr/likes.svelte'
+  import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
 
@@ -11,13 +11,11 @@
     stageLabel = '',
     clubId = '',
     clubName = '',
-    canSkip = false,
   }: {
     onGoStage?: () => void
     stageLabel?: string
     clubId?: string
     clubName?: string
-    canSkip?: boolean
   } = $props()
 
   // Reactive clock so the progress bar advances between now_playing events.
@@ -37,8 +35,11 @@
   const pct = $derived(np && np.duration > 0 ? Math.min(100, (pos / np.duration) * 100) : 0)
 
   const liked = $derived(!!np && likes.has(np.videoId))
-  function like() {
-    if (np) void likeTrack({ videoId: np.videoId, title: np.title || np.videoId, clubId, clubName })
+  // Toggle: like, or un-like if already liked (removes the reaction via NIP-09).
+  function toggleLike() {
+    if (!np) return
+    if (liked) void unlikeTrack(np.videoId)
+    else void likeTrack({ videoId: np.videoId, title: np.title || np.videoId, clubId, clubName })
   }
 
   function fmt(s: number): string {
@@ -64,15 +65,12 @@
       </div>
       <div class="right">
         <div class="right-actions">
-          {#if canSkip}
-            <button class="skip" onclick={() => requestSkip(clubId)} title="Skip this track">⏭</button>
-          {/if}
           <button
             class="like"
             class:on={liked}
-            onclick={like}
-            disabled={!auth.canSign || liked}
-            title={liked ? 'Liked' : 'Like this track'}
+            onclick={toggleLike}
+            disabled={!auth.canSign}
+            title={liked ? 'Liked — tap to remove' : 'Like this track'}
           >🔥</button>
           <ZapButton />
         </div>
@@ -170,20 +168,6 @@
   }
   .like:disabled {
     cursor: default;
-  }
-  .skip {
-    flex: 0 0 auto;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.12rem 0.45rem;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .skip:hover {
-    color: var(--text);
-    border-color: var(--accent-2);
   }
   .time {
     font-size: 0.78rem;

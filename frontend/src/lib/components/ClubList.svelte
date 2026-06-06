@@ -5,8 +5,8 @@
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
+  import { launchLogin } from '../nostr/nostrLogin'
   import { clubAvatar } from '../avatar'
-  import { fetchTopLikes, type TopTrack } from '../nostr/likes.svelte'
   import type { Club } from '../nostr/types'
 
   let clubs = $state<Club[]>([])
@@ -31,8 +31,6 @@
     return [...top, ...rest]
   })
 
-  let topTracks = $state<TopTrack[]>([])
-
   async function load() {
     loading = true
     error = ''
@@ -44,7 +42,6 @@
     } finally {
       loading = false
     }
-    void fetchTopLikes(8).then((t) => (topTracks = t))
   }
 
   async function create() {
@@ -81,6 +78,29 @@
 </script>
 
 <div class="wrap">
+  <header class="hero">
+    <p class="eyebrow">Collaborative · Decentralized · Yours</p>
+    <h1 class="hero-title">Drop in. Take the stage.<br />Own the night.</h1>
+    <p class="hero-sub">
+      zapclub is a shared turntable. Step on stage with up to five DJs back-to-back, queue
+      your tracks, and the whole room hears the same beat — perfectly in sync. Sign in with
+      Nostr: no account, no tracking. Tip the DJ in real sats, not likes. No label, no
+      middleman — just the music and the crowd. A club that's yours.
+    </p>
+    <div class="chips">
+      <span class="chip">🎧 In-sync playback</span>
+      <span class="chip">🎚️ 5 DJs back-to-back</span>
+      <span class="chip">⚡ Zap the DJ</span>
+      <span class="chip">🟣 Nostr login</span>
+      <span class="chip">🚫 No tracking</span>
+    </div>
+    {#if auth.canSign}
+      <button class="btn btn-primary hero-cta" onclick={() => (showCreate = true)}>🎛️ Start a club</button>
+    {:else}
+      <button class="btn btn-primary hero-cta" onclick={launchLogin}>⚡ Sign in to play</button>
+    {/if}
+  </header>
+
   <div class="head">
     <h2>Clubs</h2>
     {#if auth.canSign}
@@ -107,29 +127,6 @@
   {/if}
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
-
-  {#if topTracks.length}
-    <section class="top">
-      <h3>🔥 Top tracks</h3>
-      <ol class="top-list">
-        {#each topTracks as t, i (t.videoId)}
-          <li>
-            <span class="rank">{i + 1}</span>
-            <a class="tt-thumb" href={`https://youtu.be/${t.videoId}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube">
-              <img src={`https://i.ytimg.com/vi/${t.videoId}/default.jpg`} alt="" loading="lazy" />
-            </a>
-            <div class="tt-meta">
-              <div class="tt-title">{t.title}</div>
-              {#if t.clubId}
-                <button class="tt-club" onclick={() => goClub(t.clubId)}>played in {t.clubName || 'a club'}</button>
-              {/if}
-            </div>
-            <span class="tt-likes">🔥 {t.likes}</span>
-          </li>
-        {/each}
-      </ol>
-    </section>
-  {/if}
 
   {#if loading}
     <p class="dim">Loading clubs…</p>
@@ -174,6 +171,60 @@
     max-width: 680px;
     margin: 0 auto;
     padding: 1.2rem 1rem 4rem;
+  }
+  /* ── Home hero ─────────────────────────────────────────────────────────── */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1.6rem;
+    padding: 1.9rem 1.5rem 1.7rem;
+    background:
+      radial-gradient(130% 150% at 0% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 55%),
+      radial-gradient(130% 150% at 100% 8%, color-mix(in srgb, var(--accent-2) 20%, transparent), transparent 55%),
+      var(--bg-elev);
+  }
+  .eyebrow {
+    margin: 0 0 0.55rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 800;
+  }
+  .hero-title {
+    margin: 0 0 0.75rem;
+    font-size: clamp(1.7rem, 5vw, 2.5rem);
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+  }
+  .hero-sub {
+    margin: 0 0 1.1rem;
+    max-width: 54ch;
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.2rem;
+  }
+  .chip {
+    font-size: 0.76rem;
+    padding: 0.32rem 0.62rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+    border: 1px solid var(--border);
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .hero-cta {
+    font-size: 0.95rem;
+    padding: 0.65rem 1.25rem;
   }
   .head {
     display: flex;
@@ -322,79 +373,5 @@
   .err {
     color: var(--danger);
     font-size: 0.85rem;
-  }
-  .top {
-    margin-bottom: 1.4rem;
-  }
-  .top h3 {
-    margin: 0 0 0.6rem;
-    font-size: 1.05rem;
-  }
-  .top-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .top-list li {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.7rem;
-  }
-  .rank {
-    flex: 0 0 auto;
-    width: 1.4rem;
-    text-align: center;
-    font-weight: 800;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-  }
-  .tt-thumb {
-    flex: 0 0 auto;
-    width: 56px;
-    height: 38px;
-    border-radius: 6px;
-    overflow: hidden;
-    background: #000;
-  }
-  .tt-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .tt-meta {
-    flex: 1;
-    min-width: 0;
-  }
-  .tt-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tt-club {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--accent);
-    font-size: 0.76rem;
-    cursor: pointer;
-  }
-  .tt-club:hover {
-    text-decoration: underline;
-  }
-  .tt-likes {
-    flex: 0 0 auto;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: var(--amber);
   }
 </style>

@@ -28,7 +28,7 @@
     persistedStageGroup,
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
-  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip, isActingConductor } from '../nostr/sync.svelte'
+  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps, zaps } from '../nostr/zaps.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
@@ -340,7 +340,6 @@
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
         clubId={groupId}
         clubName={club?.name ?? ''}
-        canSkip={canSkip(canModerate)}
       />
     </div>
     <Player
