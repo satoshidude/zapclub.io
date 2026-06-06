@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome, goHowto } from './lib/router.svelte'
+  import { router, goHome } from './lib/router.svelte'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
   import LoginDialog from './lib/components/LoginDialog.svelte'
@@ -83,7 +83,6 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <button class="howto-link" onclick={goHowto}>How-to</button>
   <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
 </footer>
 
@@ -163,18 +162,6 @@
   .tip:disabled {
     opacity: 0.5;
     cursor: default;
-  }
-  .howto-link {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 0.8rem;
-    text-decoration: underline;
-    padding: 0.2rem 0.4rem;
-  }
-  .howto-link:hover {
-    color: var(--accent);
   }
   .foot-note {
     flex-basis: 100%;
