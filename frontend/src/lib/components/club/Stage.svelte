@@ -4,6 +4,8 @@
   import { kickFromStage } from '../../nostr/groups'
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import { goUser } from '../../router.svelte'
+  import { npubEncode } from 'nostr-tools/nip19'
 
   interface Props {
     groupId: string
@@ -82,7 +84,7 @@
       {@const profile = useProfile(dj.pubkey)}
       <div class="slot filled" class:live={dj.pubkey === liveDj}>
         <img class="avatar" src={avatarUrl(dj.pubkey, profile)} alt="" width="44" height="44" />
-        <span class="name">{displayName(dj.pubkey, profile)}</span>
+        <a class="name" href={`/user/${npubEncode(dj.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj.pubkey)) }}>{displayName(dj.pubkey, profile)}</a>
         {#if dj.pubkey === conductor}<span class="badge">conductor</span>{/if}
         {#if canModerate && dj.pubkey !== me}
           <button class="kick" onclick={() => kick(dj.pubkey)} title="Remove from stage">✕</button>
@@ -205,6 +207,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     text-align: center;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .name:hover {
+    text-decoration: underline;
   }
   .badge {
     font-size: 0.62rem;

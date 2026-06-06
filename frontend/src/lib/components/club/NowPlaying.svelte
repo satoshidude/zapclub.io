@@ -1,6 +1,8 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import { goUser } from '../../router.svelte'
+  import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
@@ -57,7 +59,7 @@
       <div class="info">
         <div class="title">{np.title || np.videoId}</div>
         <div class="dj-row">
-          <a class="dj" href={`/user/${dj}`} onclick={(e) => e.preventDefault()}>
+          <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
             <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
             {displayName(dj, profile)}
           </a>
