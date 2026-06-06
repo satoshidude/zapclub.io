@@ -1,7 +1,7 @@
 <script lang="ts">
   import { npubEncode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
-  import { router, goHome, goUser, goAdmin } from '../router.svelte'
+  import { router, goHome, goUser, goAdmin, goHowto } from '../router.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
   import { useProfile, avatarUrl } from '../nostr/profiles.svelte'
   import { isSuperadmin } from '../nostr/admin'
@@ -15,6 +15,7 @@
   const onHome = $derived(router.route.name === 'home')
   const onProfile = $derived(router.route.name === 'user')
   const onAdmin = $derived(router.route.name === 'admin')
+  const onHowto = $derived(router.route.name === 'howto')
   const myProfile = $derived(auth.pubkey ? useProfile(auth.pubkey) : null)
 
   function openProfile() {
@@ -27,6 +28,11 @@
   <button class="tab" class:active={onHome} onclick={goHome}>
     <span class="ico" aria-hidden="true">🎵</span>
     <span class="lbl">Clubs</span>
+  </button>
+
+  <button class="tab" class:active={onHowto} onclick={goHowto}>
+    <span class="ico" aria-hidden="true">❔</span>
+    <span class="lbl">How-to</span>
   </button>
 
   <button class="tab" class:active={onProfile} onclick={openProfile}>
