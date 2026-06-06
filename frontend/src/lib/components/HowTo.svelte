@@ -9,6 +9,29 @@
   </header>
 
   <section class="card">
+    <h2>🍏 On iOS / macOS Safari</h2>
+    <p>
+      Safari has no built-in Nostr login, so you sign in with a small signing extension.
+      <strong>Nostash</strong> works best right now — it gives Safari the
+      <code>window.nostr</code> login that zapclub uses. For paying zaps, <strong>Alby Go</strong>
+      is the smoothest. zapclub supports both:
+    </p>
+    <ul class="links">
+      <li>
+        <a href="https://apps.apple.com/us/app/nostash/id6744309333" target="_blank" rel="noopener noreferrer">Nostash — App Store</a>
+        (iPhone / iPad / Mac) — <strong>sign in</strong>. After installing, open the Nostash
+        icon in Safari and <strong>allow it for zapclub</strong>, then tap
+        “🧩 Browser extension (NIP-07)” on the sign-in screen.
+      </li>
+      <li>
+        <a href="https://apps.apple.com/us/app/alby-go/id6471335774" target="_blank" rel="noopener noreferrer">Alby Go — App Store</a>
+        (iPhone / iPad) — <strong>pay zaps</strong>. Tap “📲 Open in Alby Go” on the pay screen and confirm.
+      </li>
+    </ul>
+    <p class="note">First time only: you must grant Nostash access to the site, otherwise Safari won’t expose the login. The extension button then appears automatically.</p>
+  </section>
+
+  <section class="card">
     <h2>🎚️ Bring your Spotify / Apple Music playlists</h2>
     <p>
       zapclub plays from YouTube. To move an existing Spotify or Apple Music playlist over,
