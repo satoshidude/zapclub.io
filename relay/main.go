@@ -13,6 +13,7 @@ import (
 	"github.com/fiatjaf/relay29"
 	"github.com/fiatjaf/relay29/khatru29"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip13"
 	"github.com/nbd-wtf/go-nostr/nip29"
 )
 
@@ -99,6 +100,33 @@ func main() {
 	// Per-IP-Spamschutz (schließt die Sybil-Lücke des Per-Pubkey-Limits): Per-IP-Event- +
 	// Per-IP-Connection-Limiter. Direkt nach dem Ban-Check (billige Rejects zuerst).
 	ipEventLim, ipConnLim := setupSpamProtection(relay)
+
+	// NIP-13 Proof-of-Work: require mined difficulty on the Sybil-relevant kinds — club join
+	// (9021) and chat (9). Each keypair/message then costs CPU, taxing mass/IP-distributed
+	// spam that per-IP/per-pubkey limits can't stop. Cheap to verify (count leading zero bits
+	// of the id); the client mines slightly above these. Per-kind, env-tunable, 0 = off.
+	powJoin := envInt("RELAY_POW_JOIN", 16)
+	powChat := envInt("RELAY_POW_CHAT", 10)
+	relay.RejectEvent = append(relay.RejectEvent,
+		func(_ context.Context, evt *nostr.Event) (bool, string) {
+			var min int
+			switch evt.Kind {
+			case 9021:
+				min = powJoin
+			case 9:
+				min = powChat
+			default:
+				return false, ""
+			}
+			if min <= 0 {
+				return false, ""
+			}
+			if nip13.CommittedDifficulty(evt) < min {
+				return true, fmt.Sprintf("pow: %d bits of proof-of-work required (NIP-13)", min)
+			}
+			return false, ""
+		},
+	)
 
 	// Chat (kind 9): streng — Burst 6, Auffüllung 1 alle 3 s (~20/min). Stoppt
 	// gescriptete Floods, erlaubt normales Chatten. Kind 9 ist persistent → Spam-Vektor.

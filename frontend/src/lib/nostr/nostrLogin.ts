@@ -1,5 +1,6 @@
 import type { Event, EventTemplate } from 'nostr-tools/pure'
 import { decode } from 'nostr-tools/nip19'
+import { minePow } from 'nostr-tools/nip13'
 import { AccountManager } from 'applesauce-accounts'
 import {
   ExtensionAccount,
@@ -311,8 +312,28 @@ function warmSigner(): void {
  *  – NIP-46 bunker that must connect first after reload → the first sign triggers the
  *    connect() round-trip; a generous timeout per attempt, else it would hang forever.
  */
+// NIP-13 anti-spam proof-of-work. Mine the Sybil-relevant kinds — club join (9021) and chat
+// (9) — so mass/throwaway-key spam costs CPU. Bits are slightly above the relay's minimum
+// (so the relay can be tuned up without redeploying the client). Mining is synchronous but
+// brief at these difficulties (chat ~ms, join < ~1s) and runs once per such event.
+const POW_BITS: Record<number, number> = { 9: 12, 9021: 18 }
+
+/** Adds a mined NIP-13 nonce to join/chat events before signing (no-op for other kinds). The
+ *  signer re-derives the same id from these exact fields, so the proof-of-work survives. */
+function withPow(template: EventTemplate): EventTemplate {
+  const bits = POW_BITS[template.kind]
+  const pubkey = auth.pubkey
+  if (!bits || !pubkey) return template
+  const mined = minePow(
+    { pubkey, created_at: template.created_at, kind: template.kind, tags: [...template.tags], content: template.content },
+    bits,
+  )
+  return { kind: mined.kind, created_at: mined.created_at, tags: mined.tags, content: mined.content }
+}
+
 export async function signEvent(template: EventTemplate): Promise<Event> {
   if (!manager.active) throw new Error('No signer available — please sign in again.')
+  template = withPow(template)
   let lastErr: unknown
   for (let i = 0; i < 4; i++) {
     try {

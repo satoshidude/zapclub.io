@@ -7,6 +7,10 @@
 //
 // Run: RELAY_URL=ws://127.0.0.1:3334 NODE_PATH=<nostr-tools dir> node grouptest.mjs
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { minePow } from 'nostr-tools/nip13'
+
+// PoW the relay requires (must be ≥ RELAY_POW_JOIN / RELAY_POW_CHAT it boots with).
+const POWBITS = { 9: 12, 9021: 18 }
 
 const URL = process.env.RELAY_URL || 'ws://127.0.0.1:3334'
 const now = () => Math.floor(Date.now() / 1000)
@@ -23,9 +27,17 @@ function conn(sk) {
     else if (m[0] === 'EVENT') { const p = pend.get('r:' + m[1]); if (p) p.got.push(m[2]) }
     else if (m[0] === 'EOSE') { const p = pend.get('r:' + m[1]); if (p) { pend.delete('r:' + m[1]); p.res(p.got) } }
   }
+  const send = (e) => new Promise((r) => { pend.set(e.id, r); ws.send(JSON.stringify(['EVENT', e])) })
   return new Promise((res) => { ws.onopen = () => setTimeout(() => res({
     pub: getPublicKey(sk),
-    ev: (t) => { const e = finalizeEvent(t, sk); return new Promise((r) => { pend.set(e.id, r); ws.send(JSON.stringify(['EVENT', e])) }) },
+    // ev() mines NIP-13 PoW for join/chat (as the real client does); evRaw() skips it.
+    ev: (t) => {
+      const bits = POWBITS[t.kind]
+      let tt = t
+      if (bits) { const m = minePow({ pubkey: getPublicKey(sk), created_at: t.created_at, kind: t.kind, tags: [...(t.tags || [])], content: t.content }, bits); tt = { kind: m.kind, created_at: m.created_at, tags: m.tags, content: m.content } }
+      return send(finalizeEvent(tt, sk))
+    },
+    evRaw: (t) => send(finalizeEvent(t, sk)),
     query: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: r, got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
   }), 400) })
 }
@@ -49,6 +61,12 @@ await sleep(600)
 const members = (await host.query({ kinds: [39002], '#d': [G] }))
 const memberPubs = members.flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
 assert(memberPubs.includes(mem.pub), 'open club auto-join: member is in 39002')
+
+// 2b. NIP-13 PoW: chat without proof-of-work is rejected, with PoW accepted.
+const noPow = await mem.evRaw({ kind: 9, created_at: now(), tags: [['h', G]], content: 'no pow' })
+assert(noPow[0] === false && /pow/i.test(noPow[1] || ''), 'chat without PoW rejected: ' + ok(noPow))
+const yesPow = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'mined' })
+assert(yesPow[0] === true, 'chat with PoW accepted: ' + ok(yesPow))
 
 // 3. now_playing ReplaceEvent dedup — two writes, expect ONE row, the latest
 console.log('np write 1 ->', ok(await mem.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:AAA'], ['pos', '0']], content: 'Artist – Track One' })))

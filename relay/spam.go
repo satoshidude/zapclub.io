@@ -29,6 +29,16 @@ func envFloat(key string, def float64) float64 {
 	return def
 }
 
+// envInt liest einen Int aus der Umgebung, sonst der Default.
+func envInt(key string, def int) int {
+	if v := env(key, ""); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
 // connIP zieht die ECHTE Client-IP aus der WebSocket-Connection im Context. Hinter Caddy ist
 // RemoteAddr stets localhost; clientIP() vertraut nur dem von Caddy gesetzten X-Real-IP
 // (nicht client-spoofbar). Ist keine Connection im Context (sollte für Events nie passieren),
