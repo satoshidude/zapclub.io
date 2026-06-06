@@ -28,8 +28,20 @@
     saveName = ''
     saving = false
   }
+  // Which saved playlist the current set was loaded from (shown in the header). Stays as long
+  // as the set still contains exactly that playlist's tracks — diverges (add/remove) → cleared.
+  let selectedPlaylistId = $state<string | null>(null)
+  const selectedPlaylist = $derived.by(() => {
+    if (!selectedPlaylistId) return null
+    const pl = playlists.mine.find((p) => p.id === selectedPlaylistId)
+    if (!pl) return null
+    const setIds = new Set(tracks.map((t) => t.videoId))
+    return setIds.size === pl.tracks.length && pl.tracks.every((t) => setIds.has(t.videoId)) ? pl : null
+  })
+
   async function loadPl(pl: Playlist) {
     await setMyQueue(groupId, pl.tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })))
+    selectedPlaylistId = pl.id
     showLib = false
   }
 
@@ -102,7 +114,7 @@
 
 <div class="queue card">
   <div class="head">
-    <h3>My set <span class="count">{tracks.length}</span></h3>
+    <h3>My set <span class="count">{tracks.length}</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
     <div class="head-actions">
       {#if canSkip()}
         <button class="btn btn-ghost btn-sm" onclick={() => skipTrack(groupId)} title="Skip current track">⏭ Skip</button>
@@ -137,10 +149,11 @@
   {#if showLib && playlists.mine.length > 0}
     <ul class="lib-list">
       {#each playlists.mine as pl (pl.id)}
-        <li>
+        <li class:sel={selectedPlaylist?.id === pl.id}>
+          {#if selectedPlaylist?.id === pl.id}<span class="sel-dot" title="Currently loaded">●</span>{/if}
           <span class="t-title">{pl.name}</span>
           <span class="dur">{pl.tracks.length}</span>
-          <button class="add" onclick={() => loadPl(pl)} title="Load into my set">Load</button>
+          <button class="add" onclick={() => loadPl(pl)} title="Load into my set">{selectedPlaylist?.id === pl.id ? 'Loaded' : 'Load'}</button>
           <button class="rm" onclick={() => deletePlaylist(pl.id)} title="Delete playlist">✕</button>
         </li>
       {/each}
@@ -240,6 +253,13 @@
     color: var(--text-dim);
     font-weight: 600;
     font-size: 0.85rem;
+  }
+  .from {
+    margin-left: 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent);
+    vertical-align: middle;
   }
   .head-actions {
     display: flex;
@@ -457,6 +477,15 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.85rem;
+  }
+  .lib-list li.sel .t-title {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .sel-dot {
+    color: var(--accent);
+    font-size: 0.7rem;
+    flex: 0 0 auto;
   }
   .err {
     color: var(--danger);
