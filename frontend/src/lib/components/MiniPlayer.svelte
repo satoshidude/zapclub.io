@@ -22,6 +22,9 @@
     if (np.videoId !== curVid) {
       curVid = np.videoId
       player.load(np.videoId, miniPosition())
+      // loadVideoById can reset the player's mute state → re-assert it so the mini-player
+      // never starts blasting audio (it always starts muted; the user taps 🔊 to listen).
+      if (muted) player.mute()
       return
     }
     if (reseek) {
@@ -41,7 +44,12 @@
           ready = true
           applyTrack(false)
         },
-        onStateChange: () => {},
+        // YouTube can silently unmute on autoplay/loadVideoById. While the UI says muted,
+        // re-assert it whenever the player reports a state change (buffering/playing) so it
+        // can't start playing audibly behind a 🔇 icon.
+        onStateChange: () => {
+          if (muted) player?.mute()
+        },
         onError: () => {},
       }).then((p) => {
         creating = false
