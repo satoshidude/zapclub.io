@@ -12,7 +12,9 @@
   let creating = false
   let ready = false
   let curVid = ''
-  let muted = $state(true)
+  // Start UNMUTED — the mini-player continues the club's audio across navigation; muting it
+  // would silence the music the user was listening to. Browser may require a tap first.
+  let muted = $state(false)
   let driftTimer: ReturnType<typeof setInterval> | null = null
 
   function applyTrack(reseek: boolean) {
@@ -22,9 +24,9 @@
     if (np.videoId !== curVid) {
       curVid = np.videoId
       player.load(np.videoId, miniPosition())
-      // loadVideoById can reset the player's mute state → re-assert it so the mini-player
-      // never starts blasting audio (it always starts muted; the user taps 🔊 to listen).
+      // Honor the current mute state across track loads (loadVideoById can reset it).
       if (muted) player.mute()
+      else player.unMute()
       return
     }
     if (reseek) {
@@ -39,16 +41,14 @@
       creating = true
       void createPlayer('yt-mini', {
         controls: false,
-        muted: true,
+        muted: false, // continue the club's audio with sound
         onReady: () => {
           ready = true
           applyTrack(false)
         },
-        // YouTube can silently unmute on autoplay/loadVideoById. While the UI says muted,
-        // re-assert it whenever the player reports a state change (buffering/playing) so it
-        // can't start playing audibly behind a 🔇 icon.
+        // Keep the player's mute in sync with our state across YouTube's autoplay/load resets.
         onStateChange: () => {
-          if (muted) player?.mute()
+          if (player) muted ? player.mute() : player.unMute()
         },
         onError: () => {},
       }).then((p) => {
@@ -70,7 +70,7 @@
       player = null
       ready = false
       curVid = ''
-      muted = true
+      muted = false
     }
   })
 

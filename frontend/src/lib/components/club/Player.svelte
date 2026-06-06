@@ -26,7 +26,10 @@
   let player: YouTubePlayer | null = null
   let destroyed = false
   let ready = $state(false)
-  let muted = $state(true)
+  // Start UNMUTED (autoplay with sound where the browser allows it). Non-members are muted by
+  // the canHear effect below (also covers membership resolving after mount). Browser may still
+  // require a tap before unmuted autoplay actually starts.
+  let muted = $state(false)
   let volume = $state(70)
   let isFullscreen = $state(false)
   let playerEl: HTMLDivElement
@@ -34,10 +37,11 @@
   let idleMode = false
   let driftTimer: ReturnType<typeof setInterval> | null = null
 
-  // Muted autostart (browsers allow it without a gesture) — no tap overlay needed.
+  // Start with sound; the canHear effect mutes non-members once the player exists. Browsers
+  // may require a tap before unmuted autoplay actually starts; tapping the video toggles mute.
   createPlayer(elementId, {
     controls: false,
-    muted: true,
+    muted: false,
     onStateChange(s) {
       if (s === 1) lobbyFailed = false // playing → reset lobby error flag
       if (s !== 0) return // 0 = ended
