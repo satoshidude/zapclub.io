@@ -109,28 +109,53 @@ var (
 	cacheMu     sync.Mutex
 )
 
-// The print format: id, title, duration, and artist. We ask yt-dlp for the artist so
-// YouTube-Music-style results (where %(title)s is just the song) still show "Artist – Title".
-const ytPrint = "%(id)s\t%(title)s\t%(duration)s\t%(artist)s"
+// The print format: id, title, duration, artist, and channel. In --flat-playlist mode
+// yt-dlp does NOT extract per-video music metadata, so %(artist)s is almost always "NA";
+// %(channel)s, however, IS populated and is our reliable artist source (see
+// artistFromChannel). The artist field is kept for the rare case yt-dlp does fill it.
+const ytPrint = "%(id)s\t%(title)s\t%(duration)s\t%(artist)s\t%(channel)s"
 
-// buildTitle folds the artist into the title when yt-dlp gives a distinct artist and it
-// isn't already part of the title (avoids "Artist – Artist - Song" duplication).
-func buildTitle(title, artist string) string {
-	artist = strings.TrimSpace(artist)
-	if artist == "" || artist == "NA" {
-		return title
+// artistFromChannel derives the artist from a YouTube channel name, but ONLY when the
+// channel carries an unambiguous music marker: an auto-generated "<Artist> - Topic"
+// channel (YouTube Music), a "<Artist>VEVO" channel, or an "<Artist> Official" channel.
+// For a plain uploader channel (no marker) it returns "" — better to show no artist than a
+// random uploader's name on a cover/reaction/clip.
+func artistFromChannel(channel string) string {
+	c := strings.TrimSpace(channel)
+	if c == "" || c == "NA" {
+		return ""
 	}
-	if strings.Contains(strings.ToLower(title), strings.ToLower(artist)) {
-		return title
+	lower := strings.ToLower(c)
+	for _, m := range []string{" - topic", " official", " officiel", "vevo"} {
+		if strings.HasSuffix(lower, m) {
+			return strings.TrimSpace(c[:len(c)-len(m)])
+		}
 	}
-	return artist + " – " + title
+	return ""
 }
 
-// parseYtLines parses tab-separated "id\ttitle\tduration\tartist" lines from yt-dlp.
+// buildTitle folds the artist into the title so every track shows "Artist – Title". It
+// prefers yt-dlp's artist tag, falls back to the cleaned channel name, and skips both when
+// the artist is already part of the title (avoids "Artist – Artist - Song" duplication).
+func buildTitle(title, artist, channel string) string {
+	a := strings.TrimSpace(artist)
+	if a == "" || a == "NA" {
+		a = artistFromChannel(channel)
+	}
+	if a == "" {
+		return title
+	}
+	if strings.Contains(strings.ToLower(title), strings.ToLower(a)) {
+		return title
+	}
+	return a + " – " + title
+}
+
+// parseYtLines parses tab-separated "id\ttitle\tduration\tartist\tchannel" lines from yt-dlp.
 func parseYtLines(out []byte) []searchResult {
 	var results []searchResult
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		parts := strings.SplitN(line, "\t", 4)
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 2 || parts[0] == "" {
 			continue
 		}
@@ -140,11 +165,14 @@ func parseYtLines(out []byte) []searchResult {
 				dur = int(f)
 			}
 		}
-		artist := ""
+		artist, channel := "", ""
 		if len(parts) >= 4 {
 			artist = parts[3]
 		}
-		results = append(results, searchResult{ID: parts[0], Title: buildTitle(parts[1], artist), Duration: dur})
+		if len(parts) >= 5 {
+			channel = parts[4]
+		}
+		results = append(results, searchResult{ID: parts[0], Title: buildTitle(parts[1], artist, channel), Duration: dur})
 	}
 	return results
 }
