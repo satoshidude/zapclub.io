@@ -16,6 +16,11 @@ relay/relay.env
 *.env
 !*.env.example
 
+# Internal docs / AI tooling — not for the public repo
+CLAUDE.md
+.claude/
+zapclub_grobkonzept.md
+
 # OS / editor
 .DS_Store
 *.swp

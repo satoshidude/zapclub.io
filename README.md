@@ -129,5 +129,3 @@ Local → prod (no staging). Frontend built and served statically via Caddy on
 CGO_ENABLED=0`) and shipped as a static binary. Deploy discipline: `go.mod` /
 `go.sum` committed, **never** `go get` on the server, verify the feature is in
 the binary after deploy.
-
-See `CLAUDE.md` for the full data model, conductor rules and relay hardening.
