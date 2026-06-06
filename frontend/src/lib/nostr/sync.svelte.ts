@@ -5,6 +5,7 @@ import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
 import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
 import { shouldConduct } from './conductor'
+import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
@@ -236,6 +237,7 @@ export function isActingConductor(): boolean {
     np?.writer ?? null,
     np ? Date.now() - np.sentAt : Infinity,
     RESCUE_STALE_MS,
+    (pk) => presence.isOnline(pk),
   )
 }
 

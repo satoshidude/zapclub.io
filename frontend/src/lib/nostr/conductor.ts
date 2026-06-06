@@ -63,8 +63,12 @@ export function pickConductor(
  *  1. I'm the elected conductor → I always act (present-and-elected reclaims; owner-override).
  *  2. now_playing is fresh (writer still heartbeating) → only that writer keeps going. A
  *     rescuer that took over stays the writer until the elected conductor returns and writes.
- *  3. now_playing went silent (writer gone > rescueAfterMs) → the oldest-since active DJ
- *     OTHER than the silent writer takes over. Deterministic, so exactly one DJ rescues.
+ *  3. now_playing went silent (writer gone > rescueAfterMs) → the oldest-since active DJ that
+ *     is ONLINE (live presence) and isn't the silent writer takes over. Using presence is
+ *     what makes the rescue CASCADE: if the elected conductor AND the next-oldest DJ are both
+ *     phantoms (on stage but away), it still hands off to whoever is actually here — instead
+ *     of deadlocking on an absent designated rescuer. Falls back to the oldest non-writer when
+ *     no one is reporting presence (so a single present-but-silent DJ still tries).
  *
  * @param me            local pubkey (or null)
  * @param elected       pickConductor result (owner-override / sticky-oldest)
@@ -72,6 +76,7 @@ export function pickConductor(
  * @param npWriter      writer of the current now_playing, or null if no track yet
  * @param npStaleMs     ms since now_playing was last refreshed (Infinity if none)
  * @param rescueAfterMs staleness beyond which a rescuer may take over the silent conductor
+ * @param isOnline      reports whether a pubkey is reporting live presence (default: all)
  */
 export function shouldConduct(
   me: string | null,
@@ -80,13 +85,18 @@ export function shouldConduct(
   npWriter: string | null,
   npStaleMs: number,
   rescueAfterMs: number,
+  isOnline: (pubkey: string) => boolean = () => true,
 ): boolean {
   if (!me) return false
   if (me === elected) return true
   if (npWriter == null) return false // no track yet & I'm not elected → defer to the elected conductor
   if (npStaleMs <= rescueAfterMs) return npWriter === me // fresh → only the current writer drives
-  // Silent conductor → oldest active DJ that is neither the silent writer nor the (absent)
-  // elected conductor rescues the room.
-  const rescuer = activeDjs.find((pk) => pk !== npWriter && pk !== elected)
+  // Silent conductor → pick a rescuer among ONLINE active DJs (so we don't hand off to another
+  // phantom), oldest-since first, excluding the silent writer. No one online → fall back to any
+  // non-writer (a single present DJ that hasn't been seen via presence still tries).
+  const notWriter = activeDjs.filter((pk) => pk !== npWriter)
+  const online = notWriter.filter(isOnline)
+  const pool = online.length ? online : notWriter
+  const rescuer = pool.find((pk) => pk !== elected) ?? pool[0]
   return rescuer === me
 }

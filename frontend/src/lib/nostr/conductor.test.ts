@@ -130,4 +130,19 @@ describe('shouldConduct (phantom-conductor rescue)', () => {
   it('no one acts without a local pubkey', () => {
     expect(shouldConduct(null, 'owner', djs, 'owner', 120_000, RESCUE)).toBe(false)
   })
+
+  it('rescue cascades to whoever is ONLINE (skips phantom designated rescuer)', () => {
+    // owner (elected+writer) and bob are both phantoms (on stage but away); only carol is here.
+    // Without presence the rescuer would be bob (oldest non-writer) — and stay stuck. With
+    // presence, carol (the only online non-writer) takes over.
+    const online = (pk: string) => pk === 'carol'
+    expect(shouldConduct('carol', 'owner', djs, 'owner', 120_000, RESCUE, online)).toBe(true)
+    expect(shouldConduct('bob', 'owner', djs, 'owner', 120_000, RESCUE, online)).toBe(false)
+  })
+
+  it('online rescuer is oldest-since first among present DJs', () => {
+    const online = () => true // everyone present → oldest non-writer (bob) rescues
+    expect(shouldConduct('bob', 'owner', djs, 'owner', 120_000, RESCUE, online)).toBe(true)
+    expect(shouldConduct('carol', 'owner', djs, 'owner', 120_000, RESCUE, online)).toBe(false)
+  })
 })
