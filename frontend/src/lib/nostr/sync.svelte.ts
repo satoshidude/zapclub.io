@@ -174,22 +174,41 @@ function heartbeat(groupId: string): void {
   publishNp(groupId, state.np)
 }
 
-/** Advances to the next round-robin track (or loops). Only on end/skip. */
-function advance(groupId: string, fromPos: number): void {
-  const djs = stage.djs.map((d) => d.pubkey)
-  // Honor a reorder made since the last heartbeat: re-anchor to the playing track's
-  // current index, so the NEXT pick follows the new order even if the track ends before
-  // the next heartbeat would have corrected pos.
-  if (state.np) {
-    const re = reanchorPos(state.np)
-    state.np = re
-    fromPos = re.pos
-  }
+/**
+ * Playability matrix with the CURRENTLY-PLAYING track masked out — so the scan never
+ * re-picks the track that just finished (even if its `off` flag hasn't propagated yet).
+ * queues.playable() returns fresh arrays, so mutating here is safe.
+ */
+function playableExcludingCurrent(djs: string[]): boolean[][] {
   const playable = queues.playable(djs)
-  let next = nextPlayablePos(fromPos, djs.length, playable)
-  if (next === -1) next = firstPlayablePos(djs.length, playable) // loop
+  const np = state.np
+  if (np) {
+    const djIndex = djs.indexOf(np.dj)
+    if (djIndex >= 0) {
+      const ids = (queues.get(np.dj)?.tracks ?? []).map((t) => t.videoId)
+      const tIdx = ids.indexOf(np.videoId)
+      if (tIdx >= 0 && playable[djIndex]) playable[djIndex][tIdx] = false
+    }
+  }
+  return playable
+}
+
+/**
+ * Advances to the next track. ALWAYS scans from the TOP: the next track is the first active
+ * (unplayed) track per DJ in round-robin order (firstPlayablePos over pos 0,1,2,… = dj0.t0,
+ * dj1.t0, dj0.t1, …). This keeps the rotation anchored to the top of each playlist instead of
+ * drifting forward and stranding active tracks above the play head. Played tracks are `off`
+ * (so excluded); the just-finished track is masked too. No active track left → lobby.
+ */
+function advance(groupId: string): void {
+  const djs = stage.djs.map((d) => d.pubkey)
+  if (djs.length === 0) {
+    state.np = null
+    return
+  }
+  const next = firstPlayablePos(djs.length, playableExcludingCurrent(djs))
   if (next === -1) {
-    state.np = null // no tracks available
+    state.np = null // nothing active left → lobby
     return
   }
   startAt(groupId, next, Date.now())
@@ -246,7 +265,7 @@ export function conductorTick(groupId: string): void {
     // Real failover (conductor only briefly away): KEEP the running track; only advance if
     // it actually finished within this window.
     const elapsed = (Date.now() - np.startedAt) / 1000
-    if (np.duration > 0 && elapsed >= np.duration) advance(groupId, np.pos)
+    if (np.duration > 0 && elapsed >= np.duration) advance(groupId)
     else heartbeat(groupId) // same track, new conductor takes over the heartbeat
     return
   }
@@ -269,7 +288,7 @@ export function applyOrderNow(groupId: string): void {
 /** Manual skip to the next track — ONLY the acting conductor. */
 export function skipTrack(groupId: string): void {
   if (!isActingConductor() || !state.np) return
-  advance(groupId, state.np.pos)
+  advance(groupId)
 }
 
 /**
@@ -314,25 +333,18 @@ export function canSkip(canModerate = false): boolean {
   return !!auth.pubkey && !!sync.live && (isActingConductor() || canModerate)
 }
 
-/** Preview of the next round-robin tracks (across all DJs), max `max`. */
+/** Preview of the next round-robin tracks (across all DJs), max `max`. Mirrors advance():
+ *  scans from the TOP (the first active track per DJ, round-robin), excluding the running
+ *  track — so "Up next" shows exactly what will play. */
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
-  const playable = queues.playable(djs)
-  // Start from the re-anchored pos so a reorder shows in Up next immediately (before the
-  // conductor's next heartbeat corrects the published pos).
-  const np = state.np ? reanchorPos(state.np) : null
-  let pos = np ? np.pos : -1
+  const playable = playableExcludingCurrent(djs)
   const out: { dj: string; videoId: string; title: string }[] = []
-  const seen = new Set<number>()
-  if (np) seen.add(np.pos) // never list the running track as "next" (wrap)
+  let pos = -1
   for (let i = 0; i < max; i++) {
-    let next = nextPlayablePos(pos, djs.length, playable)
-    // Like the real round-robin: loop at the end → DJs with shorter playlists (whose
-    // positions are already past) reappear after the wrap instead of being missing.
-    if (next === -1) next = firstPlayablePos(djs.length, playable)
-    if (next === -1 || seen.has(next)) break // nothing playable / once fully around
-    seen.add(next)
+    const next = nextPlayablePos(pos, djs.length, playable) // walk active slots from the top
+    if (next === -1) break // no more active tracks
     const { djIndex, trackIndex } = posToSlot(next, djs.length)
     const dj = djs[djIndex]
     const track = queues.trackAt(dj, trackIndex)
@@ -346,7 +358,7 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
 export function onTrackEnded(groupId: string): void {
   if (!isActingConductor() || !state.np) return
   errorStreak = 0 // clean end → reset error streak
-  advance(groupId, state.np.pos)
+  advance(groupId)
 }
 
 // Guard against an endless skip if (almost) all tracks are unplayable.
@@ -371,7 +383,7 @@ export function onTrackError(groupId: string, videoId: string): void {
     state.np = null // too many dead tracks → lobby takes over
     return
   }
-  advance(groupId, state.np.pos)
+  advance(groupId)
 }
 
 export function resetSync(): void {

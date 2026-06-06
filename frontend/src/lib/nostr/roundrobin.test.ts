@@ -95,6 +95,43 @@ describe('reanchoredPos (reorder takes effect — the "refresh push" bug)', () =
   })
 })
 
+describe('scan from the top (regression: active tracks stranded above a drifted play head)', () => {
+  // The live repro: the play head drifted forward (pos high) while ACTIVE tracks remained at
+  // the top of each playlist. advance() now scans from the TOP (firstPlayablePos), not forward
+  // from the drifted pos (nextPlayablePos) — so the topmost unplayed track is always next.
+
+  it('the first unplayed (active) track from the top is next', () => {
+    // dj0: t0 active. dj1: t0 active. → dj0.t0 (pos 0) is next.
+    expect(firstPlayablePos(2, [[true, true], [true, true]])).toBe(0)
+  })
+
+  it('played (off) tracks at the top are skipped — next is the first active below', () => {
+    // dj0: t0,t1 played(off), t2 active. dj1: t0 played(off), t1 active.
+    // Scanning pos 0,1,2,…: dj0.t0(off), dj1.t0(off), dj0.t1(off), dj1.t1(active) → pos 3.
+    const p = [
+      [false, false, true],
+      [false, true],
+    ]
+    expect(firstPlayablePos(2, p)).toBe(3) // dj1.t1 — first active scanning from the top
+    expect(posToSlot(3, 2)).toEqual({ djIndex: 1, trackIndex: 1 })
+  })
+
+  it('a drifted forward scan would MISS the active top tracks (why we switched)', () => {
+    // 2 DJs, 8 tracks each, all active. From a drifted pos 11 the forward scan returns a deep
+    // slot — never the top tracks. firstPlayablePos returns the very top instead.
+    const p = allActive([8, 8])
+    const fwd = nextPlayablePos(11, 2, p)
+    expect(posToSlot(fwd, 2).trackIndex).toBeGreaterThan(0) // forward → deep in the lists
+    expect(firstPlayablePos(2, p)).toBe(0) // scan-from-top → dj0.t0
+  })
+
+  it('with the running track excluded, the next pick is the topmost OTHER active track', () => {
+    // advance() masks the running track. Running = dj0.t0 → next is dj1.t0 (pos 1).
+    const masked = [[false /* running, masked */, true], [true, true]]
+    expect(firstPlayablePos(2, masked)).toBe(1)
+  })
+})
+
 describe('round-robin full walk (regression: every DJ gets played)', () => {
   it('a 2-DJ rotation visits both DJs alternately', () => {
     const p = allActive([2, 2])

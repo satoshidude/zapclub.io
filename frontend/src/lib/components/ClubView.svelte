@@ -27,7 +27,7 @@
     leaveStage,
     persistedStageGroup,
   } from '../nostr/stage.svelte'
-  import { ingestQueue, queues, markPlayed, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
+  import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps, zaps } from '../nostr/zaps.svelte'
@@ -192,11 +192,6 @@
     void joinStage(groupId)
   })
 
-  // When MY track is the live one, mark it as played (greyed out, out of rotation).
-  $effect(() => {
-    const np = sync.live
-    if (np && np.dj === auth.pubkey && np.videoId) void markPlayed(groupId, np.videoId)
-  })
 
   const onStageNow = $derived(stage.isOnStage(auth.pubkey))
 

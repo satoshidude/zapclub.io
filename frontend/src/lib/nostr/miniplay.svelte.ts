@@ -1,5 +1,7 @@
 import type { Event } from 'nostr-tools/pure'
 import { pool, CLUB_RELAY } from './pool'
+import { auth } from './auth.svelte'
+import { markMyTrackPlayed } from './queue.svelte'
 
 // A small, independent now_playing tracker for the GLOBAL mini-player — separate from the
 // `sync` singleton that ClubView drives. It keeps the audio of the *active* club alive
@@ -14,6 +16,7 @@ interface MiniNP {
   duration: number // seconds
   title: string
   status: string
+  dj: string // pubkey of the DJ whose track is playing (for reliable played-marking)
 }
 
 interface MiniState {
@@ -33,6 +36,7 @@ const state = $state<MiniState>({ clubId: null, clubName: '', np: null, offsetMs
 let sub: { close(): void } | null = null
 let newestSent = 0 // sent_at (ms) of the newest now_playing seen — ms so same-second heartbeats aren't dropped
 let lastIngestMs = 0 // wall-clock of the last accepted heartbeat → staleness
+let lastMarked = '' // videoId I last marked played → fire the mark once per track
 
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
@@ -76,12 +80,22 @@ function ingest(ev: Event): void {
   newestSent = sentAt
   lastIngestMs = Date.now()
   state.offsetMs = sentAt - Date.now()
+  const dj = tag('dj') ?? ev.pubkey
   state.np = {
     videoId,
     startedAt,
     duration: Number(tag('duration')) || 0,
     title: ev.content || track,
     status: tag('status') || 'playing',
+    dj,
+  }
+  // Reliable played-marking: if the live track is MINE, mark it off in my queue — even when
+  // I'm not in the club view (this runs from the persistent mini-player layer). The
+  // round-robin scans from the top and skips `off`, so this is what keeps played tracks out
+  // of the rotation regardless of where I've navigated. Guarded so it fires once per track.
+  if (videoId && dj === auth.pubkey && state.clubId && videoId !== lastMarked) {
+    lastMarked = videoId
+    void markMyTrackPlayed(state.clubId, videoId)
   }
 }
 
@@ -96,6 +110,7 @@ export function registerActiveClub(clubId: string, clubName: string): void {
   state.np = null
   newestSent = 0
   lastIngestMs = 0
+  lastMarked = ''
   try {
     localStorage.setItem(KEY, clubId)
   } catch {
@@ -121,6 +136,7 @@ export function stopMiniPlay(): void {
   state.np = null
   newestSent = 0
   lastIngestMs = 0
+  lastMarked = ''
   try {
     localStorage.removeItem(KEY)
   } catch {

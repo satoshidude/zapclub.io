@@ -142,9 +142,34 @@ export function setTrackActive(groupId: string, videoId: string, active: boolean
   return publishMyQueue(groupId, next)
 }
 
-/** Marks a just-played own track as "played" (disabled). */
-export function markPlayed(groupId: string, videoId: string): Promise<void> {
-  return setTrackActive(groupId, videoId, false)
+/**
+ * Marks MY currently-playing track as played (off) — reliably, even when my club queue isn't
+ * resident (I navigated away while staying sticky on stage): falls back to fetch-modify-
+ * publish. Idempotent: no-op if already off or the track isn't in my queue. This is the
+ * single source of truth for "played" (the round-robin scans from the top and skips `off`),
+ * so it must run regardless of whether the club view is mounted — hence driven by the
+ * persistent mini-player layer, not a club-view effect.
+ */
+export async function markMyTrackPlayed(groupId: string, videoId: string): Promise<void> {
+  const me = auth.pubkey
+  if (!me) return
+  let tracks = state.byDj[me]?.tracks
+  if (!tracks) {
+    // Not resident → fetch my own queue for this club.
+    const events = await fetchClubQueues(groupId)
+    const mine = events
+      .filter((e) => e.pubkey === me)
+      .sort((a, b) => b.created_at - a.created_at)[0]
+    if (!mine) return
+    tracks = parseTracks(mine)
+    state.byDj[me] = { dj: me, tracks, updatedAt: mine.created_at }
+  }
+  const idx = tracks.findIndex((t) => t.videoId === videoId)
+  if (idx < 0 || tracks[idx].active === false) return // gone or already off
+  await publishMyQueue(
+    groupId,
+    tracks.map((t, i) => (i === idx ? { ...t, active: false } : t)),
+  )
 }
 
 export function addTrack(groupId: string, track: QueueTrack): Promise<void> {
