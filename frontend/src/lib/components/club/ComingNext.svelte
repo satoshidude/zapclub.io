@@ -3,8 +3,6 @@
   import { stage } from '../../nostr/stage.svelte'
   import { queues } from '../../nostr/queue.svelte'
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
-  import { goUser } from '../../router.svelte'
-  import { npubEncode } from 'nostr-tools/nip19'
 
   // Recompute when the running track, the stage, OR any DJ's queue changes. `void queues`
   // alone does NOT track queue edits (it's a constant object ref) — explicitly touch each
@@ -24,7 +22,7 @@
     <summary>
       <span class="cn-label">Up next</span>
       <span class="cn-title">{next[0].title}</span>
-      <a class="cn-dj" href={`/user/${npubEncode(next[0].dj)}`} onclick={(e) => { e.preventDefault(); e.stopPropagation(); goUser(npubEncode(next[0].dj)) }}>{displayName(next[0].dj, firstProfile)}</a>
+      <span class="cn-dj">{displayName(next[0].dj, firstProfile)}</span>
       {#if rest.length > 0}<span class="chevron" aria-hidden="true">▾</span>{/if}
     </summary>
     {#if rest.length > 0}
@@ -34,7 +32,7 @@
           <li>
             <span class="idx">{i + 2}</span>
             <span class="title">{item.title}</span>
-            <a class="dj" href={`/user/${npubEncode(item.dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(item.dj)) }}>{displayName(item.dj, profile)}</a>
+            <span class="dj">{displayName(item.dj, profile)}</span>
           </li>
         {/each}
       </ol>
@@ -84,11 +82,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .cn-dj:hover {
-    text-decoration: underline;
   }
   .chevron {
     flex: 0 0 auto;
@@ -132,10 +125,5 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .dj:hover {
-    text-decoration: underline;
   }
 </style>
