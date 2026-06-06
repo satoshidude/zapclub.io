@@ -14,6 +14,7 @@ interface PayState {
 
 const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '' })
 let closeWatch: (() => void) | null = null
+let onPaidCb: (() => void) | null = null
 
 export const payModal = {
   get open() {
@@ -37,13 +38,14 @@ export function showPay(
   invoice: string,
   sats: number,
   label: string,
-  opts: { verify?: string; dj?: string } = {},
+  opts: { verify?: string; dj?: string; onPaid?: () => void } = {},
 ): void {
   state.invoice = invoice
   state.sats = sats
   state.label = label
   state.paid = false
   state.dj = opts.dj ?? ''
+  onPaidCb = opts.onPaid ?? null
   closeWatch?.()
   closeWatch = null
   // Detect an external payment two ways:
@@ -67,11 +69,17 @@ export function markPaid(): void {
   if (state.paid) return
   state.paid = true
   if (state.dj && state.invoice) creditZap(state.dj, state.sats, state.invoice)
+  if (onPaidCb) {
+    const cb = onPaidCb
+    onPaidCb = null
+    cb() // e.g. paid-club entry → join after payment
+  }
 }
 
 export function hidePay(): void {
   closeWatch?.()
   closeWatch = null
+  onPaidCb = null
   state.invoice = ''
   state.sats = 0
   state.label = ''

@@ -62,6 +62,18 @@ async function lnurlPayData(lud16: string): Promise<LnurlPay> {
   return j
 }
 
+/** Resolves a lightning address to its NIP-57 zapper pubkey (nostrPubkey), or '' if the
+ *  endpoint doesn't support nostr zaps. Stored in a paid club's config so the relay can later
+ *  verify entry receipts (it can't do the HTTP LNURL lookup itself). */
+export async function resolveZapper(lud16: string): Promise<string> {
+  try {
+    const d = await lnurlPayData(lud16)
+    return d.allowsNostr && d.nostrPubkey ? d.nostrPubkey : ''
+  } catch {
+    return ''
+  }
+}
+
 export interface ZapInvoice {
   invoice: string // bolt11
   verify?: string // LUD-21 verify URL (to detect external payment)

@@ -31,6 +31,25 @@ export interface Club {
   memberCount?: number
   /** Owner/creator (first admin, kind 39001). pubkey (hex). */
   owner?: string
+  /** Access mode from the club-config event (kind 30101). 'open' (default) or 'paid'. */
+  access?: 'open' | 'paid'
+  /** Entry price in sats (paid clubs). */
+  price?: number
+}
+
+/**
+ * Club access config (kind 30101, addressable, authored by the OWNER). Separate from NIP-29
+ * metadata (39000) because relay29 doesn't carry custom tags. 'open' = anyone hears for free,
+ * join only to DJ/chat. 'paid' = entry costs `price` sats to `lud16`; the relay enforces it.
+ */
+export interface ClubConfig {
+  access: 'open' | 'paid'
+  /** Entry price in sats (0 for open). */
+  price: number
+  /** Entry lightning address (paid). */
+  lud16: string
+  /** Resolved NIP-57 zapper pubkey of `lud16` — for relay-side receipt verification. */
+  zapper: string
 }
 
 export interface ClubMember {

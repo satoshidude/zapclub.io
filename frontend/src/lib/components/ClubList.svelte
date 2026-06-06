@@ -146,6 +146,7 @@
             {#if club.about}<div class="about">{club.about}</div>{/if}
             <div class="tags">
               <span class="tag">👥 {club.memberCount} member{club.memberCount === 1 ? '' : 's'}</span>
+              {#if club.access === 'paid'}<span class="tag paid">🔒 {club.price} sats</span>{/if}
             </div>
             {#if club.owner}
               {@const ownerProfile = useProfile(club.owner)}
@@ -339,6 +340,11 @@
     border-radius: 999px;
     padding: 0.1rem 0.5rem;
     white-space: nowrap;
+  }
+  .tag.paid {
+    color: var(--amber);
+    border-color: var(--amber);
+    font-weight: 700;
   }
   .host {
     display: flex;

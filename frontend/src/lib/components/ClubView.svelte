@@ -7,6 +7,8 @@
     addModerator,
     deleteEvent,
     editClub,
+    setClubConfig,
+    parseClubConfig,
     parseClubMetadata,
     parseMembers,
     parseAdmins,
@@ -30,8 +32,10 @@
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
-  import { subscribeZaps, resetZaps } from '../nostr/zaps.svelte'
+  import { subscribeZaps, resetZaps, requestZapInvoice } from '../nostr/zaps.svelte'
+  import { showPay } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
+  import type { Event } from 'nostr-tools/pure'
   import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
@@ -62,6 +66,16 @@
   const isMember = $derived(!!auth.pubkey && members.some((m) => m.pubkey === auth.pubkey))
   const canModerate = $derived(isOwner || isMod)
 
+  // Access config (kind 30101) — keep the newest per author; only the OWNER's counts.
+  let configEvs = $state<Record<string, Event>>({})
+  const clubConfig = $derived.by(() => {
+    const ev = owner ? configEvs[owner] : null
+    return ev ? parseClubConfig(ev) : { access: 'open' as const, price: 0, lud16: '', zapper: '' }
+  })
+  const isPaid = $derived(clubConfig.access === 'paid')
+  // Open clubs: everyone hears (guests included). Paid clubs: only members (who paid) hear.
+  const canHear = $derived(!isPaid || isMember)
+
 
   /** Is a pubkey an admin/moderator (allowed to kick from stage)? */
   function isModerator(pubkey: string): boolean {
@@ -77,6 +91,7 @@
     club = null
     members = []
     admins = []
+    configEvs = {}
     stageResumed = false
     const me = auth.pubkey
     const stop = subscribeClub(id, {
@@ -99,6 +114,10 @@
         if (kicked && kicked === me && stage.isOnStage(me)) void leaveStage(id)
       },
       onQueue: ingestQueue,
+      onConfig: (ev) => {
+        const prev = configEvs[ev.pubkey]
+        if (!prev || ev.created_at >= prev.created_at) configEvs = { ...configEvs, [ev.pubkey]: ev }
+      },
       onSkip: ingestSkipIntent,
       onChat: ingestChat,
       onDeleteEvent: (ev) => {
@@ -246,15 +265,24 @@
     return ''
   }
 
-  // Owner: edit the club (name / about / picture).
+  // Owner: edit the club (name / about / picture / access).
   let editing = $state(false)
   let eName = $state('')
   let eAbout = $state('')
   let ePic = $state('')
+  let eAccess = $state<'open' | 'paid'>('open')
+  let ePrice = $state(21)
+  let eLud16 = $state('')
   function openEdit() {
     eName = club?.name ?? ''
     eAbout = club?.about ?? ''
     ePic = club?.picture ?? ''
+    eAccess = clubConfig.access
+    ePrice = clubConfig.price || 21
+    // Entry address defaults to the club config, else the owner's profile lightning address,
+    // else the zapclub fallback.
+    const ownerLud = (useProfile(owner)?.lud16 as string) || ''
+    eLud16 = clubConfig.lud16 || ownerLud || 'zapclub@nsnip.io'
     editing = true
   }
   async function saveEdit() {
@@ -266,9 +294,40 @@
         about: eAbout.trim() || undefined,
         picture: ePic.trim() || undefined,
       })
+      await setClubConfig(groupId, {
+        access: eAccess,
+        price: eAccess === 'paid' ? Math.max(1, Math.floor(ePrice)) : 0,
+        lud16: eAccess === 'paid' ? eLud16.trim() : '',
+      })
       editing = false
     } catch (e) {
       error = String((e as Error)?.message ?? e)
+    }
+  }
+
+  // Paid club: pay the entry fee, then join. The relay (entryfee) verifies the receipt.
+  async function doPaidJoin() {
+    if (!auth.isLoggedIn) {
+      launchLogin()
+      return
+    }
+    busy = true
+    error = ''
+    try {
+      const { invoice, verify } = await requestZapInvoice(
+        clubConfig.zapper,
+        clubConfig.lud16,
+        clubConfig.price,
+        `Entry to ${club?.name ?? 'club'}`,
+      )
+      showPay(invoice, clubConfig.price, `Enter ${club?.name ?? 'club'}`, {
+        verify,
+        onPaid: () => void joinClub(groupId),
+      })
+    } catch (e) {
+      error = String((e as Error)?.message ?? e)
+    } finally {
+      busy = false
     }
   }
 </script>
@@ -283,6 +342,7 @@
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+          {#if isPaid}<span class="tag paid">🔒 {clubConfig.price} sats entry</span>{/if}
           {#if owner}
             {@const op = useProfile(owner)}
             <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
@@ -300,6 +360,8 @@
         {#if auth.canSign}
           {#if isMember}
             <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
+          {:else if isPaid}
+            <button class="btn btn-primary btn-sm" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
           {:else}
             <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
           {/if}
@@ -321,6 +383,24 @@
           <label for="e-pic">Image URL (leave empty for the generated one)</label>
           <input id="e-pic" bind:value={ePic} placeholder="https://…" />
         </div>
+        <div class="field">
+          <label for="e-access">Access</label>
+          <select id="e-access" bind:value={eAccess}>
+            <option value="open">Open — anyone listens free; join to DJ/chat</option>
+            <option value="paid">Paid — pay sats to enter</option>
+          </select>
+        </div>
+        {#if eAccess === 'paid'}
+          <div class="field">
+            <label for="e-price">Entry price (sats)</label>
+            <input id="e-price" type="number" min="1" inputmode="numeric" bind:value={ePrice} />
+          </div>
+          <div class="field">
+            <label for="e-lud16">Entry lightning address (receives the entry fees)</label>
+            <input id="e-lud16" bind:value={eLud16} placeholder="you@wallet.com" autocomplete="off" />
+          </div>
+          <p class="paid-note">Guests hear nothing until they pay. Defaults to your profile address.</p>
+        {/if}
         <div class="edit-actions">
           <button class="btn btn-primary btn-sm" onclick={saveEdit} disabled={!eName.trim()}>Save</button>
           <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)}>Cancel</button>
@@ -339,12 +419,9 @@
       />
     </div>
     <Player
-      canHear={isMember}
-      ctaText={isMember ? '' : auth.isLoggedIn ? 'Join to listen' : 'Sign in to listen'}
-      onCta={() => {
-        if (auth.isLoggedIn) void doJoin()
-        else launchLogin()
-      }}
+      canHear={canHear}
+      ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
+      onCta={doPaidJoin}
       onended={() => onTrackEnded(groupId)}
       onerror={(vid) => onTrackError(groupId, vid)}
     />
@@ -392,7 +469,7 @@
                 {@const profile = useProfile(m.pubkey)}
                 <li>
                   <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
-                  <span class="mname">{displayName(m.pubkey, profile)}</span>
+                  <a class="mname" href={`/user/${npubEncode(m.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(m.pubkey)) }}>{displayName(m.pubkey, profile)}</a>
                   {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
                   {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
                     <span class="mod-actions">
@@ -501,6 +578,25 @@
     border-color: var(--accent-2);
     color: var(--text);
   }
+  .tag.paid {
+    color: var(--amber);
+    border-color: var(--amber);
+    font-weight: 700;
+  }
+  .edit-form .field select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.6rem;
+    font-size: 0.9rem;
+  }
+  .paid-note {
+    margin: 0.2rem 0 0;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
   .host-av {
     width: 14px;
     height: 14px;
@@ -578,6 +674,12 @@
   .mname {
     font-size: 0.9rem;
     font-weight: 600;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .mname:hover {
+    text-decoration: underline;
   }
   .role {
     font-size: 0.68rem;

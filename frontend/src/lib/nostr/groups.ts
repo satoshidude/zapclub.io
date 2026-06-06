@@ -2,7 +2,8 @@ import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { pool, CLUB_RELAY } from './pool'
 import { signEvent } from './nostrLogin'
-import type { Club, ClubMember } from './types'
+import { resolveZapper } from './zaps.svelte'
+import type { Club, ClubMember, ClubConfig } from './types'
 
 // NIP-29 event kinds (Phase 2 subset — DJ/stage/queue kinds come in Phase 3).
 export const KIND_CHAT = 9
@@ -24,6 +25,7 @@ export const KIND_QUEUE = 30103 // replaceable per DJ/club: that DJ's track queu
 export const KIND_STAGE_KICK = 30106 // replaceable per DJ: owner/mod kicks a DJ off stage
 export const KIND_SKIP = 30107 // replaceable per club: owner/mod asks the conductor to skip
 export const KIND_PLAY = 1313 // non-replaceable play record (1 per real track start)
+export const KIND_CLUB_CONFIG = 30101 // replaceable per club (d=club), OWNER-authored: access/price
 
 const RELAYS = [CLUB_RELAY]
 
@@ -104,6 +106,38 @@ export async function editClub(
   if (meta.about) metaTags.push(['about', meta.about])
   if (meta.picture) metaTags.push(['picture', meta.picture])
   await publishClub({ kind: KIND_EDIT_METADATA, created_at: now(), tags: metaTags, content: '' })
+}
+
+/**
+ * Sets the club access config (kind 30101, OWNER only). For paid clubs the entry lightning
+ * address is resolved to its NIP-57 zapper pubkey and stored too, so the relay can verify
+ * entry receipts. Open clubs store access=open (price 0).
+ */
+export async function setClubConfig(
+  groupId: string,
+  cfg: { access: 'open' | 'paid'; price: number; lud16: string },
+): Promise<void> {
+  const tags: string[][] = [
+    ['h', groupId],
+    ['d', groupId],
+    ['access', cfg.access],
+  ]
+  if (cfg.access === 'paid') {
+    const zapper = cfg.lud16 ? await resolveZapper(cfg.lud16) : ''
+    tags.push(['price', String(Math.max(0, Math.floor(cfg.price)))], ['lud16', cfg.lud16], ['zapper', zapper])
+  }
+  await publishClub({ kind: KIND_CLUB_CONFIG, created_at: now(), tags, content: '' })
+}
+
+/** Parses a club-config event (kind 30101). Caller must verify the author is the owner. */
+export function parseClubConfig(ev: Event): ClubConfig {
+  const tag = (n: string) => ev.tags.find((t) => t[0] === n)?.[1] ?? ''
+  return {
+    access: tag('access') === 'paid' ? 'paid' : 'open',
+    price: Number(tag('price')) || 0,
+    lud16: tag('lud16'),
+    zapper: tag('zapper'),
+  }
 }
 
 /** Join request (NIP-29 kind 9021). Open clubs auto-add the member on the relay. */
@@ -232,10 +266,11 @@ export function parseOwner(ev: Event): string {
  * so orphaned/test clubs don't clutter the home page.
  */
 export async function listClubs(): Promise<Club[]> {
-  const [metaEvents, memberEvents, adminEvents] = await Promise.all([
+  const [metaEvents, memberEvents, adminEvents, configEvents] = await Promise.all([
     pool.querySync(RELAYS, { kinds: [KIND_METADATA] }, { maxWait: 4000 }),
     pool.querySync(RELAYS, { kinds: [KIND_MEMBERS] }, { maxWait: 4000 }),
     pool.querySync(RELAYS, { kinds: [KIND_ADMINS] }, { maxWait: 4000 }),
+    pool.querySync(RELAYS, { kinds: [KIND_CLUB_CONFIG] }, { maxWait: 4000 }),
   ])
   const counts = new Map<string, number>()
   for (const ev of memberEvents) {
@@ -248,6 +283,16 @@ export async function listClubs(): Promise<Club[]> {
     const id = tagValue(ev, 'd')
     if (id) owners.set(id, parseOwner(ev))
   }
+  // Access config (30101) — newest OWNER-authored per club only (others ignored).
+  const configs = new Map<string, ClubConfig>()
+  const configAt = new Map<string, number>()
+  for (const ev of configEvents) {
+    const id = tagValue(ev, 'd')
+    if (!id || ev.pubkey !== owners.get(id)) continue
+    if (ev.created_at < (configAt.get(id) ?? 0)) continue
+    configAt.set(id, ev.created_at)
+    configs.set(id, parseClubConfig(ev))
+  }
   return metaEvents
     .map(parseClubMetadata)
     .filter((c) => c.id)
@@ -255,6 +300,8 @@ export async function listClubs(): Promise<Club[]> {
       ...c,
       memberCount: counts.get(c.id) ?? 0,
       owner: owners.get(c.id) || undefined,
+      access: configs.get(c.id)?.access ?? 'open',
+      price: configs.get(c.id)?.price ?? 0,
     }))
     .filter((c) => (c.memberCount ?? 0) > 0)
     .sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
@@ -367,6 +414,7 @@ export interface ClubSubHandlers {
   onStageKick?: (ev: Event) => void
   onQueue?: (ev: Event) => void
   onSkip?: (ev: Event) => void
+  onConfig?: (ev: Event) => void
 }
 
 /**
@@ -385,6 +433,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_STAGE_KICK,
       KIND_QUEUE,
       KIND_SKIP,
+      KIND_CLUB_CONFIG,
     ],
     '#h': [groupId],
   }
@@ -408,6 +457,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_STAGE_KICK) h.onStageKick?.(ev)
       else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
       else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
+      else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
     },
   })
 
