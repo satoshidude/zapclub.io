@@ -5,20 +5,27 @@
     isSuperadmin,
     loadAdminData,
     listBans,
+    loadListeners,
     banPubkey,
     unbanPubkey,
     deleteClubAdmin,
     SUPERADMIN,
     type AdminClub,
+    type ListenersResp,
   } from '../nostr/admin'
   import { goClub, goUser } from '../router.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
+  import ListenersChart from './ListenersChart.svelte'
 
   let clubs = $state<AdminClub[]>([])
   let bans = $state<Record<string, string>>({})
+  let listeners = $state<ListenersResp | null>(null)
   let loading = $state(true)
   let error = $state('')
   let busy = $state('')
+
+  // Club id → display name (for the listeners chart, which only knows ids).
+  const clubName = $derived((id: string) => clubs.find((c) => c.id === id)?.name || id.slice(0, 8))
 
   // Manual ban field
   let banInput = $state('')
@@ -28,9 +35,14 @@
     loading = true
     error = ''
     try {
-      const [c, b] = await Promise.all([loadAdminData(), listBans().catch(() => ({}))])
+      const [c, b, l] = await Promise.all([
+        loadAdminData(),
+        listBans().catch(() => ({})),
+        loadListeners().catch(() => null),
+      ])
       clubs = c
       bans = b
+      listeners = l
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {
@@ -109,8 +121,18 @@
   const bannedList = $derived(Object.entries(bans))
 
   $effect(() => {
-    if (isSuperadmin()) void load()
-    else loading = false
+    if (!isSuperadmin()) {
+      loading = false
+      return
+    }
+    void load()
+    // Keep the live listener count + chart fresh without a full reload.
+    const iv = setInterval(() => {
+      loadListeners()
+        .then((l) => (listeners = l))
+        .catch(() => {})
+    }, 30_000)
+    return () => clearInterval(iv)
   })
 </script>
 
@@ -127,6 +149,13 @@
     </header>
 
     {#if error}<p class="err">⚠ {error}</p>{/if}
+
+    <!-- Listeners (live + 24h history, by club) -->
+    {#if listeners}
+      <section class="card">
+        <ListenersChart data={listeners} {clubName} />
+      </section>
+    {/if}
 
     <!-- Ban by npub/hex -->
     <section class="card ban-box">

@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/fiatjaf/eventstore/badger"
@@ -141,6 +143,11 @@ func main() {
 		},
 	)
 
+	// Listener analytics (superadmin dashboard): observe ephemeral presence beats (kind
+	// 20100) and keep a rolling 24h per-club record. Persisted so the window survives deploys.
+	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
+	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
+
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
 	// enforced so it can't be bypassed by a hand-crafted join. (Reads the club config from the
@@ -189,11 +196,12 @@ func main() {
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans, state: state}
+	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners}
 	relay.Router().HandleFunc("/admin/bans", admin.handle)
 	relay.Router().HandleFunc("/admin/ban", admin.handle)
 	relay.Router().HandleFunc("/admin/unban", admin.handle)
 	relay.Router().HandleFunc("/admin/delete-club", admin.handle)
+	relay.Router().HandleFunc("/admin/listeners", admin.handle)
 
 	relay.Router().HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "zapclub relay — NIP-29. Use a zapclub/nostr client to connect.")
@@ -217,7 +225,20 @@ func main() {
 				ipConnLim.sweep(10 * time.Minute)
 			}
 			pruneAdminNonces()
+			// Advance/trim the listener buckets even when idle, then persist (5-min tick
+			// matches the 5-min bucket → at most one bucket lost on an unclean crash).
+			listeners.tick(time.Now().UnixMilli(), true)
 		}
+	}()
+
+	// Persist listener analytics on shutdown (systemctl restart → SIGTERM) so a deploy
+	// doesn't drop the last (≤5-min) bucket of the 24h window.
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
+		<-sig
+		listeners.save()
+		os.Exit(0)
 	}()
 
 	// Nur auf localhost lauschen — Zugriff ausschließlich über Caddy (TLS/Routing).

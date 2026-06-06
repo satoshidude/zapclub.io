@@ -164,9 +164,10 @@ func pruneAdminNonces() {
 
 // adminAPI exposes superadmin-only relay management over HTTP (NIP-98 authenticated).
 type adminAPI struct {
-	db    *badger.BadgerBackend
-	bans  *banStore
-	state *relay29.State
+	db        *badger.BadgerBackend
+	bans      *banStore
+	state     *relay29.State
+	listeners *listenerStats
 }
 
 func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +192,8 @@ func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.unban(w, r)
 	case "/admin/delete-club":
 		a.deleteClub(w, r)
+	case "/admin/listeners":
+		a.writeJSON(w, a.listeners.snapshot(time.Now().UnixMilli()))
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}

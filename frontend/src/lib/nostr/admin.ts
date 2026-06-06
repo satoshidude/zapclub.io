@@ -51,6 +51,34 @@ export function deleteClubAdmin(groupId: string): Promise<{ ok: boolean; purged:
   return adminFetch('/admin/delete-club', 'POST', { groupId }) as Promise<{ ok: boolean; purged: number }>
 }
 
+// ── Listener analytics (superadmin) ──────────────────────────────────────────
+export interface ListenerSample {
+  t: number // bucket start (ms)
+  n: number // distinct listeners during the bucket
+}
+export interface SeenListener {
+  pubkey: string
+  first: number // first beat in the window (ms)
+  last: number // last beat (ms)
+}
+export interface ClubListeners {
+  id: string
+  live: string[] // pubkeys beating right now
+  series: ListenerSample[] // 24h count buckets (incl. the open one)
+  seen: SeenListener[] // who listened in the window + their span
+}
+export interface ListenersResp {
+  generatedAt: number
+  bucketMs: number
+  windowMs: number
+  clubs: ClubListeners[]
+}
+
+/** Live + 24h listener history per club, recorded by the relay from presence beats. */
+export function loadListeners(): Promise<ListenersResp> {
+  return adminFetch('/admin/listeners', 'GET') as Promise<ListenersResp>
+}
+
 /** A fully-detailed club view for the superadmin dashboard. */
 export interface AdminClub extends Club {
   admins: string[]

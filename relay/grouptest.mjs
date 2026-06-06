@@ -154,6 +154,17 @@ if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
   const noAuth = await fetch(ADMIN_URL + '/admin/bans')
   assert(noAuth.status === 401, 'admin without auth → 401 (got ' + noAuth.status + ')')
 
+  // Listener analytics: a member's presence beat (kind 20100) is recorded and surfaces in
+  // /admin/listeners as a live listener of the club.
+  await mem.ev({ kind: 20100, created_at: now(), tags: [['h', G]], content: '' })
+  await sleep(400)
+  const lis = await adminReq('/admin/listeners', 'GET')
+  let lj = {}
+  try { lj = JSON.parse(lis.body) } catch { /* ignore */ }
+  const clubL = (lj.clubs || []).find((c) => c.id === G)
+  assert(lis.status === 200 && !!clubL && clubL.live.includes(mem.pub), 'listeners: member shows as live in the club')
+  assert(!!clubL && clubL.seen.some((s) => s.pubkey === mem.pub), 'listeners: member appears in the 24h seen list')
+
   const ban = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub, reason: 'e2e' })
   assert(ban.status === 200, 'ban → 200 (got ' + ban.status + ' ' + ban.body.slice(0, 60) + ')')
   await sleep(500)

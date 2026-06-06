@@ -10,6 +10,9 @@ relay/zapclub-relay
 relay/*.test
 relay/db/
 relay/badger/
+relay/banned.json
+relay/listeners.json
+relay/listeners.json.tmp
 
 # Secrets — NEVER commit
 relay/relay.env
