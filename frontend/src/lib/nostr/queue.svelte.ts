@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure'
-import { KIND_QUEUE, publishClub } from './groups'
+import { KIND_QUEUE, publishClub, fetchClubQueues } from './groups'
 import { auth } from './auth.svelte'
 import { isValidVideoId } from '../util'
 import type { DjQueue, QueueTrack } from './types'
@@ -41,7 +41,8 @@ function parseTracks(ev: Event): QueueTrack[] {
     .filter((tr) => isValidVideoId(tr.videoId))
 }
 
-/** Handles an incoming queue event (kind 30103). */
+/** Handles an incoming queue event (kind 30103). Idempotent: an equal/older event for a DJ
+ *  never regresses their state (newest created_at wins) — safe to re-ingest from the poll. */
 export function ingestQueue(ev: Event): void {
   const prev = state.byDj[ev.pubkey]
   if (prev && ev.created_at < prev.updatedAt) return
@@ -50,6 +51,58 @@ export function ingestQueue(ev: Event): void {
     tracks: parseTracks(ev),
     updatedAt: ev.created_at,
   }
+}
+
+// ── reliable queue re-sync ──────────────────────────────────────────────────
+// The live subscription (subscribeClub) pushes queue edits, but pushes can be missed on
+// reconnects / relay restarts / network blips — and the round-robin is only as correct as
+// the queue state behind it. So we ALSO poll all DJ queues for the active club on an
+// interval and re-ingest them (idempotent). This guarantees the round-robin reliably
+// reflects the current playlists even when a 30103 push never arrived.
+const QUEUE_SYNC_MS = 15_000
+let syncTimer: ReturnType<typeof setInterval> | null = null
+let syncGroup: string | null = null
+let syncing = false
+
+/** Re-query all DJ queues for a club and ingest them (one-shot). Overlap-guarded. */
+export async function refreshQueues(groupId: string): Promise<void> {
+  if (syncing) return
+  syncing = true
+  try {
+    const events = await fetchClubQueues(groupId)
+    for (const ev of events) ingestQueue(ev)
+  } catch {
+    /* transient relay/network error — the next tick retries */
+  } finally {
+    syncing = false
+  }
+}
+
+/** Start the periodic queue re-sync for a club (immediate refresh + interval). Idempotent. */
+export function startQueueSync(groupId: string): void {
+  if (syncGroup === groupId && syncTimer) return
+  stopQueueSync()
+  syncGroup = groupId
+  void refreshQueues(groupId)
+  syncTimer = setInterval(() => {
+    if (syncGroup) void refreshQueues(syncGroup)
+  }, QUEUE_SYNC_MS)
+}
+
+export function stopQueueSync(): void {
+  if (syncTimer) {
+    clearInterval(syncTimer)
+    syncTimer = null
+  }
+  syncGroup = null
+}
+
+// A backgrounded tab throttles the interval; refresh immediately on return so the round-robin
+// is current the moment the user looks again.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && syncGroup) void refreshQueues(syncGroup)
+  })
 }
 
 // ── edit my own queue ───────────────────────────────────────────────────────

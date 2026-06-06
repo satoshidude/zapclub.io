@@ -338,6 +338,16 @@ export async function fetchUserClubActivity(
   return { hosting, djingIn }
 }
 
+/**
+ * Snapshot of all DJ queues (kind 30103) for a club — one replaceable event per DJ. Used by
+ * the periodic queue re-sync (queue.svelte) as a reliability net against missed live
+ * subscription events (reconnects, relay restarts), so the round-robin always sees the
+ * current playlists. Read-only; ingestion stays idempotent (newest created_at wins).
+ */
+export async function fetchClubQueues(groupId: string): Promise<Event[]> {
+  return pool.querySync(RELAYS, { kinds: [KIND_QUEUE], '#h': [groupId] }, { maxWait: 4000 })
+}
+
 /** Fetch single club metadata (by d-tag). */
 export async function fetchClub(groupId: string): Promise<Club | null> {
   const ev = await pool.get(RELAYS, { kinds: [KIND_METADATA], '#d': [groupId] }, { maxWait: 4000 })

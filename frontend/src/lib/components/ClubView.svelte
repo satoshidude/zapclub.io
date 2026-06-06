@@ -27,7 +27,7 @@
     leaveStage,
     persistedStageGroup,
   } from '../nostr/stage.svelte'
-  import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
+  import { ingestQueue, queues, markPlayed, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps, zaps } from '../nostr/zaps.svelte'
@@ -112,6 +112,11 @@
       },
     })
 
+    // Reliable round-robin: besides the live push subscription above, periodically re-query
+    // all DJ queues so the rotation stays correct even if a 30103 push was missed (reconnect,
+    // relay restart). Idempotent ingest, so it never fights live updates or local edits.
+    startQueueSync(id)
+
     // Conductor tick: only the conductor acts inside conductorTick(). Touch queues so the
     // effect re-evaluates when queue lengths change (reactivity).
     const tick = setInterval(() => {
@@ -122,6 +127,7 @@
     return () => {
       stop()
       clearInterval(tick)
+      stopQueueSync()
       resetSync()
       // Only clear the stage DISPLAY — keep my own presence + heartbeat so navigating
       // doesn't drop me off the stage (WebKit). Full reset happens on logout.
@@ -143,6 +149,15 @@
   // Owner (first admin) is the stage host = always conductor when on stage.
   $effect(() => {
     setStageHost(owner || null)
+  })
+
+  // When the DJ roster changes (someone steps on/off stage), re-sync the queues right away
+  // so a new DJ's playlist enters the round-robin immediately instead of waiting for the
+  // next poll tick. Keyed on the DJ set so it only fires on actual roster changes.
+  $effect(() => {
+    const roster = stage.djs.map((d) => d.pubkey).join(',')
+    void roster
+    void refreshQueues(groupId)
   })
 
   // This club is now the active audio source. The global mini-player keeps it playing
