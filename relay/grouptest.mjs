@@ -62,6 +62,22 @@ const members = (await host.query({ kinds: [39002], '#d': [G] }))
 const memberPubs = members.flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
 assert(memberPubs.includes(mem.pub), 'open club auto-join: member is in 39002')
 
+// 2a. LEAVE then REJOIN (open club). relay29 stores a remove-user record on a 9022 leave
+// and then (buggily) bars ALL future joins by that pubkey — clearRemovalBarOnJoin must
+// clear that stale record so the rejoin re-adds the member. Regression guard for the
+// "can't rejoin after leaving" bug.
+await mem.ev({ kind: 9022, created_at: now(), tags: [['h', G]], content: '' })
+await sleep(600)
+const afterLeave = (await host.query({ kinds: [39002], '#d': [G] }))
+  .flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(!afterLeave.includes(mem.pub), 'leave removes member from 39002')
+const rejoin = await mem.ev({ kind: 9021, created_at: now() + 1, tags: [['h', G]], content: '' })
+console.log('REJOIN (after leave) ->', ok(rejoin))
+await sleep(600)
+const afterRejoin = (await host.query({ kinds: [39002], '#d': [G] }))
+  .flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(afterRejoin.includes(mem.pub), 'rejoin after leave re-adds member to 39002')
+
 // 2b. NIP-13 PoW: chat without proof-of-work is rejected, with PoW accepted.
 const noPow = await mem.evRaw({ kind: 9, created_at: now(), tags: [['h', G]], content: 'no pow' })
 assert(noPow[0] === false && /pow/i.test(noPow[1] || ''), 'chat without PoW rejected: ' + ok(noPow))

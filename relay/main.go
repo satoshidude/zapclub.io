@@ -81,6 +81,17 @@ func main() {
 	// werden, den ReplaceEvent-Handler des Stores ergänzen → genau 1 Zeile pro Adresse.
 	relay.ReplaceEvent = append(relay.ReplaceEvent, db.ReplaceEvent)
 
+	// relay29 macht das Verlassen eines Clubs PERMANENT: ein 9022-Leave (wie auch ein
+	// Mod-Kick) hinterlegt einen remove-user-Datensatz, und der Join-Reactor lehnt danach
+	// JEDEN weiteren Beitritt dieser pubkey ab — sein Check filtert nur nach pubkey, NICHT
+	// nach Gruppe, also sperrt eine Entfernung aus EINEM Club das (Wieder-)Beitreten in
+	// ALLE. In zapclub ist Entfernen nie ein Dauerbann (das ist die Ban-Liste, früher in der
+	// RejectEvent-Kette). Daher VOR dem Join-Reactor die alten remove-user-Sätze löschen.
+	relay.OnEventSaved = append(
+		[]func(context.Context, *nostr.Event){clearRemovalBarOnJoin(db)},
+		relay.OnEventSaved...,
+	)
+
 	relay.Info.Name = "zapclub"
 	relay.Info.Description = "NIP-29 relay for zapclub.io — collaborative, decentralized music"
 
