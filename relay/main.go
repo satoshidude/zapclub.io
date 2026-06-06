@@ -96,6 +96,10 @@ func main() {
 		},
 	)
 
+	// Per-IP-Spamschutz (schließt die Sybil-Lücke des Per-Pubkey-Limits): Per-IP-Event- +
+	// Per-IP-Connection-Limiter. Direkt nach dem Ban-Check (billige Rejects zuerst).
+	ipEventLim, ipConnLim := setupSpamProtection(relay)
+
 	// Chat (kind 9): streng — Burst 6, Auffüllung 1 alle 3 s (~20/min). Stoppt
 	// gescriptete Floods, erlaubt normales Chatten. Kind 9 ist persistent → Spam-Vektor.
 	chatLimiter := newKindLimiter(6, 1.0/3.0, "rate-limited: too many chat messages", 9)
@@ -158,6 +162,12 @@ func main() {
 			// Per-pubkey content limiters also need sweeping or their maps grow forever.
 			chatLimiter.sweep(10 * time.Minute)
 			reactionLimiter.sweep(10 * time.Minute)
+			if ipEventLim != nil {
+				ipEventLim.sweep(10 * time.Minute)
+			}
+			if ipConnLim != nil {
+				ipConnLim.sweep(10 * time.Minute)
+			}
 			pruneAdminNonces()
 		}
 	}()
