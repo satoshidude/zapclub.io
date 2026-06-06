@@ -28,7 +28,7 @@
     persistedStageGroup,
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, markPlayed, resetQueues } from '../nostr/queue.svelte'
-  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip } from '../nostr/sync.svelte'
+  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, canSkip, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { subscribeZaps, resetZaps, zaps } from '../nostr/zaps.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
@@ -89,10 +89,11 @@
         admins = parseAdmins(ev)
         ownerPk = parseOwner(ev)
       },
-      // Hijack protection: only accept now_playing from the current conductor (or until
-      // a conductor is known) — a rogue client can't steer playback.
+      // Hijack protection: accept now_playing only from a DJ currently on stage — the
+      // elected conductor OR a rescuer that took over a silent/phantom conductor. A rogue
+      // non-DJ member can't steer playback. (Before any stage event is known: bootstrap.)
       onNowPlaying: (ev) => {
-        if (!stage.conductor || ev.pubkey === stage.conductor) ingestNowPlaying(ev)
+        if (stage.djs.length === 0 || stage.isOnStage(ev.pubkey)) ingestNowPlaying(ev)
       },
       onStage: ingestStage,
       onStageKick: (ev) => {
@@ -156,7 +157,7 @@
   $effect(() => {
     const intent = sync.skipIntent
     if (!intent) return
-    if (auth.pubkey !== stage.conductor) return
+    if (!isActingConductor()) return
     const authorized =
       intent.author === owner || isModerator(intent.author) || intent.author === stage.conductor
     const fresh = Date.now() - intent.at < 60_000

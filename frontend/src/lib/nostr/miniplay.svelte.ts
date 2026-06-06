@@ -21,11 +21,24 @@ interface MiniState {
   clubName: string
   np: MiniNP | null
   offsetMs: number // sent_at - Date.now() at ingest → drift calibration
+  /** Reactive clock (ms) so `active` flips off when the conductor goes silent. */
+  now: number
 }
 
-const state = $state<MiniState>({ clubId: null, clubName: '', np: null, offsetMs: 0 })
+// Past this much silence the conductor is gone (navigated away while sticky-on-stage) — the
+// mini-bar must not keep "playing" a dead track. Matches sync.LIVE_STALE_MS.
+const LIVE_STALE_MS = 150_000
+
+const state = $state<MiniState>({ clubId: null, clubName: '', np: null, offsetMs: 0, now: Date.now() })
 let sub: { close(): void } | null = null
 let newestSent = 0 // sent_at (ms) of the newest now_playing seen — ms so same-second heartbeats aren't dropped
+let lastIngestMs = 0 // wall-clock of the last accepted heartbeat → staleness
+
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    state.now = Date.now()
+  }, 5000)
+}
 
 export const miniplay = {
   get clubId() {
@@ -38,7 +51,12 @@ export const miniplay = {
     return state.np
   },
   get active() {
-    return !!state.clubId && !!state.np && state.np.status !== 'stopped'
+    return (
+      !!state.clubId &&
+      !!state.np &&
+      state.np.status !== 'stopped' &&
+      state.now - lastIngestMs <= LIVE_STALE_MS // conductor still alive
+    )
   },
 }
 
@@ -56,6 +74,7 @@ function ingest(ev: Event): void {
   const sentAt = Number(tag('sent_at')) || ev.created_at * 1000
   if (sentAt <= newestSent) return // older/duplicate heartbeat — keep the freshest (ms)
   newestSent = sentAt
+  lastIngestMs = Date.now()
   state.offsetMs = sentAt - Date.now()
   state.np = {
     videoId,
@@ -76,6 +95,7 @@ export function registerActiveClub(clubId: string, clubName: string): void {
   state.clubId = clubId
   state.np = null
   newestSent = 0
+  lastIngestMs = 0
   try {
     localStorage.setItem(KEY, clubId)
   } catch {
@@ -100,6 +120,7 @@ export function stopMiniPlay(): void {
   state.clubName = ''
   state.np = null
   newestSent = 0
+  lastIngestMs = 0
   try {
     localStorage.removeItem(KEY)
   } catch {

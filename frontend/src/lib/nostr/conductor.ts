@@ -50,3 +50,43 @@ export function pickConductor(
   if (current && active.some((d) => d.pubkey === current)) return current
   return active[0].pubkey
 }
+
+/**
+ * Whether `me` should DRIVE playback (write now_playing) right now — pure & deterministic.
+ *
+ * The elected conductor (pickConductor) is the time authority, BUT conducting only happens
+ * while the club view is open, whereas stage presence is sticky across navigation. So an
+ * elected conductor can navigate away (mini-player keeps their audio, the 5-min stage
+ * heartbeat keeps them "on stage") and silently stop driving now_playing — freezing the room
+ * for everyone, since other clients defer to them. This bridges that gap:
+ *
+ *  1. I'm the elected conductor → I always act (present-and-elected reclaims; owner-override).
+ *  2. now_playing is fresh (writer still heartbeating) → only that writer keeps going. A
+ *     rescuer that took over stays the writer until the elected conductor returns and writes.
+ *  3. now_playing went silent (writer gone > rescueAfterMs) → the oldest-since active DJ
+ *     OTHER than the silent writer takes over. Deterministic, so exactly one DJ rescues.
+ *
+ * @param me            local pubkey (or null)
+ * @param elected       pickConductor result (owner-override / sticky-oldest)
+ * @param activeDjs     active stage DJ pubkeys, oldest-since first (selectActiveDjs order)
+ * @param npWriter      writer of the current now_playing, or null if no track yet
+ * @param npStaleMs     ms since now_playing was last refreshed (Infinity if none)
+ * @param rescueAfterMs staleness beyond which a rescuer may take over the silent conductor
+ */
+export function shouldConduct(
+  me: string | null,
+  elected: string | null,
+  activeDjs: string[],
+  npWriter: string | null,
+  npStaleMs: number,
+  rescueAfterMs: number,
+): boolean {
+  if (!me) return false
+  if (me === elected) return true
+  if (npWriter == null) return false // no track yet & I'm not elected → defer to the elected conductor
+  if (npStaleMs <= rescueAfterMs) return npWriter === me // fresh → only the current writer drives
+  // Silent conductor → oldest active DJ that is neither the silent writer nor the (absent)
+  // elected conductor rescues the room.
+  const rescuer = activeDjs.find((pk) => pk !== npWriter && pk !== elected)
+  return rescuer === me
+}

@@ -96,4 +96,7 @@ export interface NowPlaying {
   pos: number
   /** "Artist – Title" (display). */
   title: string
+  /** pubkey that WROTE this now_playing (the acting conductor) — distinct from `dj` (the
+   *  track's DJ). Used to detect a silent/phantom conductor and hand off to a rescuer. */
+  writer?: string
 }

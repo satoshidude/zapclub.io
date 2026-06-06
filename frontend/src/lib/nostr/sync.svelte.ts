@@ -4,6 +4,7 @@ import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
 import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
+import { shouldConduct } from './conductor'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
@@ -11,6 +12,14 @@ import type { NowPlaying } from './types'
  *  matching the stickier stage — brief stalls/background don't trigger an unnecessary
  *  conductor switch. */
 const FAILOVER_MS = 45_000
+/** A DIFFERENT present DJ rescues a silent conductor only after this much staleness — larger
+ *  than a backgrounded tab's worst-case heartbeat gap (~60s) so we don't fight a merely
+ *  backgrounded-but-alive conductor; far below the lobby fallback. */
+const RESCUE_STALE_MS = 90_000
+/** Listeners stop showing a track and fall back to the lobby once now_playing has been
+ *  silent this long — a phantom conductor (navigated away while sticky-on-stage) must not
+ *  freeze the room indefinitely. Beyond RESCUE_STALE_MS so a present DJ takes over first. */
+const LIVE_STALE_MS = 150_000
 
 interface SyncState {
   np: NowPlaying | null
@@ -18,21 +27,34 @@ interface SyncState {
   offsetMs: number
   /** Latest skip request (from an owner/mod without the conductor role). */
   skipIntent: { pos: number; author: string; at: number } | null
+  /** Reactive clock (ms) so `live` re-evaluates staleness even when no events arrive. */
+  now: number
 }
 
-const state = $state<SyncState>({ np: null, offsetMs: 0, skipIntent: null })
+const state = $state<SyncState>({ np: null, offsetMs: 0, skipIntent: null, now: Date.now() })
+
+// Reactive clock: without incoming events, `live` must still flip to the lobby once the
+// conductor goes silent. A plain Date.now() in the getter wouldn't be reactive.
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    state.now = Date.now()
+  }, 5000)
+}
 
 export const sync = {
   get nowPlaying() {
     return state.np
   },
   /**
-   * What's actually playing: a now_playing only counts if someone is on stage (the
-   * conductor drives the round-robin). Without active DJs at most a stale event lingers —
-   * then "nothing plays" and the lobby track takes over.
+   * What's actually playing: a now_playing only counts if someone is on stage AND it's been
+   * refreshed recently. A silent conductor (navigated away while sticky-on-stage) must not
+   * keep the room frozen on a dead track — past LIVE_STALE_MS we return null → lobby track.
    */
   get live() {
-    return state.np && stage.djs.length > 0 ? state.np : null
+    const np = state.np
+    if (!np || stage.djs.length === 0) return null
+    if (state.now - np.sentAt > LIVE_STALE_MS) return null
+    return np
   },
   get isPlaying() {
     return state.np?.status === 'playing'
@@ -57,6 +79,7 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
     dj: tag('dj') ?? ev.pubkey,
     pos: Number(tag('pos')) || 0,
     title: ev.content,
+    writer: ev.pubkey, // who is actually driving — for phantom-conductor detection
   }
 }
 
@@ -86,7 +109,7 @@ export function targetPosition(): number {
  */
 function publishNp(groupId: string, np: NowPlaying): void {
   const sentAt = Date.now()
-  state.np = { ...np, sentAt }
+  state.np = { ...np, sentAt, writer: auth.pubkey ?? np.writer }
   state.offsetMs = 0
   void publishClub({
     kind: KIND_NOW_PLAYING,
@@ -173,14 +196,30 @@ function advance(groupId: string, fromPos: number): void {
 }
 
 /**
- * Called periodically (by ClubView). Only the conductor acts: starts the first track,
- * keeps the heartbeat, takes over on failover.
+ * Whether the local user should DRIVE playback right now — the elected conductor normally,
+ * or (if that conductor went silent while staying sticky-on-stage) the deterministic rescuer.
+ * Bridges the lifecycle gap between conducting (club-view only) and stage presence (sticky).
+ */
+export function isActingConductor(): boolean {
+  const np = state.np
+  return shouldConduct(
+    auth.pubkey,
+    stage.conductor,
+    stage.djs.map((d) => d.pubkey),
+    np?.writer ?? null,
+    np ? Date.now() - np.sentAt : Infinity,
+    RESCUE_STALE_MS,
+  )
+}
+
+/**
+ * Called periodically (by ClubView). Only the acting conductor acts: starts the first track,
+ * keeps the heartbeat, takes over on failover — and rescues a silent/phantom conductor.
  * IMPORTANT: the heartbeat leaves the running track untouched — stage/queue changes only
  * affect the NEXT track (on end or skip).
  */
 export function conductorTick(groupId: string): void {
-  const me = auth.pubkey
-  if (!me || me !== stage.conductor) return // conductor only
+  if (!isActingConductor()) return // acting conductor only
 
   const djs = stage.djs.map((d) => d.pubkey)
   const playable = queues.playable(djs)
@@ -222,16 +261,14 @@ export function conductorTick(groupId: string): void {
  * No-op for a non-conductor (their republished queue reaches the conductor instead).
  */
 export function applyOrderNow(groupId: string): void {
-  const me = auth.pubkey
-  if (!me || me !== stage.conductor || !state.np) return
+  if (!isActingConductor() || !state.np) return
   state.np = reanchorPos(state.np)
   publishNp(groupId, state.np)
 }
 
-/** Manual skip to the next track — ONLY the leading DJ (conductor). */
+/** Manual skip to the next track — ONLY the acting conductor. */
 export function skipTrack(groupId: string): void {
-  const me = auth.pubkey
-  if (!me || me !== stage.conductor || !state.np) return
+  if (!isActingConductor() || !state.np) return
   advance(groupId, state.np.pos)
 }
 
@@ -243,7 +280,7 @@ export function skipTrack(groupId: string): void {
 export async function requestSkip(groupId: string): Promise<void> {
   const me = auth.pubkey
   if (!me || !state.np) return
-  if (me === stage.conductor) {
+  if (isActingConductor()) {
     skipTrack(groupId)
     return
   }
@@ -272,9 +309,9 @@ export function clearSkipIntent(): void {
   state.skipIntent = null
 }
 
-/** Whether the local user may skip — the conductor, OR an owner/moderator. */
+/** Whether the local user may skip — the acting conductor, OR an owner/moderator. */
 export function canSkip(canModerate = false): boolean {
-  return !!auth.pubkey && !!sync.live && (auth.pubkey === stage.conductor || canModerate)
+  return !!auth.pubkey && !!sync.live && (isActingConductor() || canModerate)
 }
 
 /** Preview of the next round-robin tracks (across all DJs), max `max`. */
@@ -305,10 +342,9 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
   return out
 }
 
-/** Track end reported by the player — only the conductor advances. */
+/** Track end reported by the player — only the acting conductor advances. */
 export function onTrackEnded(groupId: string): void {
-  const me = auth.pubkey
-  if (!me || me !== stage.conductor || !state.np) return
+  if (!isActingConductor() || !state.np) return
   errorStreak = 0 // clean end → reset error streak
   advance(groupId, state.np.pos)
 }
@@ -323,8 +359,7 @@ let errorStreak = 0
  * pile up (≥6 in 30s), the club falls back to the lobby track.
  */
 export function onTrackError(groupId: string, videoId: string): void {
-  const me = auth.pubkey
-  if (!me || me !== stage.conductor || !state.np) return
+  if (!isActingConductor() || !state.np) return
   if (state.np.videoId !== videoId) return // stale error of an old track
   const nowMs = Date.now()
   if (nowMs - errorWindowStart > 30_000) {
