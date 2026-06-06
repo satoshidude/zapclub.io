@@ -118,6 +118,18 @@ export async function addTrackToPlaylist(playlistId: string, track: QueueTrack):
   await updatePlaylist({ ...pl, tracks: [...pl.tracks, track] })
 }
 
+/** Appends several tracks to a playlist in ONE publish (deduped, order preserved) — e.g. a
+ *  YouTube playlist import. Adding them one by one would publish the replaceable event N
+ *  times. */
+export async function addTracksToPlaylist(playlistId: string, tracks: QueueTrack[]): Promise<void> {
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl || tracks.length === 0) return
+  const have = new Set(pl.tracks.map((t) => t.videoId))
+  const fresh = tracks.filter((t) => !have.has(t.videoId) && have.add(t.videoId))
+  if (fresh.length === 0) return
+  await updatePlaylist({ ...pl, tracks: [...pl.tracks, ...fresh] })
+}
+
 /** Copies a track into another playlist (source untouched; deduped). */
 export async function copyTrackTo(toId: string, track: QueueTrack): Promise<void> {
   const to = state.mine.find((p) => p.id === toId)

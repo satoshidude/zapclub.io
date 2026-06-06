@@ -13,10 +13,11 @@
     copyTrackTo,
     createPlaylist,
     addTrackToPlaylist,
+    addTracksToPlaylist,
   } from '../nostr/playlists.svelte'
   import { addTracks } from '../nostr/queue.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
-  import { searchYouTube, type SearchHit } from '../player/youtube'
+  import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../player/youtube'
   import { fetchUserClubActivity } from '../nostr/groups'
   import { goClub, goUser, goHowto } from '../router.svelte'
   import { clubAvatar } from '../avatar'
@@ -157,29 +158,54 @@
     }
   }
 
-  // Per-playlist YouTube search (to add tracks). Only one open at a time.
+  // Per-playlist YouTube search/import (to add tracks). Only one open at a time.
   let searchPl = $state<string | null>(null)
   let searchQ = $state('')
   let searchHits = $state<SearchHit[]>([])
   let searching = $state(false)
+  let searchError = $state('')
+  let isPlaylist = $state(false) // results came from a pasted playlist link
   function openSearch(plId: string) {
     searchPl = searchPl === plId ? null : plId
     searchQ = ''
     searchHits = []
+    searchError = ''
+    isPlaylist = false
   }
   async function runSearch() {
-    if (!searchQ.trim() || searching) return
+    const q = searchQ.trim()
+    if (!q || searching) return
     searching = true
+    searchError = ''
+    searchHits = []
+    // A pasted YouTube playlist link → import the whole playlist; otherwise keyword search.
+    const listId = parseYouTubePlaylistId(q)
+    isPlaylist = !!listId
     try {
-      searchHits = await searchYouTube(searchQ.trim())
-    } catch {
-      searchHits = []
+      searchHits = listId ? await fetchYouTubePlaylist(listId) : await searchYouTube(q)
+      if (searchHits.length === 0) {
+        searchError = isPlaylist
+          ? 'Empty playlist (or search is unavailable).'
+          : 'No results (or search is unavailable).'
+      }
+    } catch (e) {
+      searchError = String((e as Error)?.message ?? e)
     } finally {
       searching = false
     }
   }
   function addHit(plId: string, h: SearchHit) {
     void addTrackToPlaylist(plId, { videoId: h.videoId, title: h.title, duration: h.duration })
+    searchHits = searchHits.filter((r) => r.videoId !== h.videoId)
+  }
+  function addAllHits(plId: string) {
+    void addTracksToPlaylist(
+      plId,
+      searchHits.map((h) => ({ videoId: h.videoId, title: h.title, duration: h.duration })),
+    )
+    searchHits = []
+    searchQ = ''
+    isPlaylist = false
   }
 
   let addedTo = $state('')
@@ -371,11 +397,19 @@
                 {#if searchPl === pl.id}
                   <div class="pl-search">
                     <form onsubmit={(e) => { e.preventDefault(); void runSearch() }}>
-                      <input class="in" bind:value={searchQ} placeholder="Search YouTube…" />
+                      <input class="in" bind:value={searchQ} placeholder="Search YouTube or paste a playlist link…" />
                       <button class="btn btn-primary btn-sm" disabled={!searchQ.trim() || searching}>
                         {searching ? '…' : 'Search'}
                       </button>
                     </form>
+                    {#if searchError}
+                      <p class="pl-search-err">{searchError}</p>
+                    {/if}
+                    {#if isPlaylist && searchHits.length > 0}
+                      <button class="btn btn-primary btn-sm pl-addall" onclick={() => addAllHits(pl.id)}>
+                        ＋ Add all {searchHits.length} tracks
+                      </button>
+                    {/if}
                     {#each searchHits as h (h.videoId)}
                       <button class="hit" onclick={() => addHit(pl.id, h)} title="Add to playlist">
                         <span class="hit-title">{h.title}</span>
@@ -817,6 +851,14 @@
   .pl-search .in {
     flex: 1;
     min-width: 0;
+  }
+  .pl-search-err {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .pl-addall {
+    align-self: flex-start;
   }
   .hit {
     display: flex;
