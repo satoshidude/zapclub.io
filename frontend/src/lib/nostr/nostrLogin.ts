@@ -312,11 +312,12 @@ function warmSigner(): void {
  *  – NIP-46 bunker that must connect first after reload → the first sign triggers the
  *    connect() round-trip; a generous timeout per attempt, else it would hang forever.
  */
-// NIP-13 anti-spam proof-of-work. Mine the Sybil-relevant kinds — club join (9021) and chat
-// (9) — so mass/throwaway-key spam costs CPU. Bits are slightly above the relay's minimum
-// (so the relay can be tuned up without redeploying the client). Mining is synchronous but
-// brief at these difficulties (chat ~ms, join < ~1s) and runs once per such event.
-const POW_BITS: Record<number, number> = { 9: 12, 9021: 18 }
+// NIP-13 anti-spam proof-of-work. Mine chat (kind 9) — the spam vector — so mass/throwaway-key
+// posting costs CPU. (Join is intentionally NOT gated: PoW on join breaks slightly-stale
+// clients and adds friction to a core action; join-floods are covered by the relay's per-IP
+// limiter.) Bits are slightly above the relay's minimum. Mining is synchronous but ~ms at this
+// difficulty and runs once per chat message.
+const POW_BITS: Record<number, number> = { 9: 12 }
 
 /** Adds a mined NIP-13 nonce to join/chat events before signing (no-op for other kinds). The
  *  signer re-derives the same id from these exact fields, so the proof-of-work survives. */

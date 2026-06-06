@@ -101,11 +101,13 @@ func main() {
 	// Per-IP-Connection-Limiter. Direkt nach dem Ban-Check (billige Rejects zuerst).
 	ipEventLim, ipConnLim := setupSpamProtection(relay)
 
-	// NIP-13 Proof-of-Work: require mined difficulty on the Sybil-relevant kinds — club join
-	// (9021) and chat (9). Each keypair/message then costs CPU, taxing mass/IP-distributed
-	// spam that per-IP/per-pubkey limits can't stop. Cheap to verify (count leading zero bits
-	// of the id); the client mines slightly above these. Per-kind, env-tunable, 0 = off.
-	powJoin := envInt("RELAY_POW_JOIN", 16)
+	// NIP-13 Proof-of-Work on chat (kind 9) — the actual spam vector — taxes mass/IP-distributed
+	// posting that per-IP/per-pubkey limits can't fully stop. Cheap to verify (leading zero
+	// bits of the id); the client mines slightly above. Per-kind, env-tunable, 0 = off.
+	// Join (9021) is NOT gated by default: requiring PoW on join breaks legit joins from any
+	// slightly-stale client and adds friction to the core "join an open club" action — while
+	// join-floods are already covered by the per-IP limiter. Set RELAY_POW_JOIN>0 to re-enable.
+	powJoin := envInt("RELAY_POW_JOIN", 0)
 	powChat := envInt("RELAY_POW_CHAT", 10)
 	relay.RejectEvent = append(relay.RejectEvent,
 		func(_ context.Context, evt *nostr.Event) (bool, string) {

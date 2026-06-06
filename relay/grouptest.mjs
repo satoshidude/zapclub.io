@@ -9,8 +9,8 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { minePow } from 'nostr-tools/nip13'
 
-// PoW the relay requires (must be ≥ RELAY_POW_JOIN / RELAY_POW_CHAT it boots with).
-const POWBITS = { 9: 12, 9021: 18 }
+// PoW the relay requires (must be ≥ RELAY_POW_CHAT it boots with). Join (9021) isn't gated.
+const POWBITS = { 9: 12 }
 
 const URL = process.env.RELAY_URL || 'ws://127.0.0.1:3334'
 const now = () => Math.floor(Date.now() / 1000)
