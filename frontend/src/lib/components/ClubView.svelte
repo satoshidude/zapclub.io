@@ -363,6 +363,9 @@
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
+          {#if presence.count > 0}
+            <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
+          {/if}
           {#if isPaid}<span class="tag paid">🔒 {clubConfig.price} sats entry</span>{/if}
           {#if owner}
             {@const op = useProfile(owner)}
@@ -603,6 +606,11 @@
     color: var(--amber);
     border-color: var(--amber);
     font-weight: 700;
+  }
+  .tag.live-count {
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
   }
   .edit-form .field select {
     width: 100%;
