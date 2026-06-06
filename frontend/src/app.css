@@ -12,6 +12,7 @@
   --danger: #f0506e;
   --radius: 14px;
   --radius-sm: 9px;
+  --topbar-h: 3.5rem; /* fixed topbar height — body is padded by this so nothing hides behind it */
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   color-scheme: dark;
@@ -35,6 +36,8 @@ body {
 }
 
 body {
+  /* Offset for the fixed topbar so page content starts below it. */
+  padding-top: var(--topbar-h);
   background:
     radial-gradient(900px 500px at 85% -10%, rgba(177, 77, 255, 0.16), transparent 60%),
     radial-gradient(700px 400px at 5% 110%, rgba(74, 222, 94, 0.1), transparent 60%),

@@ -94,13 +94,16 @@
 
 <style>
   .topbar {
-    position: sticky;
+    position: fixed;
     top: 0;
+    left: 0;
+    right: 0;
+    height: var(--topbar-h);
     z-index: 50;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.7rem 1rem;
+    padding: 0 1rem;
     background: rgba(7, 7, 10, 0.8);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border);
