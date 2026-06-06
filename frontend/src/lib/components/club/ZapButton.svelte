@@ -6,7 +6,8 @@
   import { auth } from '../../nostr/auth.svelte'
 
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
-  let { pubkey = '' }: { pubkey?: string } = $props()
+  // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
+  let { pubkey = '', club = '' }: { pubkey?: string; club?: string } = $props()
 
   const PRESETS = [21, 100, 500, 2100]
   // Fallback payee when the recipient has no lightning address on their profile. The
@@ -44,7 +45,7 @@
       open = false
       comment = ''
       custom = ''
-      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj })
+      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj, club })
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {

@@ -27,6 +27,7 @@ export const KIND_SKIP = 30107 // replaceable per club: owner/mod asks the condu
 export const KIND_PLAY = 1313 // non-replaceable play record (1 per real track start)
 export const KIND_CLUB_CONFIG = 30101 // replaceable per club (d=club), OWNER-authored: access/price
 export const KIND_PRESENCE = 20100 // ephemeral per-user heartbeat ("I'm here right now")
+export const KIND_ZAP_BROADCAST = 20101 // ephemeral, zapper-signed: "I zapped <p> N sats" (club-live zap signal when the DJ's LNURL doesn't publish a 9735 receipt)
 
 const RELAYS = [CLUB_RELAY]
 
@@ -153,6 +154,31 @@ export async function joinClub(groupId: string, proof?: Event): Promise<void> {
 
 export async function leaveClub(groupId: string): Promise<void> {
   await publishClub({ kind: KIND_LEAVE_REQUEST, created_at: now(), tags: [['h', groupId]], content: '' })
+}
+
+/**
+ * Club-live zap broadcast (kind 20101, ephemeral, h-tagged). A NIP-57 9735 receipt is the
+ * hard proof of a zap — but some LNURL providers (e.g. nsnip.io) never publish one, so other
+ * clients would never see the zap. After the zapper confirms payment we also emit this
+ * lightweight club event so everyone in the room gets the animation + session score
+ * immediately, regardless of the DJ's provider. Trust: self-reported by the zapper (an
+ * ephemeral social signal, like applause); the 9735 — when it exists — stays authoritative,
+ * and `bolt11` dedup (in ingestZapBroadcast/ingestZapReceipt) prevents double-counting.
+ */
+export async function publishZapBroadcast(
+  club: string,
+  dj: string,
+  sats: number,
+  invoice?: string,
+): Promise<void> {
+  if (!club || !dj || sats <= 0) return
+  const tags: string[][] = [
+    ['h', club],
+    ['p', dj],
+    ['amount', String(sats)],
+  ]
+  if (invoice) tags.push(['bolt11', invoice])
+  await publishClub({ kind: KIND_ZAP_BROADCAST, created_at: now(), tags, content: '' })
 }
 
 // ── Moderation (host/moderator only — the relay enforces the role) ────────────
@@ -422,6 +448,7 @@ export interface ClubSubHandlers {
   onSkip?: (ev: Event) => void
   onConfig?: (ev: Event) => void
   onPresence?: (ev: Event) => void
+  onZapBroadcast?: (ev: Event) => void
 }
 
 /**
@@ -442,6 +469,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_SKIP,
       KIND_CLUB_CONFIG,
       KIND_PRESENCE,
+      KIND_ZAP_BROADCAST,
     ],
     '#h': [groupId],
   }
@@ -467,6 +495,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
       else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
       else if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
+      else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
     },
   })
 

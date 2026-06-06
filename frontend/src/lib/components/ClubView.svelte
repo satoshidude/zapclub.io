@@ -33,7 +33,7 @@
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
-  import { subscribeZaps, resetZaps, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
+  import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
   import type { Event } from 'nostr-tools/pure'
@@ -121,6 +121,7 @@
       },
       onSkip: ingestSkipIntent,
       onPresence: ingestPresence,
+      onZapBroadcast: ingestZapBroadcast,
       onChat: ingestChat,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
@@ -370,7 +371,7 @@
               <img class="host-av" src={avatarUrl(owner, op)} alt="" width="14" height="14" />
               {displayName(owner, op)}
             </a>
-            <ZapButton pubkey={owner} />
+            <ZapButton pubkey={owner} club={groupId} />
           {/if}
           {#if presence.count > 0}
             <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>

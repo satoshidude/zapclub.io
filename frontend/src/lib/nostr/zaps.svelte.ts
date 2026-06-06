@@ -337,6 +337,25 @@ export function watchInvoicePaid(
   return () => sub.close()
 }
 
+/** Handles an incoming club zap broadcast (kind 20101) → animation + session score.
+ *  See publishZapBroadcast in groups.ts for the why (LNURL providers that don't publish a
+ *  9735). `bolt11` dedup keeps the broadcast, the zapper's optimistic credit, and any later
+ *  real 9735 from triple-counting the same zap. */
+export function ingestZapBroadcast(ev: Event): void {
+  if (seen.has(ev.id)) return
+  seen.add(ev.id)
+  const dj = ev.tags.find((t) => t[0] === 'p')?.[1]
+  const sats = Math.round(Number(ev.tags.find((t) => t[0] === 'amount')?.[1]))
+  if (!dj || !sats || sats <= 0) return
+  const inv = ev.tags.find((t) => t[0] === 'bolt11')?.[1]
+  if (inv) {
+    // Dedup against the local optimistic credit (zapper's own echo) and any later 9735.
+    if (creditedInvoices.has(inv)) return
+    creditedInvoices.add(inv)
+  }
+  applyZap(dj, sats)
+}
+
 /** Subscribes to zap receipts (9735) for the stage DJs on the public relays. */
 export function subscribeZaps(djPubkeys: string[]): () => void {
   if (djPubkeys.length === 0) return () => {}

@@ -1,4 +1,5 @@
 import { pollPaid, creditZap, watchInvoicePaid } from './zaps.svelte'
+import { publishZapBroadcast } from './groups'
 
 // Global "pay this Lightning invoice" modal — shared by the DJ zap button and the
 // footer donation. Shows a QR + "open in wallet" + copy, and auto-closes (paid state)
@@ -10,9 +11,11 @@ interface PayState {
   paid: boolean
   /** Zap recipient (DJ pubkey) — credited locally on payment. Empty for donations. */
   dj: string
+  /** Club id — set for an in-club zap so payment also broadcasts to the room. */
+  club: string
 }
 
-const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '' })
+const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '', club: '' })
 let closeWatch: (() => void) | null = null
 let onPaidCb: (() => void) | null = null
 
@@ -38,13 +41,14 @@ export function showPay(
   invoice: string,
   sats: number,
   label: string,
-  opts: { verify?: string; dj?: string; onPaid?: () => void } = {},
+  opts: { verify?: string; dj?: string; club?: string; onPaid?: () => void } = {},
 ): void {
   state.invoice = invoice
   state.sats = sats
   state.label = label
   state.paid = false
   state.dj = opts.dj ?? ''
+  state.club = opts.club ?? ''
   onPaidCb = opts.onPaid ?? null
   closeWatch?.()
   closeWatch = null
@@ -68,7 +72,11 @@ export function showPay(
 export function markPaid(): void {
   if (state.paid) return
   state.paid = true
-  if (state.dj && state.invoice) creditZap(state.dj, state.sats, state.invoice)
+  if (state.dj && state.invoice) {
+    creditZap(state.dj, state.sats, state.invoice) // optimistic local credit (the zapper)
+    // Tell the rest of the club live — the DJ's LNURL may never publish a 9735 receipt.
+    if (state.club) void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
+  }
   if (onPaidCb) {
     const cb = onPaidCb
     onPaidCb = null
@@ -85,4 +93,5 @@ export function hidePay(): void {
   state.label = ''
   state.paid = false
   state.dj = ''
+  state.club = ''
 }

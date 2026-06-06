@@ -74,7 +74,7 @@
             disabled={!auth.canSign}
             title={liked ? 'Liked — tap to remove' : 'Like this track'}
           >🔥</button>
-          <ZapButton />
+          <ZapButton club={clubId} />
         </div>
         <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
       </div>
