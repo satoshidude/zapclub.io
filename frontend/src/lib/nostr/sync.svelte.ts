@@ -174,31 +174,32 @@ function heartbeat(groupId: string): void {
   publishNp(groupId, state.np)
 }
 
+// Tracks the conductor has already played THIS session (by videoId). Needed because a track's
+// `off` flag is written by its own DJ — when that DJ is away (sticky on stage, client gone),
+// the conductor plays their tracks but can't mark them off, so a top-down scan would keep
+// re-picking the same just-played track → an endless 2-song skip loop. Excluding played
+// videoIds breaks that; cleared on exhaustion (to loop the rotation) and on reset.
+const playedThisSession = new Set<string>()
+
 /**
- * Playability matrix with the CURRENTLY-PLAYING track masked out — so the scan never
- * re-picks the track that just finished (even if its `off` flag hasn't propagated yet).
- * queues.playable() returns fresh arrays, so mutating here is safe.
+ * Playability matrix: a slot is playable if the track is active (`off`!==true) AND not the
+ * currently-playing one AND not already played this session. Built directly (queues.playable
+ * returns fresh arrays per DJ).
  */
-function playableExcludingCurrent(djs: string[]): boolean[][] {
-  const playable = queues.playable(djs)
-  const np = state.np
-  if (np) {
-    const djIndex = djs.indexOf(np.dj)
-    if (djIndex >= 0) {
-      const ids = (queues.get(np.dj)?.tracks ?? []).map((t) => t.videoId)
-      const tIdx = ids.indexOf(np.videoId)
-      if (tIdx >= 0 && playable[djIndex]) playable[djIndex][tIdx] = false
-    }
-  }
-  return playable
+function playableExcluding(djs: string[]): boolean[][] {
+  const excluded = new Set(playedThisSession)
+  if (state.np?.videoId) excluded.add(state.np.videoId)
+  return djs.map((pk) =>
+    (queues.get(pk)?.tracks ?? []).map((t) => t.active !== false && !excluded.has(t.videoId)),
+  )
 }
 
 /**
  * Advances to the next track. ALWAYS scans from the TOP: the next track is the first active
- * (unplayed) track per DJ in round-robin order (firstPlayablePos over pos 0,1,2,… = dj0.t0,
- * dj1.t0, dj0.t1, …). This keeps the rotation anchored to the top of each playlist instead of
- * drifting forward and stranding active tracks above the play head. Played tracks are `off`
- * (so excluded); the just-finished track is masked too. No active track left → lobby.
+ * track per DJ in round-robin order, skipping `off`, the current track, AND anything already
+ * played this session (so a skip never loops back to a just-played track even when its DJ is
+ * away and never marked it off). When everything's been played, the session history is cleared
+ * so the rotation loops; truly nothing playable → lobby.
  */
 function advance(groupId: string): void {
   const djs = stage.djs.map((d) => d.pubkey)
@@ -206,9 +207,16 @@ function advance(groupId: string): void {
     state.np = null
     return
   }
-  const next = firstPlayablePos(djs.length, playableExcludingCurrent(djs))
+  if (state.np?.videoId) playedThisSession.add(state.np.videoId)
+  let next = firstPlayablePos(djs.length, playableExcluding(djs))
   if (next === -1) {
-    state.np = null // nothing active left → lobby
+    // Rotation exhausted → forget history and loop (the current track stays excluded so we
+    // don't immediately replay it).
+    playedThisSession.clear()
+    next = firstPlayablePos(djs.length, playableExcluding(djs))
+  }
+  if (next === -1) {
+    state.np = null // nothing active at all → lobby
     return
   }
   startAt(groupId, next, Date.now())
@@ -339,7 +347,7 @@ export function canSkip(canModerate = false): boolean {
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
-  const playable = playableExcludingCurrent(djs)
+  const playable = playableExcluding(djs)
   const out: { dj: string; videoId: string; title: string }[] = []
   let pos = -1
   for (let i = 0; i < max; i++) {
@@ -390,4 +398,5 @@ export function resetSync(): void {
   state.np = null
   state.offsetMs = 0
   state.skipIntent = null
+  playedThisSession.clear()
 }
