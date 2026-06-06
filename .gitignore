@@ -20,6 +20,7 @@ relay/relay.env
 CLAUDE.md
 .claude/
 zapclub_grobkonzept.md
+tasks/
 
 # OS / editor
 .DS_Store

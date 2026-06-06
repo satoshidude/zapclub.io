@@ -106,7 +106,6 @@ small.
 frontend/   Svelte 5 client — player, sync, stage, queue, chat, zaps, profile
 relay/      NIP-29 relay (Go) — membership, roles, moderation, content
 design/     Branding assets (neon turntable, disco-ball)
-tasks/      Working plan & lessons
 deploy/     Caddyfile, systemd unit, placeholder page
 ```
 
