@@ -33,8 +33,8 @@
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
-  import { subscribeZaps, resetZaps, requestZapInvoice } from '../nostr/zaps.svelte'
-  import { showPay } from '../nostr/payModal.svelte'
+  import { subscribeZaps, resetZaps, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
+  import { showPay, markPaid } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
   import type { Event } from 'nostr-tools/pure'
   import Player from './club/Player.svelte'
@@ -316,28 +316,38 @@
     }
   }
 
-  // Paid club: pay the entry fee, then join. The relay (entryfee) verifies the receipt.
+  // Paid club: pay the entry fee, then join WITH the 9735 receipt as proof — the relay's
+  // entry gate verifies it before admitting (so the gate can't be bypassed).
   async function doPaidJoin() {
     if (!auth.isLoggedIn) {
       launchLogin()
       return
     }
+    if (!clubConfig.zapper) {
+      error = "This club's entry address doesn't support Nostr zaps — ask the owner to use a zap-enabled one."
+      return
+    }
     busy = true
     error = ''
     try {
-      const { invoice, verify } = await requestZapInvoice(
+      const { invoice, verify } = await requestEntryInvoice(
+        groupId,
         clubConfig.zapper,
         clubConfig.lud16,
         clubConfig.price,
-        `Entry to ${club?.name ?? 'club'}`,
       )
-      showPay(invoice, clubConfig.price, `Enter ${club?.name ?? 'club'}`, {
-        verify,
-        onPaid: () => void joinClub(groupId),
-      })
+      showPay(invoice, clubConfig.price, `Enter ${club?.name ?? 'club'}`, { verify })
+      busy = false
+      // Wait for the receipt the LNURL server publishes, then join with it as proof.
+      const receipt = await captureEntryReceipt(invoice, clubConfig.zapper)
+      if (receipt) {
+        await joinClub(groupId, receipt)
+        markPaid()
+      } else {
+        error = 'Payment not detected — if you paid, tap Join again.'
+      }
     } catch (e) {
       error = String((e as Error)?.message ?? e)
-    } finally {
       busy = false
     }
   }

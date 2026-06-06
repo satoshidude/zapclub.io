@@ -126,6 +126,78 @@ export async function requestZapInvoice(
 }
 
 /**
+ * Builds a club ENTRY invoice (NIP-57). Like requestZapInvoice but the signed 9734 carries
+ * the club tags the relay's entry gate verifies: `h`=club and `club_entry`=club (so a normal
+ * track-zap receipt can't be reused as entry), plus `p`=the club's entry zapper pubkey. The
+ * resulting 9735 receipt (published by the LNURL server) is the proof attached to the 9021.
+ */
+export async function requestEntryInvoice(
+  clubId: string,
+  zapper: string,
+  lud16: string,
+  sats: number,
+): Promise<ZapInvoice> {
+  const data = await lnurlPayData(lud16)
+  const msats = sats * 1000
+  if (data.minSendable && msats < data.minSendable) {
+    throw new Error(`Entry minimum is ${Math.ceil(data.minSendable / 1000)} sats`)
+  }
+  if (!data.allowsNostr || !zapper) {
+    throw new Error("This club's entry address doesn't support Nostr zaps")
+  }
+  const zr = await signEvent({
+    kind: 9734,
+    created_at: nowSec(),
+    tags: [
+      ['relays', ...ZAP_RELAYS],
+      ['amount', String(msats)],
+      ['p', zapper],
+      ['h', clubId],
+      ['club_entry', clubId],
+    ],
+    content: 'club entry',
+  })
+  const url = new URL(data.callback)
+  url.searchParams.set('amount', String(msats))
+  url.searchParams.set('nostr', JSON.stringify(zr))
+  const res = await fetchTimeout(url.toString())
+  const json = (await res.json()) as { pr?: string; verify?: string; reason?: string }
+  if (!json.pr) throw new Error(json.reason || 'No invoice received')
+  return { invoice: json.pr, verify: json.verify }
+}
+
+/**
+ * Waits for the 9735 receipt of `invoice` (published by the LNURL server to ZAP_RELAYS) and
+ * returns the full event — the entry proof to attach to the 9021 join. Null on timeout.
+ */
+export function captureEntryReceipt(invoice: string, zapper: string, timeoutMs = 180_000): Promise<Event | null> {
+  return new Promise((resolve) => {
+    let done = false
+    const fin = (ev: Event | null) => {
+      if (done) return
+      done = true
+      try {
+        sub.close()
+      } catch {
+        /* ignore */
+      }
+      clearTimeout(t)
+      resolve(ev)
+    }
+    const sub = pool.subscribe(
+      ZAP_RELAYS,
+      { kinds: [KIND_ZAP_RECEIPT], '#p': [zapper] },
+      {
+        onevent(ev) {
+          if (ev.tags.find((t) => t[0] === 'bolt11')?.[1] === invoice) fin(ev)
+        },
+      },
+    )
+    const t = setTimeout(() => fin(null), timeoutMs)
+  })
+}
+
+/**
  * Polls a LUD-21 verify URL until the invoice is paid (or timeout). Lets us detect an
  * EXTERNAL payment (QR scan / Alby Go) and close the pay modal. Resolves true if paid.
  */

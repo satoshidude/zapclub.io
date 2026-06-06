@@ -141,9 +141,14 @@ export function parseClubConfig(ev: Event): ClubConfig {
   }
 }
 
-/** Join request (NIP-29 kind 9021). Open clubs auto-add the member on the relay. */
-export async function joinClub(groupId: string): Promise<void> {
-  await publishClub({ kind: KIND_JOIN_REQUEST, created_at: now(), tags: [['h', groupId]], content: '' })
+/**
+ * Join request (NIP-29 kind 9021). Open clubs auto-add the member on the relay. For a PAID
+ * club, pass the 9735 entry receipt as `proof` — the relay verifies it before admitting.
+ */
+export async function joinClub(groupId: string, proof?: Event): Promise<void> {
+  const tags: string[][] = [['h', groupId]]
+  if (proof) tags.push(['proof', JSON.stringify(proof)])
+  await publishClub({ kind: KIND_JOIN_REQUEST, created_at: now(), tags, content: '' })
 }
 
 export async function leaveClub(groupId: string): Promise<void> {

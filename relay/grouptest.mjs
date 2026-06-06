@@ -83,6 +83,38 @@ assert(np[0]?.content === 'Artist – Track Two', 'now_playing keeps the latest 
 const strangerWrite = await stranger.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:EVIL']], content: 'intruder' })
 assert(strangerWrite[0] === false, 'non-member write rejected: ' + ok(strangerWrite))
 
+// 4b. Paid-club entry gate (relay-enforced). Owner marks the club paid (30101); the test
+//     controls the "zapper" key so it can mint valid/invalid receipts. Then a joiner must
+//     present a valid 9735 to join.
+const zsk = generateSecretKey(), zpub = getPublicKey(zsk) // the club's entry LNURL zapper
+await host.ev({ kind: 30101, created_at: now(), tags: [['h', G], ['d', G], ['access', 'paid'], ['price', '5'], ['lud16', 'club@test'], ['zapper', zpub]], content: '' })
+await sleep(500)
+const jsk = generateSecretKey(), joiner = await conn(jsk)
+// build a 9735 receipt: embeds a 9734 signed by `signWith`, receipt signed by `byZapper`.
+const receipt = (signWith, byZapper, amountMsat, clubTag) => {
+  const zr = finalizeEvent({ kind: 9734, created_at: now(), tags: [['amount', String(amountMsat)], ['p', zpub], ['h', clubTag], ['club_entry', clubTag]], content: '' }, signWith)
+  return finalizeEvent({ kind: 9735, created_at: now(), tags: [['p', zpub], ['bolt11', 'lnbcfake'], ['description', JSON.stringify(zr)]], content: '' }, byZapper)
+}
+const joinWith = (j, proof) => j.ev({ kind: 9021, created_at: now(), tags: proof ? [['h', G], ['proof', JSON.stringify(proof)]] : [['h', G]], content: '' })
+
+assert((await joinWith(joiner))[0] === false, 'paid join WITHOUT proof rejected')
+const wrongSigner = await joinWith(joiner, receipt(jsk, generateSecretKey(), 5000, G)) // receipt not by the zapper
+assert(wrongSigner[0] === false, 'paid join with non-zapper receipt rejected: ' + ok(wrongSigner))
+const tooLow = await joinWith(joiner, receipt(jsk, zsk, 4000, G)) // 4 sats < 5
+assert(tooLow[0] === false, 'paid join with too-low amount rejected: ' + ok(tooLow))
+const notMine = await joinWith(joiner, receipt(generateSecretKey(), zsk, 5000, G)) // 9734 signed by someone else
+assert(notMine[0] === false, 'paid join with someone else’s payment rejected: ' + ok(notMine))
+const good = receipt(jsk, zsk, 5000, G)
+const okJoin = await joinWith(joiner, good)
+assert(okJoin[0] === true, 'paid join with a valid receipt accepted: ' + ok(okJoin))
+await sleep(400)
+const paidMembers = (await host.query({ kinds: [39002], '#d': [G] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(paidMembers.includes(joiner.pub), 'paid joiner is now a member')
+await joiner.ev({ kind: 9022, created_at: now(), tags: [['h', G]], content: '' }) // leave
+await sleep(400)
+const replay = await joinWith(joiner, good) // try to rejoin reusing the SAME receipt
+assert(replay[0] === false && /already used/i.test(replay[1] || ''), 'replayed entry proof rejected: ' + ok(replay))
+
 // 5. Superadmin HTTP API (NIP-98): ban + purge + replay + unban + delete-club.
 //    Only runs when ADMIN_SK (whose pubkey the relay was booted with as RELAY_SUPERADMIN)
 //    and ADMIN_URL are set — see e2e.sh, which wires it all up.

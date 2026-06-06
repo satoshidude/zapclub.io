@@ -130,6 +130,13 @@ func main() {
 		},
 	)
 
+	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
+	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
+	// enforced so it can't be bypassed by a hand-crafted join. (Reads the club config from the
+	// local store per join — joins are infrequent.)
+	entry := newEntryGate(db)
+	relay.RejectEvent = append(relay.RejectEvent, entry.reject)
+
 	// Chat (kind 9): streng — Burst 6, Auffüllung 1 alle 3 s (~20/min). Stoppt
 	// gescriptete Floods, erlaubt normales Chatten. Kind 9 ist persistent → Spam-Vektor.
 	chatLimiter := newKindLimiter(6, 1.0/3.0, "rate-limited: too many chat messages", 9)
