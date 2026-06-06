@@ -60,9 +60,17 @@
     return () => clearTimeout(t)
   })
 
-  // Open the invoice in a wallet app. Driving window.location from the tap handler is
-  // more reliable than an <a href="lightning:…"> in iOS Safari, which often does nothing.
-  function openWallet() {
+  // Open the invoice EXPLICITLY in Alby Go via its own `alby:` scheme. The generic
+  // `lightning:` scheme is also claimed by other wallets (BlueWallet, Sparrow), so the OS
+  // would let the user pick / open the wrong one. `alby:` is registered only by Alby Go
+  // (getAlby/go app.config.js), so it always lands there; Alby Go's link handler matches the
+  // BOLT11 invoice after the scheme and opens its send screen. Driving window.location from
+  // the tap handler is more reliable than an <a href> in iOS Safari.
+  function openAlbyGo() {
+    if (payModal.invoice) window.location.href = `alby:${payModal.invoice}`
+  }
+  // Fallback for users WITHOUT Alby Go: the generic lightning: scheme (any installed wallet).
+  function openOtherWallet() {
     if (payModal.invoice) window.location.href = `lightning:${payModal.invoice}`
   }
 
@@ -88,13 +96,13 @@
       {:else}
         <h3>{payModal.label} · {payModal.sats} sats</h3>
         {#if qrSrc}
-          <button class="qr-link" onclick={openWallet} title="Open in wallet">
+          <button class="qr-link" onclick={openAlbyGo} title="Open in Alby Go">
             <img class="qr" src={qrSrc} alt="invoice QR" width="220" height="220" />
           </button>
         {/if}
-        <!-- lightning: scheme → opens Alby Go locally (iOS / macOS Safari) or any wallet
-             registered for the scheme. Primary/default on Apple Safari. -->
-        <button class="btn {preferAlby || !webln ? 'btn-primary' : 'btn-ghost'} big" onclick={openWallet}>
+        <!-- alby: scheme → opens Alby Go EXPLICITLY (not BlueWallet/Sparrow). Primary on
+             Apple Safari and whenever no WebLN extension is present. -->
+        <button class="btn {preferAlby || !webln ? 'btn-primary' : 'btn-ghost'} big" onclick={openAlbyGo}>
           📲 Open in Alby Go
         </button>
         {#if webln}
@@ -104,6 +112,8 @@
           {#if payErr}<p class="err">⚠ {payErr}</p>{/if}
         {/if}
         <button class="copy" onclick={copy}>{copied ? '✓ Copied' : 'Copy invoice'}</button>
+        <!-- Escape hatch for users without Alby Go: generic lightning: scheme. -->
+        <button class="alt-wallet" onclick={openOtherWallet}>No Alby Go? Open in another wallet</button>
         <p class="hint">Pay with the Alby extension, scan the QR, or tap “Open in Alby Go” on mobile.</p>
         <!-- No reliable auto-detect (LNURL endpoint has no verify URL) → confirm manually. -->
         <button class="btn btn-ghost done" onclick={markPaid}>✓ I’ve paid</button>
@@ -184,6 +194,18 @@
     color: var(--accent);
     font-weight: 700;
     padding: 1rem 0;
+  }
+  .alt-wallet {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.76rem;
+    text-decoration: underline;
+    padding: 0.1rem;
+  }
+  .alt-wallet:hover {
+    color: var(--text);
   }
   .hint {
     margin: 0;
