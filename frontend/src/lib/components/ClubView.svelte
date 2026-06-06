@@ -32,6 +32,7 @@
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
+  import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, requestZapInvoice } from '../nostr/zaps.svelte'
   import { showPay } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
@@ -119,6 +120,7 @@
         if (!prev || ev.created_at >= prev.created_at) configEvs = { ...configEvs, [ev.pubkey]: ev }
       },
       onSkip: ingestSkipIntent,
+      onPresence: ingestPresence,
       onChat: ingestChat,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
@@ -151,7 +153,16 @@
       resetQueues()
       resetChat()
       resetZaps()
+      resetPresence()
     }
+  })
+
+  // Live presence: beat a heartbeat while I'm a member of this club so others see me online
+  // (the relay rejects presence from non-members). Stops when I leave / am no longer a member.
+  $effect(() => {
+    if (isMember) startPresence(groupId)
+    else stopPresence()
+    return () => stopPresence()
   })
 
   // One zap-receipt (9735) subscription per club for everyone shown with a zap chip:
@@ -468,7 +479,7 @@
               {#each members as m (m.pubkey)}
                 {@const profile = useProfile(m.pubkey)}
                 <li>
-                  <img class="avatar" src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" />
+                  <img class="avatar" class:online={presence.isOnline(m.pubkey)} src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" title={presence.isOnline(m.pubkey) ? 'online now' : ''} />
                   <a class="mname" href={`/user/${npubEncode(m.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(m.pubkey)) }}>{displayName(m.pubkey, profile)}</a>
                   {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
                   {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
@@ -670,6 +681,10 @@
     object-fit: cover;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
+  }
+  .avatar.online {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 2px var(--accent-2), 0 0 7px rgba(177, 77, 255, 0.5);
   }
   .mname {
     font-size: 0.9rem;

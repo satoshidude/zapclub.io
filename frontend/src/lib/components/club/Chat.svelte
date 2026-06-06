@@ -2,6 +2,7 @@
   import { chat, sendChat } from '../../nostr/chat.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import { presence } from '../../nostr/presence.svelte'
 
   interface Props {
     groupId: string
@@ -53,7 +54,7 @@
       {#each chat.messages as m (m.id)}
         {@const profile = useProfile(m.pubkey)}
         <div class="msg">
-          <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="24" height="24" />
+          <img class="av" class:online={presence.isOnline(m.pubkey)} src={avatarUrl(m.pubkey, profile)} alt="" width="24" height="24" />
           <div class="body">
             <button class="author" onclick={() => onauthor?.(m.pubkey)}>
               {displayName(m.pubkey, profile)}
@@ -137,6 +138,9 @@
     flex: none;
     margin-top: 2px;
     background: var(--bg-elev-2);
+  }
+  .av.online {
+    box-shadow: 0 0 0 2px var(--accent-2), 0 0 6px rgba(177, 77, 255, 0.5);
   }
   .body {
     display: flex;

@@ -26,6 +26,7 @@ export const KIND_STAGE_KICK = 30106 // replaceable per DJ: owner/mod kicks a DJ
 export const KIND_SKIP = 30107 // replaceable per club: owner/mod asks the conductor to skip
 export const KIND_PLAY = 1313 // non-replaceable play record (1 per real track start)
 export const KIND_CLUB_CONFIG = 30101 // replaceable per club (d=club), OWNER-authored: access/price
+export const KIND_PRESENCE = 20100 // ephemeral per-user heartbeat ("I'm here right now")
 
 const RELAYS = [CLUB_RELAY]
 
@@ -415,6 +416,7 @@ export interface ClubSubHandlers {
   onQueue?: (ev: Event) => void
   onSkip?: (ev: Event) => void
   onConfig?: (ev: Event) => void
+  onPresence?: (ev: Event) => void
 }
 
 /**
@@ -434,6 +436,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_QUEUE,
       KIND_SKIP,
       KIND_CLUB_CONFIG,
+      KIND_PRESENCE,
     ],
     '#h': [groupId],
   }
@@ -458,6 +461,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
       else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
       else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
+      else if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
     },
   })
 

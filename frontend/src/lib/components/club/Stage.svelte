@@ -6,6 +6,7 @@
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
   import { goUser } from '../../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
+  import { presence } from '../../nostr/presence.svelte'
 
   interface Props {
     groupId: string
@@ -83,7 +84,7 @@
     {#each djs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
       <div class="slot filled" class:live={dj.pubkey === liveDj}>
-        <img class="avatar" src={avatarUrl(dj.pubkey, profile)} alt="" width="44" height="44" />
+        <img class="avatar" class:online={presence.isOnline(dj.pubkey)} src={avatarUrl(dj.pubkey, profile)} alt="" width="44" height="44" title={presence.isOnline(dj.pubkey) ? 'online now' : ''} />
         <a class="name" href={`/user/${npubEncode(dj.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj.pubkey)) }}>{displayName(dj.pubkey, profile)}</a>
         {#if dj.pubkey === conductor}<span class="badge">conductor</span>{/if}
         {#if canModerate && dj.pubkey !== me}
@@ -199,6 +200,11 @@
     object-fit: cover;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
+  }
+  /* Nostr-purple ring = this user is online right now (live presence heartbeat). */
+  .avatar.online {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 2px var(--accent-2), 0 0 8px rgba(177, 77, 255, 0.55);
   }
   .name {
     font-size: 0.74rem;
