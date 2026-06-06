@@ -9,8 +9,9 @@ import type { ProfileMetadata } from './types'
 export const PROFILE_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
+  'wss://relay.nostr.band', // indexer — kept for broad READ/search coverage
   'wss://relay.primal.net',
+  'wss://offchain.pub', // probed: accepts writes + reads → extra write-redundancy
 ]
 
 /**
@@ -25,13 +26,15 @@ export const CLUB_RELAY = 'wss://relay.zapclub.io'
  * list. Public relays — zap receipts are global, not club-scoped (the NIP-29 relay
  * rejects events without an h-tag).
  */
+// Lean + write-friendly: the LNURL server publishes the 9735 to exactly these relays (the
+// 9734 `relays` tag), and we read from the same list — so every entry must reliably ACCEPT
+// the zapper's write and be fast to read. nostr.band dropped (indexer: didn't store receipts,
+// connect errors). nsnip.io is whitelist-only for writes, but its own zapper is whitelisted
+// there → it publishes reliably to its home relay; we only read from it.
 export const ZAP_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
   'wss://relay.primal.net',
-  // nsnip.io's own relay — most lightning addresses here are nsnip.io, so its zapper can
-  // reliably publish the receipt to its home relay (improves discovery + redundancy).
   'wss://relay.nsnip.io',
 ]
 
