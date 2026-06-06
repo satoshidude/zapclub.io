@@ -1,4 +1,4 @@
-import { pollPaid, creditZap } from './zaps.svelte'
+import { pollPaid, creditZap, watchInvoicePaid } from './zaps.svelte'
 
 // Global "pay this Lightning invoice" modal — shared by the DJ zap button and the
 // footer donation. Shows a QR + "open in wallet" + copy, and auto-closes (paid state)
@@ -13,6 +13,7 @@ interface PayState {
 }
 
 const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '' })
+let closeWatch: (() => void) | null = null
 
 export const payModal = {
   get open() {
@@ -43,9 +44,20 @@ export function showPay(
   state.label = label
   state.paid = false
   state.dj = opts.dj ?? ''
+  closeWatch?.()
+  closeWatch = null
+  // Detect an external payment two ways:
+  // 1. LUD-21 verify URL (if the LNURL server provides one — many, incl. nsnip.io, don't).
   if (opts.verify) {
     void pollPaid(opts.verify, () => state.invoice === invoice).then((ok) => {
       if (ok && state.invoice === invoice) markPaid()
+    })
+  }
+  // 2. The 9735 zap receipt for this invoice (works without LUD-21). For a zap (dj set) this
+  //    is usually the ONLY automatic signal → it's what lets the modal auto-close.
+  if (state.dj) {
+    closeWatch = watchInvoicePaid(invoice, state.dj, () => {
+      if (state.invoice === invoice) markPaid()
     })
   }
 }
@@ -58,6 +70,8 @@ export function markPaid(): void {
 }
 
 export function hidePay(): void {
+  closeWatch?.()
+  closeWatch = null
   state.invoice = ''
   state.sats = 0
   state.label = ''

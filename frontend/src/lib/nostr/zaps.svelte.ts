@@ -229,6 +229,30 @@ export function creditZap(dj: string, sats: number, invoice?: string): void {
   applyZap(dj, sats)
 }
 
+/**
+ * Watches for the 9735 zap RECEIPT of a specific invoice and fires onPaid when it lands.
+ * This is the only automatic payment signal when the LNURL server provides no LUD-21 verify
+ * URL (e.g. nsnip.io / many LNbits) — the receipt the server publishes on payment doubles as
+ * the "paid" confirmation. Matches by bolt11 (exact). Returns a close function.
+ */
+export function watchInvoicePaid(
+  invoice: string,
+  recipientPubkey: string,
+  onPaid: () => void,
+): () => void {
+  if (!invoice || !recipientPubkey) return () => {}
+  const sub = pool.subscribe(
+    ZAP_RELAYS,
+    { kinds: [KIND_ZAP_RECEIPT], '#p': [recipientPubkey] },
+    {
+      onevent(ev) {
+        if (ev.tags.find((t) => t[0] === 'bolt11')?.[1] === invoice) onPaid()
+      },
+    },
+  )
+  return () => sub.close()
+}
+
 /** Subscribes to zap receipts (9735) for the stage DJs on the public relays. */
 export function subscribeZaps(djPubkeys: string[]): () => void {
   if (djPubkeys.length === 0) return () => {}

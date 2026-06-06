@@ -25,7 +25,15 @@ export const CLUB_RELAY = 'wss://relay.zapclub.io'
  * list. Public relays — zap receipts are global, not club-scoped (the NIP-29 relay
  * rejects events without an h-tag).
  */
-export const ZAP_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band']
+export const ZAP_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+  // nsnip.io's own relay — most lightning addresses here are nsnip.io, so its zapper can
+  // reliably publish the receipt to its home relay (improves discovery + redundancy).
+  'wss://relay.nsnip.io',
+]
 
 /** Shared pool for profile and club relays. */
 export const pool = new SimplePool()
