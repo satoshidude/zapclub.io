@@ -3,8 +3,24 @@
   import { loginDialog, closeLoginDialog } from '../nostr/loginDialog.svelte'
   import { createAccount, loginExtension, loginBunker, loginNsec, startNostrConnect } from '../nostr/nostrLogin'
 
-  // Only offer the NIP-07 extension (Alby/nos2x/Nostash) if present → hide on iOS/Safari.
-  const hasExtension = typeof window !== 'undefined' && !!window.nostr
+  // NIP-07 providers inject window.nostr. On Safari (Nostash) it often appears LATE — after
+  // page load, or only once the extension is granted access to the site — so detect it
+  // reactively (poll while the dialog is open) AND always offer it on Apple/Safari, where the
+  // click waits for a late-injected provider (loginExtension polls too).
+  let hasExtension = $state(typeof window !== 'undefined' && !!window.nostr)
+  const isAppleSafari =
+    typeof navigator !== 'undefined' &&
+    /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) &&
+    /Safari/.test(navigator.userAgent) &&
+    !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS/.test(navigator.userAgent)
+  $effect(() => {
+    if (!loginDialog.open || hasExtension) return
+    const iv = setInterval(() => {
+      if (typeof window !== 'undefined' && window.nostr) hasExtension = true
+    }, 400)
+    return () => clearInterval(iv)
+  })
+  const showExtension = $derived(hasExtension || isAppleSafari)
 
   let view = $state<'main' | 'bunker' | 'nsec'>('main')
   let busy = $state(false)
@@ -114,10 +130,13 @@
         <button class="btn btn-ghost big" onclick={() => { view = 'nsec'; error = '' }} disabled={busy}>
           🔑 Use a private key (nsec)
         </button>
-        {#if hasExtension}
+        {#if showExtension}
           <button class="btn btn-ghost big" onclick={doExtension} disabled={busy}>
             🧩 Browser extension (NIP-07)
           </button>
+          {#if isAppleSafari && !hasExtension}
+            <p class="hint">Using Nostash on Safari? Open its icon and allow it for this site, then tap above.</p>
+          {/if}
         {/if}
         <p class="hint">No email, no password. Your Nostr key is your identity.</p>
       {:else if view === 'bunker'}

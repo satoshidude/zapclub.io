@@ -177,8 +177,25 @@ export function initAuth(): void {
 
 // ── Login actions (called from LoginDialog.svelte) ──────────────────────────
 
-/** Browser extension (NIP-07, e.g. Alby/nos2x/Nostash) — only if window.nostr exists. */
+/** Waits for a NIP-07 provider to appear. Safari extensions (Nostash) inject `window.nostr`
+ *  LATE — after page load and often only once the user grants the extension access to the
+ *  site — so we poll briefly instead of failing immediately. */
+async function waitForNostr(ms = 4000): Promise<void> {
+  const start = Date.now()
+  while (typeof window !== 'undefined' && !window.nostr && Date.now() - start < ms) {
+    await sleep(200)
+  }
+  if (typeof window === 'undefined' || !window.nostr) {
+    throw new Error(
+      'No Nostr extension detected. In Safari, open the Nostash icon, allow it for this site, then try again.',
+    )
+  }
+}
+
+/** Browser extension (NIP-07, e.g. Alby/nos2x/Nostash). Waits for a late-injected provider
+ *  (Safari/Nostash) before reading the key. */
 export async function loginExtension(): Promise<void> {
+  await waitForNostr()
   const acc = await ExtensionAccount.fromExtension()
   manager.addAccount(acc)
   manager.setActive(acc)
