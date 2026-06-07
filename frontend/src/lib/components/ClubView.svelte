@@ -57,7 +57,6 @@
   let busy = $state(false)
   let error = $state('')
   let stageResumed = false
-  let tab = $state<'station' | 'chat'>('station')
 
   // Owner = the 'owner'-role admin, NOT admins[0] (tag order isn't owner-first).
   const owner = $derived(ownerPk)
@@ -231,10 +230,9 @@
 
   const onStageNow = $derived(stage.isOnStage(auth.pubkey))
 
-  /** From the lobby "go on stage" link: hop on the stage and open the DJ Station tab. */
+  /** From the lobby "go on stage" link: hop on the stage (the set is right below the stage). */
   function goOnStage() {
     if (!onStageNow) void joinStage(groupId)
-    tab = 'station'
   }
 
   async function doJoin() {
@@ -463,22 +461,18 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <!-- Stage: always visible under the hero. -->
+  <!-- Stage + the DJ's set ("My set") — one block under the hero, no tabs. -->
   <section class="stream">
     <Stage {groupId} {canModerate} {isMember} />
+    {#if isMember}
+      <Queue {groupId} />
+    {:else}
+      <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+    {/if}
   </section>
 
-  <div class="club-tabs" role="tablist">
-    <button class="ctab" class:active={tab === 'station'} role="tab" aria-selected={tab === 'station'} onclick={() => (tab = 'station')}>
-      🎛️ DJ Station
-    </button>
-    <button class="ctab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} onclick={() => (tab = 'chat')}>
-      💬 Chat
-    </button>
-  </div>
-
-  {#if tab === 'chat'}
-    <div class="panel">
+  <!-- Chat + members — always below. -->
+  <div class="panel">
       <Chat
         {groupId}
         canChat={isMember}
@@ -519,15 +513,6 @@
         </details>
       </section>
     </div>
-  {:else}
-    <div class="panel">
-      {#if isMember}
-        <Queue {groupId} />
-      {:else}
-        <section class="join-hint">Join the club to step on stage and queue tracks.</section>
-      {/if}
-    </div>
-  {/if}
 
 </div>
 
@@ -792,39 +777,11 @@
     flex-direction: column;
     gap: 0.9rem;
   }
-  /* In-club tabs — underline style (no pills). */
-  .club-tabs {
-    display: flex;
-    gap: 0.2rem;
-    margin: 1.2rem 0 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .ctab {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0.6rem 0.9rem;
-    font-size: 0.92rem;
-    font-weight: 600;
-    transition: color 0.15s ease, border-color 0.15s ease;
-  }
-  .ctab:hover {
-    color: var(--text);
-  }
-  .ctab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
   .panel {
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
+    margin-top: 1rem;
   }
   .join-hint {
     background: var(--bg-elev);
