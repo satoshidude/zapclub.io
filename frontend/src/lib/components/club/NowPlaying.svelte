@@ -6,19 +6,49 @@
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
+  import Player from './Player.svelte'
 
-  // Optional "go on stage" action shown in the idle (lobby) state.
+  // The video lives INSIDE this card: small on the left by default to save space, with a zoom
+  // toggle that expands it to full content-width. The Player instance is never remounted on
+  // toggle (only CSS changes) → no reload, playback continues.
   let {
     onGoStage,
     stageLabel = '',
     clubId = '',
     clubName = '',
+    canHear = false,
+    ctaText = '',
+    onCta,
+    onended,
+    onerror,
   }: {
     onGoStage?: () => void
     stageLabel?: string
     clubId?: string
     clubName?: string
+    canHear?: boolean
+    ctaText?: string
+    onCta?: () => void
+    onended?: () => void
+    onerror?: (videoId: string) => void
   } = $props()
+
+  const ZOOM_KEY = 'zapclub:videoZoom'
+  let zoomed = $state.raw((() => {
+    try {
+      return localStorage.getItem(ZOOM_KEY) === '1'
+    } catch {
+      return false
+    }
+  })())
+  function toggleZoom() {
+    zoomed = !zoomed
+    try {
+      localStorage.setItem(ZOOM_KEY, zoomed ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Reactive clock so the progress bar advances between now_playing events.
   let nowMs = $state(Date.now())
@@ -52,42 +82,52 @@
   }
 </script>
 
-<div class="np card">
-  {#if np}
-    <div class="row">
-      <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-      <div class="info">
-        <div class="title">{np.title || np.videoId}</div>
-        <div class="dj-row">
-          <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
-            <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-            {displayName(dj, profile)}
-          </a>
-        </div>
-      </div>
-      <div class="right">
-        <div class="right-actions">
-          <button
-            class="like"
-            class:on={liked}
-            onclick={toggleLike}
-            disabled={!auth.canSign}
-            title={liked ? 'Liked — tap to remove' : 'Like this track'}
-          >🔥</button>
-          <ZapButton club={clubId} />
-        </div>
-        <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
-      </div>
+<div class="np card" class:zoomed>
+  <div class="np-main">
+    <div class="video">
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} />
+      <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
+        {zoomed ? '⤡' : '⤢'}
+      </button>
     </div>
-    <div class="bar"><div class="fill" style:width="{pct}%"></div></div>
-  {:else}
-    <div class="idle">
-      No DJ on stage — lobby is playing.
-      {#if onGoStage && stageLabel}
-        <button class="stage-link" onclick={onGoStage}>{stageLabel}</button>
+    <div class="meta">
+      {#if np}
+        <div class="info">
+          <div class="title-row">
+            <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="title">{np.title || np.videoId}</span>
+          </div>
+          <div class="dj-row">
+            <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
+              <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
+              {displayName(dj, profile)}
+            </a>
+          </div>
+        </div>
+        <div class="meta-foot">
+          <div class="right-actions">
+            <button
+              class="like"
+              class:on={liked}
+              onclick={toggleLike}
+              disabled={!auth.canSign}
+              title={liked ? 'Liked — tap to remove' : 'Like this track'}
+            >🔥</button>
+            <ZapButton club={clubId} />
+          </div>
+          <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
+        </div>
+      {:else}
+        <div class="idle">
+          No DJ on stage — lobby is playing.
+          {#if onGoStage && stageLabel}
+            <button class="stage-link" onclick={onGoStage}>{stageLabel}</button>
+          {/if}
+        </div>
       {/if}
     </div>
-  {/if}
+  </div>
+  {#if np}<div class="bar"><div class="fill" style:width="{pct}%"></div></div>{/if}
 </div>
 
 <style>
@@ -97,14 +137,75 @@
     border-radius: var(--radius);
     padding: 0.8rem 1rem;
   }
-  .row {
+  .np-main {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    gap: 0.8rem;
+    align-items: stretch;
   }
-  .info {
+  /* Small video on the left (default). Player fills the container width at 16:9. */
+  .video {
+    position: relative;
+    flex: 0 0 40%;
+    max-width: 190px;
+    align-self: flex-start;
+  }
+  /* Zoomed: video on top, full content-width; meta below. */
+  .np.zoomed .np-main {
+    flex-direction: column;
+  }
+  .np.zoomed .video {
+    flex-basis: auto;
+    max-width: none;
+    width: 100%;
+  }
+  .zoom {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 3;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 7px;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .zoom:hover {
+    background: rgba(0, 0, 0, 0.8);
+    border-color: var(--accent);
+  }
+  .meta {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  .np.zoomed .meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .info {
+    min-width: 0;
+  }
+  .meta-foot {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
   .title {
     font-weight: 700;
@@ -134,13 +235,6 @@
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
-  }
-  .right {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.3rem;
   }
   .right-actions {
     display: flex;

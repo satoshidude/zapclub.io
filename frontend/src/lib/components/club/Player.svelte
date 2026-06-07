@@ -12,8 +12,10 @@
     ctaText?: string
     /** Click on the overlay (trigger login or join). */
     onCta?: () => void
+    /** Compact (small thumbnail) mode → hide the full control bar; tap-to-mute still works. */
+    compact?: boolean
   }
-  let { onended, onerror, canHear = false, ctaText = '', onCta }: Props = $props()
+  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false }: Props = $props()
 
   let lobbyFailed = false
 
@@ -248,8 +250,8 @@
     {/if}
   </div>
 
-  {#if ready && canHear}
-    <!-- Control bar BELOW the video (no overlay) — members only. -->
+  {#if ready && canHear && !compact}
+    <!-- Control bar BELOW the video (no overlay) — members only; hidden in compact mode. -->
     <div class="controls">
       <button class="ctrl" onclick={toggleMute} title={muted ? 'Unmute' : 'Mute'}>
         {muted ? '🔇' : '🔊'}

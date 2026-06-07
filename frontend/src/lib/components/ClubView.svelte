@@ -38,7 +38,6 @@
   import { showPay, markPaid } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
   import type { Event } from 'nostr-tools/pure'
-  import Player from './club/Player.svelte'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
@@ -447,15 +446,13 @@
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
         clubId={groupId}
         clubName={club?.name ?? ''}
+        canHear={canHear}
+        ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
+        onCta={doPaidJoin}
+        onended={() => onTrackEnded(groupId)}
+        onerror={(vid) => onTrackError(groupId, vid)}
       />
     </div>
-    <Player
-      canHear={canHear}
-      ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
-      onCta={doPaidJoin}
-      onended={() => onTrackEnded(groupId)}
-      onerror={(vid) => onTrackError(groupId, vid)}
-    />
     <ComingNext />
   </header>
 
