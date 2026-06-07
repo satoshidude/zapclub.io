@@ -29,22 +29,11 @@
   let destroyed = false
   let ready = $state(false)
 
-  // iOS/iPadOS Safari (and Low Power Mode) HARD-block autoplay with sound: media may only
-  // start unmuted from inside a user gesture. Muted autoplay IS allowed. So on iOS we start
-  // MUTED (the synced stream still runs visually) and show a one-tap "sound on" prompt; the
-  // first tap unmutes inside the gesture, which unlocks audio for the whole session (incl.
-  // later track changes). Everywhere else, start unmuted as before. Includes iPadOS, which
-  // reports a Mac UA but has touch points.
-  const isIOS = (() => {
-    if (typeof navigator === 'undefined') return false
-    const ua = navigator.userAgent
-    return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
-  })()
-  // Non-members are muted by the canHear effect below (also covers membership resolving after
-  // mount). On iOS, members also start muted until the sound-tap unlocks audio.
-  let muted = $state(isIOS)
-  /** iOS only: becomes true once the user has tapped to unlock audio this session. */
-  let soundUnlocked = $state(false)
+  // Start MUTED everywhere. Muted autoplay is allowed by every browser without a user gesture
+  // (unlike unmuted, which iOS Safari / Chrome's autoplay policy block), so the synced stream
+  // always starts visually. A persistent "🔊 Tap for sound" overlay shows whenever we're muted;
+  // one tap unmutes inside the gesture (the only way iOS lets audio start) and re-syncs.
+  let muted = $state(true)
   let volume = $state(70)
   let isFullscreen = $state(false)
   let playerEl: HTMLDivElement
@@ -54,7 +43,7 @@
 
   createPlayer(elementId, {
     controls: false,
-    muted: isIOS, // iOS: muted autoplay (allowed); unmute happens on the user's sound-tap.
+    muted: true, // muted autoplay (always allowed); the "Tap for sound" overlay unmutes.
     onStateChange(s) {
       if (s === 1) lobbyFailed = false // playing → reset lobby error flag
       if (s !== 0) return // 0 = ended
@@ -143,24 +132,23 @@
     }
   }
 
-  /** iOS sound-tap: unmute INSIDE the user gesture (the only way iOS lets audio start), re-sync
-   *  to the live position, and remember it for the session so later track changes keep sound. */
+  /** Sound-tap: unmute INSIDE the user gesture (the only way iOS lets audio start) and re-sync
+   *  to the live position (the muted autoplay kept the clock running). */
   function enableSound() {
-    soundUnlocked = true
     if (!player) return
     if (volume === 0) volume = 70
     player.unMute()
     player.setVolume(volume)
     muted = false
-    // Muted autoplay kept the clock running; re-seek + play in case it stalled while muted.
     if (sync.live) {
       player.seekTo(targetPosition())
       player.play()
     }
   }
 
-  // iOS, member/guest who may hear, audio not yet unlocked, a real track is live → prompt.
-  const needsSoundTap = $derived(isIOS && canHear && !soundUnlocked && ready && !!sync.live)
+  // Show the "Tap for sound" prompt whenever we're muted (and the user may hear) — i.e. the
+  // muted autostart, or after the user mutes again.
+  const needsSoundTap = $derived(canHear && ready && muted)
 
   /** Volume slider: sets volume, unmutes (0 = muted). */
   function applyVolume(v: number) {
@@ -220,8 +208,8 @@
       class:clickable={canHear}
       onclick={() => {
         if (!canHear) return
-        // iOS: the first tap unlocks audio (inside the gesture); afterwards it toggles mute.
-        if (isIOS && !soundUnlocked) enableSound()
+        // Muted → tapping turns sound on (inside the gesture, re-syncs); unmuted → mute.
+        if (muted) enableSound()
         else toggleMute()
       }}
       aria-label={canHear ? (needsSoundTap ? 'Tap for sound' : muted ? 'Unmute' : 'Mute') : ''}

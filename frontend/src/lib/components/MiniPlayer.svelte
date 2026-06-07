@@ -12,16 +12,10 @@
   let creating = false
   let ready = false
   let curVid = ''
-  // iOS/iPadOS Safari blocks autoplay WITH sound (only muted autoplay is allowed without a
-  // gesture). The mini-player is a fresh iframe created on navigation, so on iOS we start it
-  // MUTED — guaranteeing playback continues — and the 🔊 button (a user gesture) turns sound
-  // back on. Everywhere else, start unmuted to keep the club's audio seamless across pages.
-  const isIOS = (() => {
-    if (typeof navigator === 'undefined') return false
-    const ua = navigator.userAgent
-    return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
-  })()
-  let muted = $state(isIOS)
+  // Start MUTED everywhere (muted autoplay is always allowed; unmuted is blocked by iOS Safari
+  // and Chrome's autoplay policy on a fresh iframe). The 🔊 button (a user gesture) turns sound
+  // back on. Consistent with the main player's muted-autostart.
+  let muted = $state(true)
   let driftTimer: ReturnType<typeof setInterval> | null = null
 
   function applyTrack(reseek: boolean) {
@@ -48,7 +42,7 @@
       creating = true
       void createPlayer('yt-mini', {
         controls: false,
-        muted: isIOS, // iOS: muted autoplay (allowed); 🔊 button unmutes within a gesture
+        muted: true, // muted autoplay (always allowed); 🔊 button unmutes within a gesture
         onReady: () => {
           ready = true
           applyTrack(false)
@@ -77,7 +71,7 @@
       player = null
       ready = false
       curVid = ''
-      muted = isIOS // next show re-starts muted on iOS (gesture needed again for a fresh iframe)
+      muted = true // next show re-starts muted (fresh iframe needs a gesture for sound)
     }
   })
 
