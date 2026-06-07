@@ -236,12 +236,18 @@ export async function kickFromStage(groupId: string, djPubkey: string): Promise<
   })
 }
 
-/** Publishes a play record (one real track start). Called by the conductor. */
+/**
+ * Publishes a play record (one real track start), the SHARED, conductor-independent source
+ * of round-robin progress (see playlog.ts). `pos` = the round-robin position; `loop` = the
+ * rotation epoch (bumped by advance() on exhaustion so every client agrees on a replay).
+ */
 export async function publishPlay(
   groupId: string,
   djPubkey: string,
   videoId: string,
   startedAt: number,
+  pos: number,
+  loop: number,
 ): Promise<void> {
   await publishClub({
     kind: KIND_PLAY,
@@ -250,6 +256,8 @@ export async function publishPlay(
       ['h', groupId],
       ['p', djPubkey],
       ['started_at', String(startedAt)],
+      ['pos', String(pos)],
+      ['loop', String(loop)],
     ],
     content: videoId,
   })
@@ -427,6 +435,16 @@ export async function fetchClubQueues(groupId: string): Promise<Event[]> {
   return pool.querySync(RELAYS, { kinds: [KIND_QUEUE], '#h': [groupId] }, { maxWait: 4000 })
 }
 
+/** Fetch the club's play-log (kind 1313) since `sinceMs` — the shared round-robin progress
+ *  (playlog.ts reconstructs the played-set from it). Bounded by `since` to keep reads small. */
+export async function fetchClubPlayLog(groupId: string, sinceMs: number): Promise<Event[]> {
+  return pool.querySync(
+    RELAYS,
+    { kinds: [KIND_PLAY], '#h': [groupId], since: Math.floor(sinceMs / 1000) },
+    { maxWait: 4000 },
+  )
+}
+
 /** Fetch single club metadata (by d-tag). */
 export async function fetchClub(groupId: string): Promise<Club | null> {
   const ev = await pool.get(RELAYS, { kinds: [KIND_METADATA], '#d': [groupId] }, { maxWait: 4000 })
@@ -449,6 +467,7 @@ export interface ClubSubHandlers {
   onConfig?: (ev: Event) => void
   onPresence?: (ev: Event) => void
   onZapBroadcast?: (ev: Event) => void
+  onPlay?: (ev: Event) => void
 }
 
 /**
@@ -470,6 +489,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_CLUB_CONFIG,
       KIND_PRESENCE,
       KIND_ZAP_BROADCAST,
+      KIND_PLAY,
     ],
     '#h': [groupId],
   }
@@ -496,6 +516,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
       else if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
       else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
+      else if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
     },
   })
 

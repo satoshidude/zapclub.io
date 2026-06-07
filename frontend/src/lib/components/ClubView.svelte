@@ -30,6 +30,7 @@
     persistedStageGroup,
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
+  import { ingestPlay, startPlayLogSync, stopPlayLogSync, refreshPlayLog, resetPlayLog } from '../nostr/playlog.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
@@ -122,6 +123,7 @@
       onSkip: ingestSkipIntent,
       onPresence: ingestPresence,
       onZapBroadcast: ingestZapBroadcast,
+      onPlay: ingestPlay,
       onChat: ingestChat,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
@@ -135,6 +137,9 @@
     // all DJ queues so the rotation stays correct even if a 30103 push was missed (reconnect,
     // relay restart). Idempotent ingest, so it never fights live updates or local edits.
     startQueueSync(id)
+    // Shared round-robin progress: keep the play-log (kind 1313) live so any conductor
+    // continues where the room left off instead of replaying away DJs' tracks.
+    startPlayLogSync(id)
 
     // Conductor tick: only the conductor acts inside conductorTick(). Touch queues so the
     // effect re-evaluates when queue lengths change (reactivity).
@@ -147,11 +152,13 @@
       stop()
       clearInterval(tick)
       stopQueueSync()
+      stopPlayLogSync()
       resetSync()
       // Only clear the stage DISPLAY — keep my own presence + heartbeat so navigating
       // doesn't drop me off the stage (WebKit). Full reset happens on logout.
       clearStageView()
       resetQueues()
+      resetPlayLog()
       resetChat()
       resetZaps()
       resetPresence()
@@ -186,6 +193,7 @@
     const roster = stage.djs.map((d) => d.pubkey).join(',')
     void roster
     void refreshQueues(groupId)
+    void refreshPlayLog(groupId) // so a takeover gets the shared played-set immediately
   })
 
   // This club is now the active audio source. The global mini-player keeps it playing

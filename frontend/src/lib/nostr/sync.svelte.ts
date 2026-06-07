@@ -6,6 +6,7 @@ import { queues } from './queue.svelte'
 import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
 import { shouldConduct } from './conductor'
 import { presence } from './presence.svelte'
+import { sessionPlayed } from './playlog.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
@@ -19,8 +20,10 @@ const FAILOVER_MS = 45_000
 const RESCUE_STALE_MS = 90_000
 /** Listeners stop showing a track and fall back to the lobby once now_playing has been
  *  silent this long — a phantom conductor (navigated away while sticky-on-stage) must not
- *  freeze the room indefinitely. Beyond RESCUE_STALE_MS so a present DJ takes over first. */
-const LIVE_STALE_MS = 150_000
+ *  freeze the room indefinitely. Beyond RESCUE_STALE_MS so a present DJ takes over first.
+ *  Exported as the SINGLE source for the play-log's session-gap (playlog.svelte.ts): a gap
+ *  larger than the lobby-fallback == the room was in the lobby == a new playback session. */
+export const LIVE_STALE_MS = 150_000
 
 interface SyncState {
   np: NowPlaying | null
@@ -148,8 +151,9 @@ function startAt(groupId: string, pos: number, startedAtMs: number): void {
     dj,
     pos,
   })
-  // Countable play record (now_playing is replaceable, keeps no history).
-  void publishPlay(groupId, dj, track.videoId, startedAtMs)
+  // Shared play record (now_playing is replaceable, keeps no history): the conductor-
+  // independent source of round-robin progress, carrying pos + the current loop epoch.
+  void publishPlay(groupId, dj, track.videoId, startedAtMs, pos, currentLoopEpoch)
 }
 
 /**
@@ -182,6 +186,28 @@ function heartbeat(groupId: string): void {
 // videoIds breaks that; cleared on exhaustion (to loop the rotation) and on reset.
 const playedThisSession = new Set<string>()
 
+/** Rotation epoch. advance() bumps it on exhaustion so a replay is agreed across clients via
+ *  the 1313 `loop` tag (see playlog.ts), instead of each conductor silently looping locally. */
+let currentLoopEpoch = 0
+
+/**
+ * Merge the SHARED played-set (reconstructed from the 1313 play-log) into the local set, so a
+ * fresh / rescuing / bootstrapping conductor continues exactly where the room left off instead
+ * of replaying away DJs' tracks. Additive — never un-excludes what advance() has locally added.
+ *  - log epoch > local → another conductor looped the rotation; adopt it and reset locally.
+ *  - log epoch < local → we just bumped and our publishPlay hasn't echoed back yet; skip, our
+ *    cleared local set is authoritative until the log catches up (avoids re-adding old plays).
+ */
+function seedPlayedFromLog(): void {
+  const { played, loop } = sessionPlayed(state.np?.videoId ?? null)
+  if (loop < currentLoopEpoch) return
+  if (loop > currentLoopEpoch) {
+    currentLoopEpoch = loop
+    playedThisSession.clear()
+  }
+  for (const v of played) playedThisSession.add(v)
+}
+
 /**
  * Playability matrix: a slot is playable if the track is active (`off`!==true) AND not the
  * currently-playing one AND not already played this session. Built directly (queues.playable
@@ -208,11 +234,14 @@ function advance(groupId: string): void {
     state.np = null
     return
   }
+  seedPlayedFromLog() // continue from the SHARED progress, not just this client's local set
   if (state.np?.videoId) playedThisSession.add(state.np.videoId)
   let next = firstPlayablePos(djs.length, playableExcluding(djs))
   if (next === -1) {
-    // Rotation exhausted → forget history and loop (the current track stays excluded so we
-    // don't immediately replay it).
+    // Rotation exhausted → bump the loop epoch (so all clients agree on the replay via the
+    // 1313 `loop` tag) and forget history. The current track stays excluded so we don't
+    // immediately replay it.
+    currentLoopEpoch++
     playedThisSession.clear()
     next = firstPlayablePos(djs.length, playableExcluding(djs))
   }
@@ -250,26 +279,23 @@ export function isActingConductor(): boolean {
 export function conductorTick(groupId: string): void {
   if (!isActingConductor()) return // acting conductor only
 
-  const djs = stage.djs.map((d) => d.pubkey)
-  const playable = queues.playable(djs)
   const np = state.np
   const npFresh = !!np && Date.now() - np.sentAt < FAILOVER_MS
 
   if (!np) {
-    const pos = firstPlayablePos(djs.length, playable)
-    if (pos >= 0) startAt(groupId, pos, Date.now())
+    // Bootstrap. advance() seeds from the SHARED play-log (playlog) first, so a fresh takeover
+    // / lobby-recovery continues the session instead of replaying from the top, and loops via
+    // the shared epoch when everything's been played. Empty/away DJs' slots are skipped.
+    advance(groupId)
     return
   }
 
   if (!npFresh) {
     // Very old now_playing = residue of an earlier session (kind 30100 is replaceable and
-    // lingers on the relay). Then `elapsed` against the ancient started_at is huge → would
-    // be falsely treated as "finished" and the first track skipped. Instead re-start the
-    // same pos (never skip).
+    // lingers on the relay). Don't resurrect a long-dead track at a stale pos — advance()
+    // continues from the shared progress (and won't replay, since the residue is excluded).
     if (Date.now() - np.sentAt > 120_000) {
-      const pos = firstPlayablePos(djs.length, playable)
-      if (pos >= 0) startAt(groupId, pos, Date.now())
-      else state.np = null
+      advance(groupId)
       return
     }
     // Real failover (conductor only briefly away): KEEP the running track; only advance if
@@ -401,4 +427,5 @@ export function resetSync(): void {
   state.offsetMs = 0
   state.skipIntent = null
   playedThisSession.clear()
+  currentLoopEpoch = 0
 }

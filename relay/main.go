@@ -34,6 +34,37 @@ func env(key, def string) string {
 	return def
 }
 
+// pruneOldPlays deletes kind-1313 play records older than `cutoffSec`. 1313 is
+// non-replaceable (the shared round-robin progress log) and would otherwise grow forever; the
+// client only ever reads a short rolling window, so old records are pure DB bloat. Loops
+// query+delete (the store caps a single query) until a pass deletes nothing. Keeps badger
+// small per CLAUDE.md §7.
+func pruneOldPlays(db *badger.BadgerBackend, cutoffSec int64) int {
+	ctx := context.Background()
+	until := nostr.Timestamp(cutoffSec)
+	total := 0
+	for pass := 0; pass < 1000; pass++ {
+		ch, err := db.QueryEvents(ctx, nostr.Filter{Kinds: []int{1313}, Until: &until})
+		if err != nil {
+			log.Printf("prune 1313 query: %v", err)
+			break
+		}
+		var evs []*nostr.Event
+		for ev := range ch {
+			evs = append(evs, ev)
+		}
+		if len(evs) == 0 {
+			break
+		}
+		for _, ev := range evs {
+			if db.DeleteEvent(ctx, ev) == nil {
+				total++
+			}
+		}
+	}
+	return total
+}
+
 func main() {
 	domain := env("RELAY_DOMAIN", "relay.zapclub.io")
 	port := env("RELAY_PORT", "3334")
@@ -228,6 +259,8 @@ func main() {
 			// Advance/trim the listener buckets even when idle, then persist (5-min tick
 			// matches the 5-min bucket → at most one bucket lost on an unclean crash).
 			listeners.tick(time.Now().UnixMilli(), true)
+			// Drop play-log records older than 24h (client reads only a ≤6h window).
+			pruneOldPlays(db, time.Now().Add(-24*time.Hour).Unix())
 		}
 	}()
 
