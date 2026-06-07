@@ -202,9 +202,11 @@ func (s *listenerStats) snapshot(now int64) listenersResp {
 	defer s.mu.Unlock()
 	s.rollLocked(now)
 
-	resp := listenersResp{GeneratedAt: now, BucketMs: listenBucketMs, WindowMs: listenWindowMs}
+	// Initialise slices non-nil so JSON encodes [] (not null) for an idle relay — the
+	// client treats null as a hard error otherwise.
+	resp := listenersResp{GeneratedAt: now, BucketMs: listenBucketMs, WindowMs: listenWindowMs, Clubs: []clubListeners{}}
 	for club := range s.clubUniverseLocked() {
-		cl := clubListeners{ID: club}
+		cl := clubListeners{ID: club, Live: []string{}, Seen: []seenListener{}, Series: []listenerSample{}}
 		// finalized buckets + the still-open bucket as the live tail
 		cl.Series = append(cl.Series, s.Series[club]...)
 		cl.Series = append(cl.Series, listenerSample{T: s.CurStart, N: len(s.CurSets[club])})

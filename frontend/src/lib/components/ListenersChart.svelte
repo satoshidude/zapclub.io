@@ -13,13 +13,17 @@
 
   const bucket = $derived(data.bucketMs || 300_000)
   const end = $derived(data.generatedAt)
-  const start = $derived(data.generatedAt - data.windowMs)
+  const windowMs = $derived(data.windowMs || 86_400_000)
+  const start = $derived(end - windowMs)
+  // Go marshals empty slices as null → default everything to [] so a quiet relay (no
+  // listener data yet) renders "no activity" instead of crashing the whole dashboard.
+  const clubs = $derived(data.clubs ?? [])
 
   // Total concurrent listeners per bucket across all clubs (the headline 24h diagram),
   // with missing buckets filled as 0 so the timeline is continuous.
   const totals = $derived.by(() => {
     const m = new Map<number, number>()
-    for (const c of data.clubs) for (const s of c.series) m.set(s.t, (m.get(s.t) ?? 0) + s.n)
+    for (const c of clubs) for (const s of c.series ?? []) m.set(s.t, (m.get(s.t) ?? 0) + s.n)
     const pts: { t: number; n: number }[] = []
     const first = Math.floor(start / bucket) * bucket
     for (let t = first; t <= end; t += bucket) pts.push({ t, n: m.get(t) ?? 0 })
@@ -27,10 +31,10 @@
   })
   const peak = $derived(totals.reduce((a, p) => Math.max(a, p.n), 0))
   const yMax = $derived(Math.max(1, peak))
-  const liveNow = $derived(data.clubs.reduce((a, c) => a + c.live.length, 0))
+  const liveNow = $derived(clubs.reduce((a, c) => a + (c.live?.length ?? 0), 0))
   const unique24h = $derived.by(() => {
     const set = new Set<string>()
-    for (const c of data.clubs) for (const s of c.seen) set.add(s.pubkey)
+    for (const c of clubs) for (const s of c.seen ?? []) set.add(s.pubkey)
     return set.size
   })
 
@@ -48,7 +52,7 @@
 
   // Per-club sparkline (its own series), same time axis.
   function sparkPath(c: ClubListeners): string {
-    if (!c.series.length) return ''
+    if (!c.series?.length) return ''
     const m = new Map(c.series.map((s) => [s.t, s.n]))
     const first = Math.floor(start / bucket) * bucket
     const pts: string[] = []
@@ -99,11 +103,11 @@
     {/each}
   </div>
 
-  {#if data.clubs.length === 0}
+  {#if clubs.length === 0}
     <p class="dim">No listener activity recorded yet.</p>
   {:else}
     <ul class="clubs">
-      {#each data.clubs as c (c.id)}
+      {#each clubs as c (c.id)}
         <li class="club">
           <button class="row" onclick={() => (expanded = { ...expanded, [c.id]: !expanded[c.id] })}>
             <span class="chev" class:open={expanded[c.id]}>▸</span>
@@ -111,12 +115,12 @@
             <svg class="spark" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
               <path d={sparkPath(c)} class="line" />
             </svg>
-            <span class="live-badge" class:on={c.live.length > 0}>{c.live.length} now</span>
-            <span class="seen-n">{c.seen.length}</span>
+            <span class="live-badge" class:on={(c.live?.length ?? 0) > 0}>{c.live?.length ?? 0} now</span>
+            <span class="seen-n">{c.seen?.length ?? 0}</span>
           </button>
           {#if expanded[c.id]}
             <ul class="seen">
-              {#each c.seen as s (s.pubkey)}
+              {#each c.seen ?? [] as s (s.pubkey)}
                 {@const p = useProfile(s.pubkey)}
                 {@const online = data.generatedAt - s.last < 60_000}
                 <li>
