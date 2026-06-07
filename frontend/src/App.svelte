@@ -85,7 +85,7 @@
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
   <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
-  <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with 4 music</span>
+  <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 
 <Nav mobile />
