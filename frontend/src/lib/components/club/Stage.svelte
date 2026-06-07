@@ -1,6 +1,6 @@
 <script lang="ts">
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
-  import { sync } from '../../nostr/sync.svelte'
+  import { sync, requestFreshStart } from '../../nostr/sync.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
@@ -35,6 +35,7 @@
     error = ''
     try {
       await joinStage(groupId)
+      requestFreshStart(groupId) // taking the stage starts MY set from my current top track
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {
