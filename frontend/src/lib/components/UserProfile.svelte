@@ -245,7 +245,10 @@
     <img class="pavatar" src={avatarUrl(pubkey, profile)} alt="" width="64" height="64" />
     <div class="pinfo">
       <h1>{displayName(pubkey, profile)}</h1>
-      <span class="npub">{npub.slice(0, 18)}…</span>
+      <div class="pid">
+        <span class="npub">{npub.slice(0, 18)}…</span>
+        <a class="njump" href={`https://njump.me/${npub}`} target="_blank" rel="noopener noreferrer" title="Open this profile on njump.me for full Nostr details">on Nostr ↗</a>
+      </div>
       {#if profile?.about}<p class="pabout">{profile.about}</p>{/if}
       {#if profile?.lud16}
         <p class="plud">⚡ {profile.lud16}</p>
@@ -290,6 +293,16 @@
       <h2>⚡ Received <span class="recv-total">{received.total.toLocaleString()} sats</span>
         <span class="count">from {received.bySender.length} {received.bySender.length === 1 ? 'person' : 'people'}</span>
       </h2>
+      {#if !profile?.lud16}
+        <p class="recv-note">
+          🙏 No lightning address yet, so these sats went to <strong>zapclub</strong> — thank you!
+          {#if isMe}
+            <button class="recv-link" onclick={openEditor}>Add a receiving address</button> so future zaps reach you directly.
+          {:else}
+            Please add a receiving address (lud16) to your profile so future zaps reach you directly.
+          {/if}
+        </p>
+      {/if}
       <ul class="senders">
         {#each received.bySender.slice(0, 12) as s (s.sender)}
           {@const sp = useProfile(s.sender)}
@@ -503,10 +516,51 @@
     margin: 0;
     font-size: 1.4rem;
   }
+  .pid {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
   .npub {
     font-size: 0.78rem;
     color: var(--text-dim);
     font-family: ui-monospace, monospace;
+  }
+  .njump {
+    font-size: 0.74rem;
+    color: var(--accent-2);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    white-space: nowrap;
+  }
+  .njump:hover {
+    border-color: var(--accent-2);
+  }
+  .recv-note {
+    margin: 0 0 0.7rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.7rem;
+    line-height: 1.45;
+  }
+  .recv-note strong {
+    color: var(--accent);
+  }
+  .recv-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent-2);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
   }
   .pabout {
     margin: 0.4rem 0 0;
