@@ -98,6 +98,28 @@ describe('shouldConduct (phantom-conductor rescue)', () => {
     expect(shouldConduct('bob', 'owner', djs, null, Infinity, RESCUE)).toBe(false)
   })
 
+  it('bootstraps when there is no track AND the elected conductor is offline', () => {
+    // owner is elected but offline (dead/closed client, or empty queue + navigated away while
+    // sticky on stage) and there is NO now_playing. Everyone deferring to the absent owner
+    // would leave the room silent even though bob/carol have full queues → the oldest ONLINE
+    // DJ (bob) must bootstrap playback instead.
+    const online = (pk: string) => pk !== 'owner'
+    expect(shouldConduct('bob', 'owner', djs, null, Infinity, RESCUE, online)).toBe(true)
+    expect(shouldConduct('carol', 'owner', djs, null, Infinity, RESCUE, online)).toBe(false)
+  })
+
+  it('still defers bootstrap to the elected conductor while it is online', () => {
+    const online = () => true
+    expect(shouldConduct('bob', 'owner', djs, null, Infinity, RESCUE, online)).toBe(false)
+    expect(shouldConduct('owner', 'owner', djs, null, Infinity, RESCUE, online)).toBe(true)
+  })
+
+  it('bootstrap cascades past multiple offline DJs to the first online one', () => {
+    const online = (pk: string) => pk === 'carol' // owner + bob offline, only carol here
+    expect(shouldConduct('carol', 'owner', djs, null, Infinity, RESCUE, online)).toBe(true)
+    expect(shouldConduct('bob', 'owner', djs, null, Infinity, RESCUE, online)).toBe(false)
+  })
+
   it('the oldest non-writer DJ rescues a silent conductor', () => {
     // owner (elected) went silent → bob (oldest active DJ that is not the silent writer) takes over
     expect(shouldConduct('bob', 'owner', djs, 'owner', 120_000, RESCUE)).toBe(true)

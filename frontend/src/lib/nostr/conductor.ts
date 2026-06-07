@@ -89,7 +89,19 @@ export function shouldConduct(
 ): boolean {
   if (!me) return false
   if (me === elected) return true
-  if (npWriter == null) return false // no track yet & I'm not elected → defer to the elected conductor
+  if (npWriter == null) {
+    // No now_playing yet → normally the elected conductor bootstraps it. But if the elected
+    // conductor is OFFLINE (the oldest on-stage DJ has a dead/closed client, or an empty queue
+    // and navigated away — stage is sticky for 1h), nobody would EVER start and the room stays
+    // silent even though other present DJs have full queues. So when the elected conductor
+    // isn't online, the oldest ONLINE active DJ bootstraps playback (same cascade as the
+    // stale-conductor rescue). When presence is unknown (default all-online) we still defer to
+    // the elected conductor, preserving the deterministic single-starter behaviour.
+    if (!elected || isOnline(elected)) return false
+    const online = activeDjs.filter(isOnline)
+    const starter = online.find((pk) => pk !== elected) ?? online[0]
+    return starter === me
+  }
   if (npStaleMs <= rescueAfterMs) return npWriter === me // fresh → only the current writer drives
   // Silent conductor → pick a rescuer among ONLINE active DJs (so we don't hand off to another
   // phantom), oldest-since first, excluding the silent writer. No one online → fall back to any
