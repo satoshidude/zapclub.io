@@ -120,6 +120,11 @@ const tooLow = await joinWith(joiner, receipt(jsk, zsk, 4000, G)) // 4 sats < 5
 assert(tooLow[0] === false, 'paid join with too-low amount rejected: ' + ok(tooLow))
 const notMine = await joinWith(joiner, receipt(generateSecretKey(), zsk, 5000, G)) // 9734 signed by someone else
 assert(notMine[0] === false, 'paid join with someone else’s payment rejected: ' + ok(notMine))
+// Stale receipt (>10min old) rejected — limits post-restart replay of an old proof.
+const staleZr = finalizeEvent({ kind: 9734, created_at: now() - 700, tags: [['amount', '5000'], ['p', zpub], ['h', G], ['club_entry', G]], content: '' }, jsk)
+const staleRec = finalizeEvent({ kind: 9735, created_at: now() - 700, tags: [['p', zpub], ['bolt11', 'lnbcstale'], ['description', JSON.stringify(staleZr)]], content: '' }, zsk)
+const stale = await joinWith(joiner, staleRec)
+assert(stale[0] === false && /expired/i.test(stale[1] || ''), 'paid join with a stale (>10min) receipt rejected: ' + ok(stale))
 const good = receipt(jsk, zsk, 5000, G)
 const okJoin = await joinWith(joiner, good)
 assert(okJoin[0] === true, 'paid join with a valid receipt accepted: ' + ok(okJoin))

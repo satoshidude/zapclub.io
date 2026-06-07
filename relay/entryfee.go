@@ -23,7 +23,7 @@ import (
 //   - its embedded 9734 zap request is valid, signed by the JOINER (binds payment to them),
 //     carries ['club_entry', <club>] (so a track-zap receipt can't be reused as entry), and
 //     amount >= price
-//   - the receipt is fresh (< 1h) and its id hasn't been used before (single-use; in-memory).
+//   - the receipt is fresh (< 10min) and its id hasn't been used before (single-use; in-memory).
 
 const (
 	kindClubConfig  = 30101
@@ -112,7 +112,10 @@ func (g *entryGate) verifyReceipt(proofJSON, club string, ca clubAccess, joiner 
 	if ca.zapper == "" || r.PubKey != ca.zapper {
 		return false, "entry proof not from the club's entry wallet"
 	}
-	if time.Since(r.CreatedAt.Time()) > time.Hour {
+	// Short freshness window: LNURL invoices expire in minutes anyway, and the replay-set is
+	// in-memory (reset on restart) — a tight window keeps a post-restart replay of an old receipt
+	// to a few minutes rather than an hour.
+	if time.Since(r.CreatedAt.Time()) > 10*time.Minute {
 		return false, "entry proof expired — pay again"
 	}
 	desc := tagVal(&r, "description")

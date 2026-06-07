@@ -24,6 +24,17 @@ const RESCUE_STALE_MS = 90_000
  *  Exported as the SINGLE source for the play-log's session-gap (playlog.svelte.ts): a gap
  *  larger than the lobby-fallback == the room was in the lobby == a new playback session. */
 export const LIVE_STALE_MS = 150_000
+/** Off-club (ConductorService) the only track-end signal is conductorTick comparing elapsed vs
+ *  duration — so a track with NO duration (yt-dlp returned 0) would never advance and the room
+ *  would hang. Cap such tracks at this fallback length. On-club the player's `ended` event
+ *  advances earlier, so this only bites the (rare) duration-less off-club case. */
+const MAX_TRACK_FALLBACK_S = 600
+
+/** Has the running track played out? Uses a fallback cap when its duration is unknown (<=0). */
+function trackFinished(np: NowPlaying): boolean {
+  const dur = np.duration > 0 ? np.duration : MAX_TRACK_FALLBACK_S
+  return (Date.now() - np.startedAt) / 1000 >= dur
+}
 
 interface SyncState {
   np: NowPlaying | null
@@ -311,8 +322,7 @@ export function conductorTick(groupId: string): void {
     }
     // Real failover (conductor only briefly away): KEEP the running track; only advance if
     // it actually finished within this window.
-    const elapsed = (Date.now() - np.startedAt) / 1000
-    if (np.duration > 0 && elapsed >= np.duration) advance(groupId)
+    if (trackFinished(np)) advance(groupId)
     else heartbeat(groupId) // same track, new conductor takes over the heartbeat
     return
   }
@@ -323,8 +333,7 @@ export function conductorTick(groupId: string): void {
   // lets the conductor keep the rotation going off the club page (ConductorService) — and is a
   // harmless backstop on-club (onTrackEnded usually fires first; the just-started next track
   // is fresh → no double-advance).
-  const elapsed = (Date.now() - np.startedAt) / 1000
-  if (np.duration > 0 && elapsed >= np.duration) advance(groupId)
+  if (trackFinished(np)) advance(groupId)
   else heartbeat(groupId) // track frozen, new sent_at
 }
 
