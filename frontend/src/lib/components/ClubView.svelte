@@ -471,7 +471,8 @@
     {/if}
   </section>
 
-  <!-- Chat + members — always below. -->
+  <!-- Chat + members — only for members who have joined the club. -->
+  {#if isMember}
   <div class="panel">
       <Chat
         {groupId}
@@ -513,6 +514,7 @@
         </details>
       </section>
     </div>
+  {/if}
 
 </div>
 
