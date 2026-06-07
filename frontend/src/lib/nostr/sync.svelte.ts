@@ -306,8 +306,15 @@ export function conductorTick(groupId: string): void {
     return
   }
 
-  // Fresh & I'm conductor → heartbeat (track frozen, new sent_at).
-  heartbeat(groupId)
+  // Fresh & I'm conductor. The track-end advance is normally driven by the player's `ended`
+  // event (onTrackEnded) — but that only fires while a club view's player is mounted. So the
+  // tick is ALSO self-driving: if the running track has played out, advance here. This is what
+  // lets the conductor keep the rotation going off the club page (ConductorService) — and is a
+  // harmless backstop on-club (onTrackEnded usually fires first; the just-started next track
+  // is fresh → no double-advance).
+  const elapsed = (Date.now() - np.startedAt) / 1000
+  if (np.duration > 0 && elapsed >= np.duration) advance(groupId)
+  else heartbeat(groupId) // track frozen, new sent_at
 }
 
 /**

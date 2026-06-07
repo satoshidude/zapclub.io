@@ -11,6 +11,7 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
   import MiniPlayer from './lib/components/MiniPlayer.svelte'
+  import ConductorService from './lib/components/ConductorService.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
@@ -90,6 +91,7 @@
 <Nav mobile />
 
 <MiniPlayer />
+<ConductorService />
 <LoginDialog />
 <PayModal />
 
