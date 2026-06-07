@@ -12,9 +12,16 @@
   let creating = false
   let ready = false
   let curVid = ''
-  // Start UNMUTED — the mini-player continues the club's audio across navigation; muting it
-  // would silence the music the user was listening to. Browser may require a tap first.
-  let muted = $state(false)
+  // iOS/iPadOS Safari blocks autoplay WITH sound (only muted autoplay is allowed without a
+  // gesture). The mini-player is a fresh iframe created on navigation, so on iOS we start it
+  // MUTED — guaranteeing playback continues — and the 🔊 button (a user gesture) turns sound
+  // back on. Everywhere else, start unmuted to keep the club's audio seamless across pages.
+  const isIOS = (() => {
+    if (typeof navigator === 'undefined') return false
+    const ua = navigator.userAgent
+    return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+  })()
+  let muted = $state(isIOS)
   let driftTimer: ReturnType<typeof setInterval> | null = null
 
   function applyTrack(reseek: boolean) {
@@ -41,7 +48,7 @@
       creating = true
       void createPlayer('yt-mini', {
         controls: false,
-        muted: false, // continue the club's audio with sound
+        muted: isIOS, // iOS: muted autoplay (allowed); 🔊 button unmutes within a gesture
         onReady: () => {
           ready = true
           applyTrack(false)
@@ -70,7 +77,7 @@
       player = null
       ready = false
       curVid = ''
-      muted = false
+      muted = isIOS // next show re-starts muted on iOS (gesture needed again for a fresh iframe)
     }
   })
 

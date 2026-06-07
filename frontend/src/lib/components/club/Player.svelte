@@ -26,10 +26,23 @@
   let player: YouTubePlayer | null = null
   let destroyed = false
   let ready = $state(false)
-  // Start UNMUTED (autoplay with sound where the browser allows it). Non-members are muted by
-  // the canHear effect below (also covers membership resolving after mount). Browser may still
-  // require a tap before unmuted autoplay actually starts.
-  let muted = $state(false)
+
+  // iOS/iPadOS Safari (and Low Power Mode) HARD-block autoplay with sound: media may only
+  // start unmuted from inside a user gesture. Muted autoplay IS allowed. So on iOS we start
+  // MUTED (the synced stream still runs visually) and show a one-tap "sound on" prompt; the
+  // first tap unmutes inside the gesture, which unlocks audio for the whole session (incl.
+  // later track changes). Everywhere else, start unmuted as before. Includes iPadOS, which
+  // reports a Mac UA but has touch points.
+  const isIOS = (() => {
+    if (typeof navigator === 'undefined') return false
+    const ua = navigator.userAgent
+    return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+  })()
+  // Non-members are muted by the canHear effect below (also covers membership resolving after
+  // mount). On iOS, members also start muted until the sound-tap unlocks audio.
+  let muted = $state(isIOS)
+  /** iOS only: becomes true once the user has tapped to unlock audio this session. */
+  let soundUnlocked = $state(false)
   let volume = $state(70)
   let isFullscreen = $state(false)
   let playerEl: HTMLDivElement
@@ -37,11 +50,9 @@
   let idleMode = false
   let driftTimer: ReturnType<typeof setInterval> | null = null
 
-  // Start with sound; the canHear effect mutes non-members once the player exists. Browsers
-  // may require a tap before unmuted autoplay actually starts; tapping the video toggles mute.
   createPlayer(elementId, {
     controls: false,
-    muted: false,
+    muted: isIOS, // iOS: muted autoplay (allowed); unmute happens on the user's sound-tap.
     onStateChange(s) {
       if (s === 1) lobbyFailed = false // playing → reset lobby error flag
       if (s !== 0) return // 0 = ended
@@ -130,6 +141,25 @@
     }
   }
 
+  /** iOS sound-tap: unmute INSIDE the user gesture (the only way iOS lets audio start), re-sync
+   *  to the live position, and remember it for the session so later track changes keep sound. */
+  function enableSound() {
+    soundUnlocked = true
+    if (!player) return
+    if (volume === 0) volume = 70
+    player.unMute()
+    player.setVolume(volume)
+    muted = false
+    // Muted autoplay kept the clock running; re-seek + play in case it stalled while muted.
+    if (sync.live) {
+      player.seekTo(targetPosition())
+      player.play()
+    }
+  }
+
+  // iOS, member/guest who may hear, audio not yet unlocked, a real track is live → prompt.
+  const needsSoundTap = $derived(isIOS && canHear && !soundUnlocked && ready && !!sync.live)
+
   /** Volume slider: sets volume, unmutes (0 = muted). */
   function applyVolume(v: number) {
     volume = v
@@ -186,10 +216,23 @@
     <button
       class="shield"
       class:clickable={canHear}
-      onclick={() => { if (canHear) toggleMute() }}
-      aria-label={canHear ? (muted ? 'Unmute' : 'Mute') : ''}
+      onclick={() => {
+        if (!canHear) return
+        // iOS: the first tap unlocks audio (inside the gesture); afterwards it toggles mute.
+        if (isIOS && !soundUnlocked) enableSound()
+        else toggleMute()
+      }}
+      aria-label={canHear ? (needsSoundTap ? 'Tap for sound' : muted ? 'Unmute' : 'Mute') : ''}
       tabindex={canHear ? 0 : -1}
     ></button>
+
+    <!-- iOS: muted autoplay is running in sync; one tap (anywhere on the video) turns on sound.
+         pointer-events:none so the full-area shield button underneath catches the tap. -->
+    {#if needsSoundTap}
+      <div class="sound-tap" aria-hidden="true">
+        <span class="sound-pill">🔊 Tap for sound</span>
+      </div>
+    {/if}
 
     <!-- Lobby: when no DJ is playing, overlay a hint over the muted idle stream. -->
     {#if !sync.live}
@@ -264,6 +307,41 @@
   }
   .shield.clickable {
     cursor: pointer;
+  }
+  /* iOS "tap for sound" prompt — visible hint over the (muted) synced stream; the tap is
+     handled by the full-area shield button beneath it. */
+  .sound-tap {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.35);
+  }
+  .sound-pill {
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 800;
+    font-size: 0.95rem;
+    padding: 0.6rem 1.1rem;
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    animation: sound-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes sound-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.06);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sound-pill {
+      animation: none;
+    }
   }
   /* Lobby overlay covers the (muted) idle stream with a calm placeholder. */
   .lobby {
