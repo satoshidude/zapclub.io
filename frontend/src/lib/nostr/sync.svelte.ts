@@ -274,7 +274,9 @@ function freshStart(groupId: string): void {
   }
   currentLoopEpoch++ // new session/loop: the reordered top is eligible even if recently played
   playedThisSession.clear()
-  const pos = firstPlayablePos(djs.length, playableExcluding(djs))
+  // Use the raw playability matrix (off-only) — NOT playableExcluding — so we land on the true
+  // top track even if it happens to be the currently-frozen now_playing (which we're replacing).
+  const pos = firstPlayablePos(djs.length, queues.playable(djs))
   if (pos >= 0) startAt(groupId, pos, Date.now())
   else state.np = null
 }
