@@ -582,6 +582,32 @@
     margin: 0;
     font-size: 1.4rem;
   }
+  /* Installed PWA (standalone): the club hero is the first thing on screen with no browser
+     chrome, so trim its height — smaller club image, name and padding — to give the player
+     and stage more room. */
+  @media (display-mode: standalone) {
+    .hero {
+      padding: 0.7rem 0.8rem;
+    }
+    .hero-top {
+      gap: 0.7rem;
+    }
+    .pic {
+      width: 44px;
+      height: 44px;
+      flex-basis: 44px;
+      border-radius: 10px;
+    }
+    h1 {
+      font-size: 1.05rem;
+    }
+    .hero-now {
+      margin-top: 0.6rem;
+    }
+    .tags {
+      margin-top: 0.4rem;
+    }
+  }
   .tags {
     display: flex;
     align-items: center;
