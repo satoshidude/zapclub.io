@@ -86,7 +86,9 @@
     startPlayLogSync(gid)
     // Self-driving tick (advance/heartbeat). First fire after 6s → the subscription has
     // delivered the current now_playing/stage/queues by then, so no bootstrap jump.
-    setStageHost(ownerPk)
+    // NOTE: ownerPk is read ONLY here inside the interval (untracked) — never synchronously
+    // in the effect body, or onAdmins writing it would re-trigger this effect in a loop
+    // (resubscribe storm).
     const tick = setInterval(() => {
       setStageHost(ownerPk) // keep owner-override correct as 39001 arrives
       conductorTick(gid)
