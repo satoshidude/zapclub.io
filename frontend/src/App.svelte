@@ -84,6 +84,7 @@
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
   <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
+  <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with 4 music</span>
 </footer>
 
 <Nav mobile />
@@ -171,6 +172,18 @@
     text-align: center;
     margin-top: 0.4rem;
     font-size: 0.72rem;
+  }
+  .foot-note + .foot-note {
+    margin-top: 0.15rem;
+  }
+  .block {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .block:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
   /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
   @media (max-width: 560px) {
