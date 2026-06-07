@@ -252,35 +252,6 @@ function advance(groupId: string): void {
   startAt(groupId, next, Date.now())
 }
 
-// Set when the user EXPLICITLY takes the stage ("Go on stage"). The conductor then restarts
-// the rotation from the top of the current queues (a new loop epoch) instead of inheriting a
-// stale/frozen now_playing — so taking the stage starts YOUR set from YOUR current top track,
-// reflecting any reorder. Honored only briefly + only by the acting conductor (a non-conductor
-// joiner's flag just expires). NOT set on reload-resume / ConductorService (those continue).
-let freshStartAt = 0
-let freshStartGroup = ''
-export function requestFreshStart(groupId: string): void {
-  freshStartGroup = groupId
-  freshStartAt = Date.now()
-}
-
-/** Restart the round-robin from the top of the current queues (new loop epoch → nothing counts
- *  as played, so a just-reordered top track plays). Used when the user takes the stage. */
-function freshStart(groupId: string): void {
-  const djs = stage.djs.map((d) => d.pubkey)
-  if (djs.length === 0) {
-    state.np = null
-    return
-  }
-  currentLoopEpoch++ // new session/loop: the reordered top is eligible even if recently played
-  playedThisSession.clear()
-  // Use the raw playability matrix (off-only) — NOT playableExcluding — so we land on the true
-  // top track even if it happens to be the currently-frozen now_playing (which we're replacing).
-  const pos = firstPlayablePos(djs.length, queues.playable(djs))
-  if (pos >= 0) startAt(groupId, pos, Date.now())
-  else state.np = null
-}
-
 /**
  * Whether the local user should DRIVE playback right now — the elected conductor normally,
  * or (if that conductor went silent while staying sticky-on-stage) the deterministic rescuer.
@@ -310,21 +281,6 @@ export function conductorTick(groupId: string): void {
 
   const djs = stage.djs.map((d) => d.pubkey)
   const np = state.np
-
-  // The user just took the stage → start their set from the top (reflects reorders), instead
-  // of inheriting whatever was frozen as now_playing. Scoped to this club; expires after 15s
-  // (e.g. joined as a non-conductor, who never reaches here to consume it).
-  if (freshStartAt) {
-    if (Date.now() - freshStartAt >= 15_000) {
-      freshStartAt = 0
-      freshStartGroup = ''
-    } else if (freshStartGroup === groupId) {
-      freshStartAt = 0
-      freshStartGroup = ''
-      freshStart(groupId)
-      return
-    }
-  }
 
   // Orphan guard: never keep playing a track whose DJ is no longer on an active stage slot
   // (left / went stale). Their leftover now_playing lingers (kind 30100 is replaceable); advance
@@ -490,6 +446,4 @@ export function resetSync(): void {
   state.skipIntent = null
   playedThisSession.clear()
   currentLoopEpoch = 0
-  freshStartAt = 0
-  freshStartGroup = ''
 }

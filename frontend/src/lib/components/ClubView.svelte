@@ -31,7 +31,7 @@
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
   import { ingestPlay, startPlayLogSync, stopPlayLogSync, refreshPlayLog, resetPlayLog } from '../nostr/playlog.svelte'
-  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor, requestFreshStart } from '../nostr/sync.svelte'
+  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
@@ -229,12 +229,9 @@
 
   const onStageNow = $derived(stage.isOnStage(auth.pubkey))
 
-  /** From the lobby "go on stage" link: hop on the stage and start my set from my top track. */
+  /** From the lobby "go on stage" link: hop on the stage; the round-robin interleaves my set. */
   function goOnStage() {
-    if (!onStageNow) {
-      void joinStage(groupId)
-      requestFreshStart(groupId)
-    }
+    if (!onStageNow) void joinStage(groupId)
   }
 
   async function doJoin() {
