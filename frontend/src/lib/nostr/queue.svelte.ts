@@ -172,6 +172,28 @@ export async function markMyTrackPlayed(groupId: string, videoId: string): Promi
   )
 }
 
+/**
+ * Reactivate ALL of my tracks for a club (clear the `off`/played flags). Called when I take the
+ * stage so my full curated set re-enters the round-robin — `off` is a permanent played-marker,
+ * so without this a returning DJ's set stays depleted (their top tracks vanish from Up next).
+ * Tracks I actually played THIS session stay excluded by the session play-log (1313), not `off`,
+ * so reactivating doesn't replay them. No-op if nothing is off / I'm not signed in.
+ */
+export async function reactivateMyQueue(groupId: string): Promise<void> {
+  const me = auth.pubkey
+  if (!me) return
+  let tracks = state.byDj[me]?.tracks
+  if (!tracks) {
+    const events = await fetchClubQueues(groupId)
+    const mine = events.filter((e) => e.pubkey === me).sort((a, b) => b.created_at - a.created_at)[0]
+    if (!mine) return
+    tracks = parseTracks(mine)
+    state.byDj[me] = { dj: me, tracks, updatedAt: mine.created_at }
+  }
+  if (!tracks.some((t) => t.active === false)) return // already all active
+  await publishMyQueue(groupId, tracks.map((t) => ({ ...t, active: true })))
+}
+
 export function addTrack(groupId: string, track: QueueTrack): Promise<void> {
   return publishMyQueue(groupId, [...myTracks(), track])
 }

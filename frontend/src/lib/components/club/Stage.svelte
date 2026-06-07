@@ -1,6 +1,7 @@
 <script lang="ts">
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { sync } from '../../nostr/sync.svelte'
+  import { reactivateMyQueue } from '../../nostr/queue.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
@@ -35,6 +36,7 @@
     error = ''
     try {
       await joinStage(groupId) // just join the rotation — the round-robin interleaves my set
+      void reactivateMyQueue(groupId) // bring my FULL set (clear stale played-flags from before)
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {

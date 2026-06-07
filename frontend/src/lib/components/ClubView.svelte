@@ -29,7 +29,7 @@
     leaveStage,
     persistedStageGroup,
   } from '../nostr/stage.svelte'
-  import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues } from '../nostr/queue.svelte'
+  import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues, reactivateMyQueue } from '../nostr/queue.svelte'
   import { ingestPlay, startPlayLogSync, stopPlayLogSync, refreshPlayLog, resetPlayLog } from '../nostr/playlog.svelte'
   import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
@@ -231,7 +231,10 @@
 
   /** From the lobby "go on stage" link: hop on the stage; the round-robin interleaves my set. */
   function goOnStage() {
-    if (!onStageNow) void joinStage(groupId)
+    if (!onStageNow) {
+      void joinStage(groupId)
+      void reactivateMyQueue(groupId) // bring my full set into the round-robin
+    }
   }
 
   async function doJoin() {
