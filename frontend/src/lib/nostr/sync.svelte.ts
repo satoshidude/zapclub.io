@@ -221,15 +221,27 @@ function seedPlayedFromLog(): void {
 
 /**
  * Playability matrix: a slot is playable if the track is active (`off`!==true) AND not the
- * currently-playing one AND not already played this session. Built directly (queues.playable
- * returns fresh arrays per DJ).
+ * currently-playing one AND (for an AWAY DJ) not already played this session.
+ *
+ * The shared session played-set (1313) only needs to guard an AWAY DJ: their client is gone,
+ * so it can't mark their just-played track `off`, and a top-down scan would re-pick it forever.
+ * For a PRESENT DJ — and always for myself — the queue's own `active`/`off` flags are
+ * authoritative: a present DJ marks tracks `off` as they play (markMyTrackPlayed) AND can
+ * reactivate one to replay it. So a present DJ's reactivated track is eligible again instead of
+ * staying wrongly excluded by the played-set (the bug: a reactivated track sitting before the
+ * play head got skipped — the rotation jumped to the next unplayed track after the current one).
  */
 function playableExcluding(djs: string[]): boolean[][] {
-  const excluded = new Set(playedThisSession)
-  if (state.np?.videoId) excluded.add(state.np.videoId)
-  return djs.map((pk) =>
-    (queues.get(pk)?.tracks ?? []).map((t) => t.active !== false && !excluded.has(t.videoId)),
-  )
+  const cur = state.np?.videoId
+  return djs.map((pk) => {
+    const here = pk === auth.pubkey || presence.isOnline(pk)
+    return (queues.get(pk)?.tracks ?? []).map(
+      (t) =>
+        t.active !== false && // not explicitly played/disabled by its DJ
+        t.videoId !== cur && // never re-pick the currently-playing track
+        (here || !playedThisSession.has(t.videoId)), // away DJ → shared played-set guard
+    )
+  })
 }
 
 /**
