@@ -61,12 +61,9 @@
   const np = $derived(sync.live)
 
   // Channel name reported live by the YouTube embed (getVideoData) — no extraction, no bot gate.
-  // Reset on track change; the player reports the new channel once it starts playing.
-  let ytAuthor = $state('')
-  $effect(() => {
-    void np?.videoId
-    ytAuthor = ''
-  })
+  // Keyed to the videoId it belongs to, so it persists across now_playing heartbeats (same track,
+  // new object) and is ignored the moment the track changes — until the player reports the new one.
+  let ytMeta = $state({ vid: '', author: '' })
 
   // Derive the artist from a YouTube channel ONLY when it carries a music marker ("Artist -
   // Topic", "ArtistVEVO", "Artist Official") — mirrors the relay's artistFromChannel. A plain
@@ -91,7 +88,8 @@
     if (m && m.index !== undefined && m.index > 0) {
       return { artist: full.slice(0, m.index), title: full.slice(m.index + m[0].length) }
     }
-    return { artist: artistFromChannel(ytAuthor), title: full }
+    const author = np?.videoId && ytMeta.vid === np.videoId ? ytMeta.author : ''
+    return { artist: artistFromChannel(author), title: full }
   })
   const dj = $derived(np?.dj ?? '')
   const profile = $derived(dj ? useProfile(dj) : null)
@@ -121,7 +119,7 @@
   {#if np}<div class="zap-corner"><ZapButton club={clubId} /></div>{/if}
   <div class="np-main">
     <div class="video">
-      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => (ytAuthor = author)} />
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => { if (np) ytMeta = { vid: np.videoId, author } }} />
       <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
         {zoomed ? '⤡' : '⤢'}
       </button>
