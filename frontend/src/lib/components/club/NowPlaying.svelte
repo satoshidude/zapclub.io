@@ -1,8 +1,5 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
-  import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
-  import { goUser } from '../../router.svelte'
-  import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { enrichMyTrackTitle } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -90,8 +87,24 @@
     if (/ [–—-] /.test(full)) return full // already has an artist
     return channelArtist ? `${channelArtist} - ${full}` : full
   })
-  const dj = $derived(np?.dj ?? '')
-  const profile = $derived(dj ? useProfile(dj) : null)
+
+  // Marquee: when the title is wider than its box, scroll it slowly back and forth instead of
+  // ellipsizing. Measure the overflow (re-measured on title/layout change via ResizeObserver).
+  let titleEl = $state<HTMLElement>()
+  let scrollPx = $state(0)
+  const marqueeDur = $derived(Math.max(9, Math.round(scrollPx / 14) + 6)) // slower for longer titles
+  $effect(() => {
+    void displayTitle // re-measure when the title changes
+    const el = titleEl
+    if (!el) return
+    const measure = () => {
+      if (titleEl) scrollPx = Math.max(0, titleEl.scrollWidth - titleEl.clientWidth)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
   const pos = $derived.by(() => {
     void nowMs // re-evaluate on tick
     return np ? targetPosition() : 0
@@ -117,11 +130,14 @@
 <div class="np card" class:zoomed>
   {#if np}
     <div class="np-head">
-      <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
-        <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-        {displayName(dj, profile)}
-      </a>
-      <ZapButton club={clubId} />
+      <ZapButton club={clubId} showDj />
+      <button
+        class="like"
+        class:on={liked}
+        onclick={toggleLike}
+        disabled={!auth.canSign}
+        title={liked ? 'Liked — tap to remove' : 'Like this track'}
+      >🔥</button>
     </div>
   {/if}
   <div class="np-main">
@@ -145,19 +161,12 @@
         <div class="info">
           <div class="title-row">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="title">{displayTitle}</span>
+            <span class="title" bind:this={titleEl} class:scroll={scrollPx > 0} style:--scroll="{scrollPx}px" style:--marquee-dur="{marqueeDur}s">
+              <span class="title-text">{displayTitle}</span>
+            </span>
           </div>
         </div>
         <div class="meta-foot">
-          <div class="right-actions">
-            <button
-              class="like"
-              class:on={liked}
-              onclick={toggleLike}
-              disabled={!auth.canSign}
-              title={liked ? 'Liked — tap to remove' : 'Like this track'}
-            >🔥</button>
-          </div>
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
         </div>
       {:else}
@@ -185,8 +194,7 @@
   .np-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    gap: 0.4rem;
     margin-bottom: 0.6rem;
   }
   .np-main {
@@ -260,36 +268,33 @@
     flex-wrap: wrap;
   }
   .title {
+    flex: 1;
+    min-width: 0;
     font-weight: 700;
     font-size: 0.98rem;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .dj {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    text-decoration: none;
-    min-width: 0;
-    overflow: hidden;
+  .title-text {
+    display: inline-block;
+    white-space: nowrap;
   }
-  .dj .avatar {
-    flex: 0 0 auto;
+  /* Title wider than its box → scroll it slowly back and forth (marquee) instead of clipping. */
+  .title.scroll .title-text {
+    animation: title-marquee var(--marquee-dur, 12s) ease-in-out infinite;
   }
-  .avatar {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
+  @keyframes title-marquee {
+    0%, 12% { transform: translateX(0); }
+    50%, 62% { transform: translateX(calc(-1 * var(--scroll, 0px))); }
+    100% { transform: translateX(0); }
   }
-  .right-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
+  @media (prefers-reduced-motion: reduce) {
+    .title.scroll .title-text {
+      animation: none;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   }
   .like {
     flex: 0 0 auto;

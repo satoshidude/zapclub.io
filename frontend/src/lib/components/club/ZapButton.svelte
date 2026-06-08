@@ -2,12 +2,13 @@
   import { sync } from '../../nostr/sync.svelte'
   import { requestZapInvoice, zaps } from '../../nostr/zaps.svelte'
   import { showPay } from '../../nostr/payModal.svelte'
-  import { useProfile, displayName } from '../../nostr/profiles.svelte'
+  import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
 
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
-  let { pubkey = '', club = '' }: { pubkey?: string; club?: string } = $props()
+  // `showDj` renders the recipient DJ's avatar + name on the chip (the zap target).
+  let { pubkey = '', club = '', showDj = false }: { pubkey?: string; club?: string; showDj?: boolean } = $props()
 
   const PRESETS = [21, 100, 500, 2100]
   // Fallback payee when the recipient has no lightning address on their profile. The
@@ -55,9 +56,14 @@
 </script>
 
 {#if show}
-  <button class="zap-mini" onclick={() => (open = !open)} title="Zap {displayName(dj, djProfile)} · {total} sats received">
+  <button class="zap-mini" class:with-dj={showDj} onclick={() => (open = !open)} title="Zap {displayName(dj, djProfile)} · {total} sats received">
     <span class="bolt">⚡</span>
-    <span class="lbl">zap</span>
+    {#if showDj}
+      <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
+      <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
+    {:else}
+      <span class="lbl">zap</span>
+    {/if}
     {#if total > 0}<span class="score">{fmtSats(total)} sats</span>{/if}
   </button>
 
@@ -127,6 +133,19 @@
   .lbl {
     font-size: 0.74rem;
     font-weight: 800;
+  }
+  .zap-av {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: rgba(0, 0, 0, 0.18);
+  }
+  .dj-name {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .score {
     font-size: 0.72rem;
