@@ -7,6 +7,7 @@
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
   import Player from './Player.svelte'
+  import ComingNext from './ComingNext.svelte'
 
   // The video lives INSIDE this card: small on the left by default to save space, with a zoom
   // toggle that expands it to full content-width. The Player instance is never remounted on
@@ -128,6 +129,7 @@
     </div>
   </div>
   {#if np}<div class="bar"><div class="fill" style:width="{pct}%"></div></div>{/if}
+  <ComingNext />
 </div>
 
 <style>

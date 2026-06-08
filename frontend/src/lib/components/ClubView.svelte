@@ -41,7 +41,6 @@
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
-  import ComingNext from './club/ComingNext.svelte'
   import ZapButton from './club/ZapButton.svelte'
   import Chat from './club/Chat.svelte'
   import { clubAvatar } from '../avatar'
@@ -456,7 +455,6 @@
         onerror={(vid) => onTrackError(groupId, vid)}
       />
     </div>
-    <ComingNext />
   </header>
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
