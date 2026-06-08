@@ -227,7 +227,7 @@ func main() {
 	// even when no client is in the foreground. Single always-on writer → no client election/
 	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
-	cond := newConductor(db, relay, sk)
+	cond := newConductor(db, relay, state, sk)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence)
 	go cond.run()
 

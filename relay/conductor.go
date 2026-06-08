@@ -11,6 +11,7 @@ import (
 
 	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru"
+	"github.com/fiatjaf/relay29"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -73,6 +74,7 @@ type condClub struct {
 type conductor struct {
 	db    *badger.BadgerBackend
 	relay *khatru.Relay
+	state *relay29.State // group membership/roles (skip authorization)
 	sk    string
 	pub   string
 	mu    sync.Mutex
@@ -82,9 +84,38 @@ type conductor struct {
 	pres   map[string]map[string]int64 // club → pubkey → last presence beat (ms)
 }
 
-func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, sk string) *conductor {
+func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
 	pub, _ := nostr.GetPublicKey(sk)
-	return &conductor{db: db, relay: relay, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}}
+	return &conductor{db: db, relay: relay, state: state, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}}
+}
+
+// isSkipAuthorized reports whether `pk` may skip the running track of `club`: a club owner or
+// moderator, OR the DJ whose track is currently playing (they may skip their own track, e.g. a
+// broken video). Roles come from the relay29 in-memory group state (39001/39002 are served
+// dynamically, NOT stored — so they can't be queried from the DB). Reads group.Members the same
+// lock-free way relay29's own query handlers do; the recover guards the rare concurrent-map race.
+func (c *conductor) isSkipAuthorized(club, pk, currentDJ string) (ok bool) {
+	if pk == "" {
+		return false
+	}
+	if pk == currentDJ {
+		return true
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	group, found := c.state.Groups.Load(club)
+	if !found || group == nil {
+		return false
+	}
+	for _, role := range group.Members[pk] {
+		if role != nil && (role.Name == "owner" || role.Name == "moderator") {
+			return true
+		}
+	}
+	return false
 }
 
 // observePresence records ephemeral presence beats (kind 20100) so the conductor knows which
@@ -416,10 +447,12 @@ func (c *conductor) matrix(club string, djPks []string, queues map[string][]cond
 	return out
 }
 
-// skipRequested reports whether a fresh skip-request (kind 30107) targets the running track.
-// The request must name the current pos AND be newer than the current track's start (so a stale
-// request from a previous track is ignored, and the relay never re-acts on it after advancing —
-// the new track has a different pos/start).
+// skipRequested reports whether a fresh, AUTHORIZED skip-request (kind 30107) targets the
+// running track. The request must (a) name the current pos, (b) be newer than the current
+// track's start (so a stale request from a previous track is ignored, and the relay never
+// re-acts after advancing — the new track has a different pos/start), and (c) come from a club
+// owner/moderator or the currently-playing DJ. The relay accepts any member's 30107 into the
+// store (it knows no kind allowlist), so the role check is enforced HERE.
 func (c *conductor) skipRequested(ctx context.Context, club string, pb *condClub) bool {
 	if !pb.playing {
 		return false
@@ -440,7 +473,10 @@ func (c *conductor) skipRequested(ctx context.Context, club string, pb *condClub
 	if atoiDefault(tagVal(latest, "pos"), -1) != pb.pos {
 		return false
 	}
-	return int64(latest.CreatedAt)*1000 >= pb.startedAt
+	if int64(latest.CreatedAt)*1000 < pb.startedAt {
+		return false
+	}
+	return c.isSkipAuthorized(club, latest.PubKey, pb.dj)
 }
 
 func (c *conductor) stop(pb *condClub) {

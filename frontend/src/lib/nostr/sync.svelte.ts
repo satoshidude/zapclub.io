@@ -434,21 +434,21 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
 }
 
 /**
- * Track end reported by the local player. The RELAY advances by the track's duration on its own
- * clock (so playback continues even with no client present), but the player's `ended` is the
- * precise signal — so we ask the relay to advance NOW via a skip-request for the running track.
- * The relay advances once (the request names the current pos); a stale/duplicate end no-ops.
+ * Track end reported by the local player. No-op: the RELAY advances by the track's duration on
+ * its own clock (so playback continues even with no client present), and a skip-request is a
+ * MODERATION action the relay role-gates — a normal listener's "ended" must not skip. The relay
+ * advancing within its tick after the duration elapses is the single authority.
  */
-export function onTrackEnded(groupId: string): void {
-  if (!state.np) return
-  void requestSkip(groupId)
+export function onTrackEnded(_groupId: string): void {
+  /* relay-driven: nothing to do */
 }
 
 /**
  * Playback error reported by the player (deleted, region-locked, embedding off). The relay can't
- * detect this itself, so we ask it to skip the dead track via a skip-request. Members only (the
- * relay rejects non-member writes); when the next track is also dead the cycle repeats one step
- * at a time until a playable one is found.
+ * detect this itself, so we ask it to skip the dead track via a skip-request — honored only when
+ * the local user is authorized (owner/mod, or the playing DJ skipping their own broken track).
+ * For an unattended-by-mods room a broken track plays out its duration (noted; a quorum-based
+ * broken-track skip is a later hardening).
  */
 export function onTrackError(groupId: string, videoId: string): void {
   if (!state.np || state.np.videoId !== videoId) return // stale error of an old track

@@ -160,7 +160,16 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', pos0]], content: '' })
   await sleep(4000)
   const npB = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  assert(!!npB && npB.tags.find((t) => t[0] === 'track')?.[1] !== firstTrack, 'conductor: advanced to the next track on a skip-request (30107)')
+  const trackB = npB && npB.tags.find((t) => t[0] === 'track')?.[1]
+  assert(!!npB && trackB !== firstTrack, 'conductor: advanced to the next track on a skip-request (30107)')
+  // role validation: a plain MEMBER (not owner/mod, not the playing DJ) cannot skip.
+  await mem.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // mem joins C
+  await sleep(800)
+  const posB = (npB && npB.tags.find((t) => t[0] === 'pos')?.[1]) || '1'
+  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posB]], content: '' })
+  await sleep(4000)
+  const npD = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  assert(!!npD && npD.tags.find((t) => t[0] === 'track')?.[1] === trackB, 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
