@@ -95,6 +95,7 @@
 </script>
 
 <div class="np card" class:zoomed>
+  {#if np}<div class="zap-corner"><ZapButton club={clubId} /></div>{/if}
   <div class="np-main">
     <div class="video">
       <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} />
@@ -126,7 +127,6 @@
               disabled={!auth.canSign}
               title={liked ? 'Liked — tap to remove' : 'Like this track'}
             >🔥</button>
-            <ZapButton club={clubId} />
           </div>
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
         </div>
@@ -146,10 +146,22 @@
 
 <style>
   .np {
+    position: relative;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.8rem 1rem;
+  }
+  /* Zap chip pinned to the top-right corner of the card. */
+  .zap-corner {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.65rem;
+    z-index: 5;
+  }
+  /* Keep the title/artist/dj clear of the corner chip (non-zoomed: meta sits top-right). */
+  .np:not(.zoomed) .info {
+    padding-right: 4.2rem;
   }
   .np-main {
     display: flex;
@@ -175,7 +187,7 @@
   .zoom {
     position: absolute;
     top: 5px;
-    right: 5px;
+    left: 5px;
     z-index: 3;
     width: 26px;
     height: 26px;
