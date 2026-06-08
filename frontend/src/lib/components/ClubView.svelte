@@ -41,7 +41,6 @@
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
-  import ZapButton from './club/ZapButton.svelte'
   import Chat from './club/Chat.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
@@ -350,26 +349,27 @@
               <img class="host-av" src={avatarUrl(owner, op)} alt="" width="14" height="14" />
               {displayName(owner, op)}
             </a>
-            <ZapButton pubkey={owner} club={groupId} />
-          {/if}
-          {#if presence.count > 0}
-            <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
           {/if}
         </div>
       </div>
       <div class="actions">
-        {#if isOwner}
-          <button class="btn btn-ghost btn-sm" onclick={openEdit} title="Edit club">✏️</button>
+        {#if presence.count > 0}
+          <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
         {/if}
-        {#if auth.canSign}
-          {#if isMember}
-            <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
-          {:else if isPaid}
-            <button class="btn btn-primary btn-sm" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
-          {:else}
-            <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
+        <div class="action-btns">
+          {#if isOwner}
+            <button class="btn btn-ghost btn-sm" onclick={openEdit} title="Edit club">✏️</button>
           {/if}
-        {/if}
+          {#if auth.canSign}
+            {#if isMember}
+              <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
+            {:else if isPaid}
+              <button class="btn btn-primary btn-sm" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
+            {:else}
+              <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
+            {/if}
+          {/if}
+        </div>
       </div>
     </div>
 
@@ -596,7 +596,6 @@
     color: var(--accent);
     border-color: var(--accent);
     font-weight: 600;
-    margin-left: auto; /* push the listener count to the far right of the tags row */
   }
   .edit-form .field select {
     width: 100%;
@@ -621,6 +620,14 @@
   }
   .actions {
     flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.45rem;
+  }
+  .action-btns {
+    display: flex;
+    gap: 0.4rem;
   }
   .desc {
     margin: 0.9rem 0 0;
