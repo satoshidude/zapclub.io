@@ -59,16 +59,39 @@
   })
 
   const np = $derived(sync.live)
-  // Show the artist as its own line. Server enrichment writes "Artist – Title" (en-dash), but
-  // many raw YouTube titles use "Artist - Title" (hyphen) or an em-dash. Split on the FIRST
-  // spaced dash of any kind. Requiring surrounding spaces avoids splitting hyphenated words
-  // ("Hip-Hop", "Toni-L"); a bare song name (no spaced dash) stays whole, no artist line.
+
+  // Channel name reported live by the YouTube embed (getVideoData) — no extraction, no bot gate.
+  // Reset on track change; the player reports the new channel once it starts playing.
+  let ytAuthor = $state('')
+  $effect(() => {
+    void np?.videoId
+    ytAuthor = ''
+  })
+
+  // Derive the artist from a YouTube channel ONLY when it carries a music marker ("Artist -
+  // Topic", "ArtistVEVO", "Artist Official") — mirrors the relay's artistFromChannel. A plain
+  // uploader channel yields "" (better no artist than a random uploader name).
+  function artistFromChannel(ch: string): string {
+    const c = (ch ?? '').trim()
+    if (!c || c === 'NA') return ''
+    const low = c.toLowerCase()
+    for (const m of [' - topic', ' official', ' officiel', 'vevo']) {
+      if (low.endsWith(m)) return c.slice(0, c.length - m.length).trim()
+    }
+    return ''
+  }
+
+  // Show the artist as its own line. Server enrichment writes "Artist – Title" (en-dash); many
+  // raw YouTube titles use "Artist - Title" (hyphen) or an em-dash → split on the FIRST spaced
+  // dash (surrounding spaces avoid splitting "Hip-Hop"/"Toni-L"). When the stored title is a
+  // bare song name (no artist, e.g. older tracks), fall back to the channel the embed reports.
   const track = $derived.by(() => {
     const full = np?.title || np?.videoId || ''
     const m = full.match(/ [–—-] /)
-    return m && m.index !== undefined && m.index > 0
-      ? { artist: full.slice(0, m.index), title: full.slice(m.index + m[0].length) }
-      : { artist: '', title: full }
+    if (m && m.index !== undefined && m.index > 0) {
+      return { artist: full.slice(0, m.index), title: full.slice(m.index + m[0].length) }
+    }
+    return { artist: artistFromChannel(ytAuthor), title: full }
   })
   const dj = $derived(np?.dj ?? '')
   const profile = $derived(dj ? useProfile(dj) : null)
@@ -98,7 +121,7 @@
   {#if np}<div class="zap-corner"><ZapButton club={clubId} /></div>{/if}
   <div class="np-main">
     <div class="video">
-      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} />
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => (ytAuthor = author)} />
       <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
         {zoomed ? '⤡' : '⤢'}
       </button>

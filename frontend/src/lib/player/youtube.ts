@@ -39,6 +39,8 @@ export interface YouTubePlayer {
   getIframe(): HTMLIFrameElement | null
   /** YT state: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued */
   getState(): number
+  /** Live video metadata from the embed (no extraction → no bot gate): channel + title. */
+  getVideoData(): { author?: string; title?: string; video_id?: string }
   destroy(): void
 }
 
@@ -101,6 +103,7 @@ function wrap(yt: YTPlayerInstance): YouTubePlayer {
     setVolume: (v) => yt.setVolume(Math.max(0, Math.min(100, v))),
     getIframe: () => (yt.getIframe ? yt.getIframe() : null),
     getState: () => yt.getPlayerState() ?? -1,
+    getVideoData: () => (yt.getVideoData ? yt.getVideoData() : {}),
     destroy: () => yt.destroy(),
   }
 }
@@ -120,6 +123,7 @@ interface YTPlayerInstance {
   unMute(): void
   setVolume(v: number): void
   getIframe?: () => HTMLIFrameElement | null
+  getVideoData?: () => { author?: string; title?: string; video_id?: string }
   destroy(): void
 }
 

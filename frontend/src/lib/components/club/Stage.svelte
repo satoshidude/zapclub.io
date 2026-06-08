@@ -17,8 +17,10 @@
     isMember?: boolean
     /** The now-playing card — rendered inside the stage card (the track plays on the stage). */
     children?: import('svelte').Snippet
+    /** Footer content (the DJ's Live Set) — rendered inside the stage card, below the slots. */
+    footer?: import('svelte').Snippet
   }
-  let { groupId, canModerate = false, isMember = false, children }: Props = $props()
+  let { groupId, canModerate = false, isMember = false, children, footer }: Props = $props()
 
   let busy = $state(false)
   let error = $state('')
@@ -109,6 +111,8 @@
       </button>
     {/each}
   </div>
+
+  {#if footer}<div class="set-wrap">{@render footer()}</div>{/if}
 </div>
 
 <style>
@@ -139,6 +143,9 @@
   }
   .now-wrap {
     margin-bottom: 0.9rem;
+  }
+  .set-wrap {
+    margin-top: 0.9rem;
   }
   .slots {
     display: flex;

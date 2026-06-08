@@ -14,8 +14,11 @@
     onCta?: () => void
     /** Compact (small thumbnail) mode → hide the full control bar; tap-to-mute still works. */
     compact?: boolean
+    /** Live embed metadata (channel + title) once a real track plays — no extraction, no bot
+     *  gate. Lets the card show the artist (from a "Artist - Topic" channel) for bare titles. */
+    onmeta?: (author: string, title: string) => void
   }
-  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false }: Props = $props()
+  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta }: Props = $props()
 
   let lobbyFailed = false
 
@@ -45,7 +48,14 @@
     controls: false,
     muted: true, // muted autoplay (always allowed); the "Tap for sound" overlay unmutes.
     onStateChange(s) {
-      if (s === 1) lobbyFailed = false // playing → reset lobby error flag
+      if (s === 1) {
+        lobbyFailed = false // playing → reset lobby error flag
+        // Surface the embed's channel + title (no extraction → no bot gate) for a real track.
+        if (!idleMode && player) {
+          const d = player.getVideoData()
+          if (d && (d.author || d.title)) onmeta?.(d.author ?? '', d.title ?? '')
+        }
+      }
       if (s !== 0) return // 0 = ended
       if (idleMode) {
         // Loop the lobby track.

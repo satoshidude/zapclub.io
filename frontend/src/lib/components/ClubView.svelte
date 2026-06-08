@@ -417,8 +417,8 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <!-- Stage + the DJ's set ("My set") — one block under the hero, no tabs.
-       The now-playing card lives INSIDE the stage card (the track plays on the stage). -->
+  <!-- Stage block under the hero (no tabs): now-playing card + DJ slots + the DJ's Live Set,
+       all INSIDE the stage card (it all happens on the stage). -->
   <section class="stream">
     <Stage {groupId} {canModerate} {isMember}>
       <NowPlaying
@@ -432,12 +432,14 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
       />
+      {#snippet footer()}
+        {#if isMember}
+          <Queue {groupId} {canModerate} />
+        {:else}
+          <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+        {/if}
+      {/snippet}
     </Stage>
-    {#if isMember}
-      <Queue {groupId} {canModerate} />
-    {:else}
-      <section class="join-hint">Join the club to step on stage and queue tracks.</section>
-    {/if}
   </section>
 
   <!-- Chat + members — only for members who have joined the club. -->
