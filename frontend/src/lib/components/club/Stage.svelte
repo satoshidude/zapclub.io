@@ -72,14 +72,8 @@
 <div class="stage card">
   <div class="head">
     <h3>Stage <span class="count">{djs.length}/{MAX_DJS}</span></h3>
-    {#if auth.canSign && isMember}
-      {#if onStage}
-        <button class="btn btn-ghost btn-sm" onclick={leave} disabled={busy}>Leave stage</button>
-      {:else if !stage.full}
-        <button class="btn btn-primary btn-sm" onclick={go} disabled={busy}>Go on stage</button>
-      {:else}
-        <span class="full">Stage full</span>
-      {/if}
+    {#if auth.canSign && isMember && onStage === false && stage.full}
+      <span class="full">Stage full</span>
     {/if}
   </div>
 
@@ -88,6 +82,19 @@
   {#if children}<div class="now-wrap">{@render children()}</div>{/if}
 
   <div class="slots">
+    {#if auth.canSign && isMember}
+      {#if onStage}
+        <button class="slot action leave" onclick={leave} disabled={busy} title="Leave the stage">
+          <span class="plus">🚪</span>
+          <span class="name">Leave stage</span>
+        </button>
+      {:else if !stage.full}
+        <button class="slot action join" onclick={go} disabled={busy} title="Go on stage">
+          <span class="plus">🎧</span>
+          <span class="name">Go on stage</span>
+        </button>
+      {/if}
+    {/if}
     {#each djs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
       <div class="slot filled" class:live={dj.pubkey === liveDj}>
@@ -205,6 +212,43 @@
     color: var(--accent);
   }
   .slot.empty:disabled {
+    cursor: default;
+  }
+  /* Go on stage / Leave stage as the first slot. */
+  .slot.action {
+    justify-content: center;
+    min-height: 96px;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .slot.action .plus {
+    font-size: 1.5rem;
+    color: inherit;
+  }
+  .slot.action .name {
+    white-space: normal;
+    max-width: none;
+    line-height: 1.15;
+    color: inherit;
+  }
+  .slot.action.join {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .slot.action.join:hover {
+    background: rgba(74, 222, 94, 0.12);
+  }
+  .slot.action.leave {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .slot.action.leave:hover {
+    background: rgba(255, 90, 90, 0.12);
+  }
+  .slot.action:disabled {
+    opacity: 0.6;
     cursor: default;
   }
   .avatar {

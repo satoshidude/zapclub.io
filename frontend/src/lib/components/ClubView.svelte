@@ -645,9 +645,9 @@
     font-weight: 700;
   }
   .tag.live-count {
-    color: var(--accent);
-    border-color: var(--accent);
-    font-weight: 600;
+    border: none;
+    color: var(--text-dim);
+    padding-left: 0.2rem;
   }
   .edit-form .field select {
     width: 100%;
