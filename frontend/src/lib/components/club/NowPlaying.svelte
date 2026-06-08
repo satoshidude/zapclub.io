@@ -59,6 +59,13 @@
   })
 
   const np = $derived(sync.live)
+  // Track titles are enriched server-side as "Artist – Title" (en-dash). Split the first " – "
+  // so the card can show the artist as its own line; un-enriched titles have no separator.
+  const track = $derived.by(() => {
+    const full = np?.title || np?.videoId || ''
+    const i = full.indexOf(' – ')
+    return i > 0 ? { artist: full.slice(0, i), title: full.slice(i + 3) } : { artist: '', title: full }
+  })
   const dj = $derived(np?.dj ?? '')
   const profile = $derived(dj ? useProfile(dj) : null)
   const pos = $derived.by(() => {
@@ -96,8 +103,9 @@
         <div class="info">
           <div class="title-row">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="title">{np.title || np.videoId}</span>
+            <span class="title">{track.title}</span>
           </div>
+          {#if track.artist}<div class="artist">{track.artist}</div>{/if}
           <div class="dj-row">
             <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
               <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
@@ -212,6 +220,14 @@
   .title {
     font-weight: 700;
     font-size: 0.98rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .artist {
+    margin-top: 0.12rem;
+    font-size: 0.82rem;
+    color: var(--text-dim);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
