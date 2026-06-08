@@ -171,9 +171,6 @@
             </span>
           </div>
         </div>
-        <div class="meta-foot">
-          <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
-        </div>
         <div class="dj-row">
           <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
             <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
@@ -190,7 +187,12 @@
       {/if}
     </div>
   </div>
-  {#if np}<div class="bar"><div class="fill" style:width="{pct}%"></div></div>{/if}
+  {#if np}
+    <div class="bar-row">
+      <div class="bar"><div class="fill" style:width="{pct}%"></div></div>
+      <span class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</span>
+    </div>
+  {/if}
   <ComingNext />
 </div>
 
@@ -274,12 +276,6 @@
   .info {
     min-width: 0;
   }
-  .meta-foot {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.35rem;
-  }
   .dj-row {
     display: flex;
     align-items: center;
@@ -360,12 +356,21 @@
     cursor: default;
   }
   .time {
+    flex: 0 0 auto;
     font-size: 0.78rem;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
-  .bar {
+  /* Progress bar at the bottom, with the runtime attached on the right. */
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     margin-top: 0.6rem;
+  }
+  .bar {
+    flex: 1;
+    min-width: 0;
     height: 4px;
     background: var(--border);
     border-radius: 999px;
