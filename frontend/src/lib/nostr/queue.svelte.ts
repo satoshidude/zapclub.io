@@ -58,8 +58,10 @@ export function ingestQueue(ev: Event): void {
 // reconnects / relay restarts / network blips — and the round-robin is only as correct as
 // the queue state behind it. So we ALSO poll all DJ queues for the active club on an
 // interval and re-ingest them (idempotent). This guarantees the round-robin reliably
-// reflects the current playlists even when a 30103 push never arrived.
-const QUEUE_SYNC_MS = 15_000
+// reflects the current playlists even when a 30103 push never arrived. This is only a BACKSTOP
+// for missed pushes — the live subscription delivers edits instantly, and a roster change /
+// tab-return triggers an immediate refresh — so a slow interval suffices and cuts read traffic.
+const QUEUE_SYNC_MS = 60_000
 let syncTimer: ReturnType<typeof setInterval> | null = null
 let syncGroup: string | null = null
 let syncing = false

@@ -29,6 +29,14 @@ export const LIVE_STALE_MS = 150_000
  *  would hang. Cap such tracks at this fallback length. On-club the player's `ended` event
  *  advances earlier, so this only bites the (rare) duration-less off-club case. */
 const MAX_TRACK_FALLBACK_S = 600
+/** Steady-state heartbeat publish cadence. The conductor tick fires more often (so the cheap,
+ *  local track-end check stays precise), but the COSTLY now_playing republish is throttled to
+ *  this — halving conductor writes. Well inside FAILOVER_MS (45s) and LIVE_STALE_MS (150s), so
+ *  late-joiners (who get the replaceable event instantly on subscribe anyway) and failover are
+ *  unaffected. A real track change / reorder / takeover still publishes immediately. */
+const HEARTBEAT_PUBLISH_MS = 15_000
+/** Wall-clock (ms) of the last now_playing publish — gates the throttled steady-state beat. */
+let lastHeartbeatMs = 0
 
 /** Has the running track played out? Uses a fallback cap when its duration is unknown (<=0). */
 function trackFinished(np: NowPlaying): boolean {
@@ -124,6 +132,7 @@ export function targetPosition(): number {
  */
 function publishNp(groupId: string, np: NowPlaying): void {
   const sentAt = Date.now()
+  lastHeartbeatMs = sentAt // any publish (track change, reorder, beat) resets the beat clock
   state.np = { ...np, sentAt, writer: auth.pubkey ?? np.writer }
   state.offsetMs = 0
   void publishClub({
@@ -188,6 +197,13 @@ function heartbeat(groupId: string): void {
   if (!state.np) return
   state.np = reanchorPos(state.np)
   publishNp(groupId, state.np)
+}
+
+/** Throttled steady-state beat: only republish once the publish cadence has elapsed, so the
+ *  frequent tick keeps track-end detection precise without a write every tick. */
+function maybeHeartbeat(groupId: string): void {
+  if (Date.now() - lastHeartbeatMs < HEARTBEAT_PUBLISH_MS) return
+  heartbeat(groupId)
 }
 
 // Tracks the conductor has already played THIS session (by videoId). Needed because a track's
@@ -346,7 +362,7 @@ export function conductorTick(groupId: string): void {
   // harmless backstop on-club (onTrackEnded usually fires first; the just-started next track
   // is fresh → no double-advance).
   if (trackFinished(np)) advance(groupId)
-  else heartbeat(groupId) // track frozen, new sent_at
+  else maybeHeartbeat(groupId) // track frozen; republish only when the beat cadence is due
 }
 
 /**

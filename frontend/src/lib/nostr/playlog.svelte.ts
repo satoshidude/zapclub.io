@@ -38,7 +38,9 @@ export function sessionPlayed(currentVideoId: string | null): { played: Set<stri
 }
 
 // ── poll backstop (mirrors queue.svelte.ts) ─────────────────────────────────
-const PLAYLOG_SYNC_MS = 15_000
+// Backstop only: the live subscription pushes 1313 records instantly and a roster change /
+// tab-return refreshes immediately, so a slow interval suffices and cuts read traffic.
+const PLAYLOG_SYNC_MS = 60_000
 let syncTimer: ReturnType<typeof setInterval> | null = null
 let syncGroup: string | null = null
 let syncing = false
