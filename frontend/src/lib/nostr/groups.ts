@@ -1,6 +1,6 @@
 import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
-import { pool, CLUB_RELAY } from './pool'
+import { pool, CLUB_RELAY, PROFILE_RELAYS } from './pool'
 import { signEvent } from './nostrLogin'
 import { resolveZapper } from './zaps.svelte'
 import type { Club, ClubMember, ClubConfig } from './types'
@@ -64,6 +64,21 @@ async function publishClub(template: EventTemplate): Promise<Event> {
 
 function now(): number {
   return Math.floor(Date.now() / 1000)
+}
+
+/**
+ * Publishes a PUBLIC kind-1 note to the open relays (e.g. sharing a club link). Goes to the
+ * public Nostr network, not the club relay — so the user's followers see it. Needs a signer.
+ */
+export async function shareNote(content: string, url: string): Promise<void> {
+  const signed = await signEvent({
+    kind: 1,
+    created_at: now(),
+    tags: [['t', 'zapclub'], ['r', url]],
+    content,
+  })
+  const results = await Promise.allSettled(pool.publish(PROFILE_RELAYS, signed))
+  if (!results.some((r) => r.status === 'fulfilled')) throw new Error('No relay accepted the note')
 }
 
 // ── Club lifecycle ──────────────────────────────────────────────────────────

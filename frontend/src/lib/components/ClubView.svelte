@@ -13,6 +13,7 @@
     parseMembers,
     parseAdmins,
     parseOwner,
+    shareNote,
   } from '../nostr/groups'
   import { goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
@@ -255,6 +256,38 @@
     return ''
   }
 
+  // Share this club: copy the link, share via the OS sheet, or post it publicly to Nostr.
+  let shareOpen = $state(false)
+  let shareMsg = $state('')
+  const clubUrl = $derived(`${location.origin}/club/${groupId}`)
+  const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(clubUrl)
+      shareMsg = 'Link copied ✓'
+      setTimeout(() => (shareMsg = ''), 1500)
+    } catch {
+      shareMsg = 'Copy failed'
+    }
+  }
+  async function shareNative() {
+    try {
+      await navigator.share({ title: club?.name ?? 'zapclub', url: clubUrl })
+    } catch {
+      /* user cancelled */
+    }
+    shareOpen = false
+  }
+  async function shareOnNostr() {
+    try {
+      await shareNote(`🎧 ${club?.name ?? 'A club'} on zapclub — collaborative, Nostr-native music.\n${clubUrl}`, clubUrl)
+      shareMsg = 'Posted to Nostr ✓'
+      setTimeout(() => { shareMsg = ''; shareOpen = false }, 1400)
+    } catch (e) {
+      shareMsg = String((e as Error)?.message ?? 'Post failed')
+    }
+  }
+
   // Owner: edit the club (name / about / picture / access).
   let editing = $state(false)
   let eName = $state('')
@@ -350,13 +383,30 @@
               {displayName(owner, op)}
             </a>
           {/if}
+          {#if presence.count > 0}
+            <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
+          {/if}
         </div>
       </div>
       <div class="actions">
-        {#if presence.count > 0}
-          <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
-        {/if}
         <div class="action-btns">
+          <div class="share-wrap">
+            <button class="btn btn-ghost btn-sm" onclick={() => { shareOpen = !shareOpen; shareMsg = '' }} title="Share this club" aria-label="Share this club">↗</button>
+            {#if shareOpen}
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <div class="share-backdrop" role="presentation" onclick={() => (shareOpen = false)}></div>
+              <div class="share-menu" role="menu">
+                {#if auth.canSign}
+                  <button class="share-item" role="menuitem" onclick={shareOnNostr}>⚡ Share on Nostr</button>
+                {/if}
+                <button class="share-item" role="menuitem" onclick={copyLink}>🔗 Copy link</button>
+                {#if canNativeShare}
+                  <button class="share-item" role="menuitem" onclick={shareNative}>📤 Share…</button>
+                {/if}
+                {#if shareMsg}<div class="share-msg">{shareMsg}</div>{/if}
+              </div>
+            {/if}
+          </div>
           {#if isOwner}
             <button class="btn btn-ghost btn-sm" onclick={openEdit} title="Edit club">✏️</button>
           {/if}
@@ -630,6 +680,48 @@
   .action-btns {
     display: flex;
     gap: 0.4rem;
+  }
+  .share-wrap {
+    position: relative;
+  }
+  .share-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+  }
+  .share-menu {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 31;
+    min-width: 168px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  }
+  .share-item {
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 0.85rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .share-item:hover {
+    background: var(--bg);
+    color: var(--accent);
+  }
+  .share-msg {
+    font-size: 0.72rem;
+    color: var(--accent);
+    padding: 0.3rem 0.6rem;
   }
   .desc {
     margin: 0.9rem 0 0;
