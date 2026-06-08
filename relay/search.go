@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -177,6 +178,56 @@ func parseYtLines(out []byte) []searchResult {
 	return results
 }
 
+// videoIDRe: an exact 11-char YouTube video id.
+var videoIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+
+// parseVideoID returns the YouTube video id if `q` is a single-video link or a bare id
+// (youtu.be/<id>, youtube.com/watch?v=<id>, /shorts/<id>, /embed/<id>), else "". Used so that
+// pasting a single video into search resolves THAT video instead of a keyword search.
+func parseVideoID(q string) string {
+	q = strings.TrimSpace(q)
+	if videoIDRe.MatchString(q) {
+		return q
+	}
+	u, err := url.Parse(q)
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimPrefix(u.Hostname(), "www.")
+	if host == "youtu.be" {
+		if id := strings.TrimPrefix(u.Path, "/"); videoIDRe.MatchString(id) {
+			return id
+		}
+		return ""
+	}
+	if host == "youtube.com" || host == "m.youtube.com" || host == "music.youtube.com" {
+		if v := u.Query().Get("v"); videoIDRe.MatchString(v) {
+			return v
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) == 2 && (parts[0] == "shorts" || parts[0] == "embed") && videoIDRe.MatchString(parts[1]) {
+			return parts[1]
+		}
+	}
+	return ""
+}
+
+// ytVideo resolves a SINGLE video's metadata (full extraction → accurate title + duration +
+// artist). `--no-playlist` ignores any list= in the URL so we only get the one video.
+func ytVideo(ctx context.Context, id string) ([]searchResult, error) {
+	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
+		"--no-playlist", "--no-cache-dir", "--no-warnings",
+		"--print", ytPrint,
+		"--",
+		"https://www.youtube.com/watch?v="+id,
+	)
+	out, err := runCapped(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return parseYtLines(out), nil
+}
+
 func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
 	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
 		"--flat-playlist", "--no-cache-dir", "--no-warnings",
@@ -288,7 +339,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), searchTimeout)
 	defer cancel()
-	results, err := ytSearch(ctx, query)
+	// A single video link / id resolves to THAT video; otherwise it's a keyword search.
+	var results []searchResult
+	var err error
+	if vid := parseVideoID(query); vid != "" {
+		results, err = ytVideo(ctx, vid)
+	} else {
+		results, err = ytSearch(ctx, query)
+	}
 	if err != nil {
 		http.Error(w, `{"error":"search failed"}`, http.StatusBadGateway)
 		return
