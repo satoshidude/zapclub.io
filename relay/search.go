@@ -212,20 +212,27 @@ func parseVideoID(q string) string {
 	return ""
 }
 
-// ytVideo resolves a SINGLE video's metadata (full extraction → accurate title + duration +
-// artist). `--no-playlist` ignores any list= in the URL so we only get the one video.
+// ytVideo resolves a SINGLE video's metadata. We CAN'T fetch the watch page directly — from a
+// server IP YouTube gates it with "sign in to confirm you're not a bot" — but the SEARCH
+// endpoint isn't gated and returns the exact video first when queried by its id. So we search
+// for the id and pick the matching result (title + duration). Empty if it isn't found.
 func ytVideo(ctx context.Context, id string) ([]searchResult, error) {
 	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
-		"--no-playlist", "--no-cache-dir", "--no-warnings",
+		"--flat-playlist", "--no-cache-dir", "--no-warnings",
 		"--print", ytPrint,
 		"--",
-		"https://www.youtube.com/watch?v="+id,
+		"ytsearch5:"+id,
 	)
 	out, err := runCapped(cmd)
 	if err != nil {
 		return nil, err
 	}
-	return parseYtLines(out), nil
+	for _, r := range parseYtLines(out) {
+		if r.ID == id {
+			return []searchResult{r}, nil
+		}
+	}
+	return nil, nil
 }
 
 func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
