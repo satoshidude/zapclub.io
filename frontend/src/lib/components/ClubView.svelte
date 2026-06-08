@@ -501,7 +501,7 @@
     <Stage {groupId} {canModerate} {isMember}>
       <NowPlaying
         onGoStage={goOnStage}
-        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
+        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
         clubId={groupId}
         clubName={club?.name ?? ''}
         canHear={canHear}

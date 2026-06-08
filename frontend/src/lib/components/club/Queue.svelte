@@ -205,7 +205,7 @@
   {/if}
 
   {#if !onStage}
-    <p class="hint">Go on stage to add tracks to the round-robin.</p>
+    <p class="hint">Enter stage to add tracks to the round-robin.</p>
   {/if}
 
   <!-- Search to add tracks (below the set) -->
