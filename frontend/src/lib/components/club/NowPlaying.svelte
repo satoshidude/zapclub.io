@@ -128,18 +128,6 @@
 </script>
 
 <div class="np card" class:zoomed>
-  {#if np}
-    <div class="np-head">
-      <ZapButton club={clubId} showDj />
-      <button
-        class="like"
-        class:on={liked}
-        onclick={toggleLike}
-        disabled={!auth.canSign}
-        title={liked ? 'Liked — tap to remove' : 'Like this track'}
-      >🔥</button>
-    </div>
-  {/if}
   <div class="np-main">
     <div class="video">
       <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
@@ -167,6 +155,16 @@
           </div>
         </div>
         <div class="meta-foot">
+          <div class="actions">
+            <ZapButton club={clubId} showDj />
+            <button
+              class="like"
+              class:on={liked}
+              onclick={toggleLike}
+              disabled={!auth.canSign}
+              title={liked ? 'Liked — tap to remove' : 'Like this track'}
+            >🔥</button>
+          </div>
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
         </div>
       {:else}
@@ -189,13 +187,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.8rem 1rem;
-  }
-  /* Header row: the DJ (left) and the zap chip (right), on the same line above the video. */
-  .np-head {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 0.6rem;
   }
   .np-main {
     display: flex;
@@ -264,8 +255,16 @@
   .meta-foot {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
     flex-wrap: wrap;
+    margin-top: 0.5rem;
+  }
+  /* Zap (with DJ) + like, sitting under the title. */
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
   }
   .title {
     flex: 1;
