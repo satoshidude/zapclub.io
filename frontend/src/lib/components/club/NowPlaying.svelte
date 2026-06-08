@@ -59,12 +59,16 @@
   })
 
   const np = $derived(sync.live)
-  // Track titles are enriched server-side as "Artist – Title" (en-dash). Split the first " – "
-  // so the card can show the artist as its own line; un-enriched titles have no separator.
+  // Show the artist as its own line. Server enrichment writes "Artist – Title" (en-dash), but
+  // many raw YouTube titles use "Artist - Title" (hyphen) or an em-dash. Split on the FIRST
+  // spaced dash of any kind. Requiring surrounding spaces avoids splitting hyphenated words
+  // ("Hip-Hop", "Toni-L"); a bare song name (no spaced dash) stays whole, no artist line.
   const track = $derived.by(() => {
     const full = np?.title || np?.videoId || ''
-    const i = full.indexOf(' – ')
-    return i > 0 ? { artist: full.slice(0, i), title: full.slice(i + 3) } : { artist: '', title: full }
+    const m = full.match(/ [–—-] /)
+    return m && m.index !== undefined && m.index > 0
+      ? { artist: full.slice(0, m.index), title: full.slice(m.index + m[0].length) }
+      : { artist: '', title: full }
   })
   const dj = $derived(np?.dj ?? '')
   const profile = $derived(dj ? useProfile(dj) : null)
