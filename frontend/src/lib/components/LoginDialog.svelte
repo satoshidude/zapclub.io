@@ -1,5 +1,7 @@
 <script lang="ts">
   import qrcode from 'qrcode-generator'
+  import jsQR from 'jsqr'
+  import { tick, onDestroy } from 'svelte'
   import { loginDialog, closeLoginDialog } from '../nostr/loginDialog.svelte'
   import { createAccount, loginExtension, loginBunker, loginNsec, startNostrConnect } from '../nostr/nostrLogin'
 
@@ -104,9 +106,75 @@
     }
   }
 
+  // Camera QR scan: read a bunker:// (or nostrconnect://) connection QR with the device camera.
+  // jsQR decodes each video frame (BarcodeDetector isn't on Safari/iOS, where this matters most).
+  let scanning = $state(false)
+  let scanError = $state('')
+  let videoEl = $state<HTMLVideoElement>()
+  let stream: MediaStream | null = null
+  let rafId = 0
+
+  async function startScan() {
+    scanError = ''
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    } catch {
+      scanError = 'Camera unavailable or permission denied'
+      return
+    }
+    scanning = true
+    await tick() // let the <video> render so we can bind the stream
+    if (!videoEl) {
+      stopScan()
+      return
+    }
+    videoEl.srcObject = stream
+    videoEl.setAttribute('playsinline', '')
+    await videoEl.play().catch(() => {})
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const loop = () => {
+      if (!scanning || !videoEl || !ctx) return
+      if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+        canvas.width = videoEl.videoWidth
+        canvas.height = videoEl.videoHeight
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const code = jsQR(img.data, img.width, img.height)
+        if (code && code.data) {
+          onScanned(code.data)
+          return
+        }
+      }
+      rafId = requestAnimationFrame(loop)
+    }
+    rafId = requestAnimationFrame(loop)
+  }
+
+  function stopScan() {
+    scanning = false
+    if (rafId) cancelAnimationFrame(rafId)
+    rafId = 0
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop())
+      stream = null
+    }
+  }
+
+  function onScanned(data: string) {
+    stopScan()
+    bunkerInput = data.trim()
+    // A bunker:// (or nostrconnect://) link connects right away; anything else just fills the field.
+    if (/^(bunker|nostrconnect):\/\//i.test(bunkerInput)) void doBunker()
+  }
+
+  onDestroy(stopScan)
+
   function close() {
+    stopScan()
     view = 'main'
     error = ''
+    scanError = ''
     bunkerInput = ''
     connectUri = ''
     closeLoginDialog()
@@ -140,29 +208,41 @@
         {/if}
         <p class="hint">No email, no password. Your Nostr key is your identity.</p>
       {:else if view === 'bunker'}
-        <button class="back" onclick={() => (view = 'main')}>← Back</button>
+        <button class="back" onclick={() => { stopScan(); view = 'main' }}>← Back</button>
         <h3>Connect a remote signer</h3>
-        {#if qrSrc}
-          <a class="qr-link" href={connectUri}>
-            <img class="qr" src={qrSrc} alt="QR" width="200" height="200" />
-          </a>
-          <p class="hint">Scan with your signer app, or paste a bunker:// link below.</p>
-          <button class="copy-uri" onclick={copyUri} title={connectUri}>
-            {copied ? '✓ Copied' : 'Copy connection link'}
+        {#if scanning}
+          <!-- svelte-ignore a11y_media_has_caption -->
+          <video class="scan-video" bind:this={videoEl} muted autoplay></video>
+          <p class="hint">Point the camera at your signer's bunker QR.</p>
+          {#if scanError}<p class="err">⚠ {scanError}</p>{/if}
+          <button class="btn btn-ghost big" onclick={stopScan}>Cancel scan</button>
+        {:else}
+          {#if qrSrc}
+            <a class="qr-link" href={connectUri}>
+              <img class="qr" src={qrSrc} alt="QR" width="200" height="200" />
+            </a>
+            <p class="hint">Scan with your signer app, or paste / scan a bunker:// link below.</p>
+            <button class="copy-uri" onclick={copyUri} title={connectUri}>
+              {copied ? '✓ Copied' : 'Copy connection link'}
+            </button>
+          {/if}
+          <div class="or">or</div>
+          <input
+            class="bunker-in"
+            bind:value={bunkerInput}
+            placeholder="bunker://…"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-primary big" onclick={doBunker} disabled={busy || !bunkerInput.trim()}>
+            Connect
           </button>
+          <button class="btn btn-ghost big" onclick={startScan} disabled={busy}>
+            📷 Scan bunker QR with camera
+          </button>
+          {#if scanError}<p class="err">⚠ {scanError}</p>{/if}
         {/if}
-        <div class="or">or</div>
-        <input
-          class="bunker-in"
-          bind:value={bunkerInput}
-          placeholder="bunker://…"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-        <button class="btn btn-primary big" onclick={doBunker} disabled={busy || !bunkerInput.trim()}>
-          Connect
-        </button>
       {:else}
         <button class="back" onclick={() => (view = 'main')}>← Back</button>
         <h3>Use a private key</h3>
@@ -237,6 +317,16 @@
   }
   .qr-link {
     align-self: center;
+  }
+  .scan-video {
+    width: 100%;
+    max-width: 280px;
+    aspect-ratio: 1;
+    align-self: center;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    background: #000;
+    border: 1px solid var(--border);
   }
   .qr {
     width: 200px;
