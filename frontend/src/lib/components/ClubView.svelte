@@ -441,8 +441,14 @@
     {:else if club?.about}
       <p class="desc">{club.about}</p>
     {/if}
+  </header>
 
-    <div class="hero-now">
+  {#if error}<p class="err">⚠ {error}</p>{/if}
+
+  <!-- Stage + the DJ's set ("My set") — one block under the hero, no tabs.
+       The now-playing card lives INSIDE the stage card (the track plays on the stage). -->
+  <section class="stream">
+    <Stage {groupId} {canModerate} {isMember}>
       <NowPlaying
         onGoStage={goOnStage}
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Go on stage →') : ''}
@@ -454,14 +460,7 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
       />
-    </div>
-  </header>
-
-  {#if error}<p class="err">⚠ {error}</p>{/if}
-
-  <!-- Stage + the DJ's set ("My set") — one block under the hero, no tabs. -->
-  <section class="stream">
-    <Stage {groupId} {canModerate} {isMember} />
+    </Stage>
     {#if isMember}
       <Queue {groupId} />
     {:else}
@@ -533,9 +532,6 @@
     gap: 1rem;
     align-items: flex-start;
   }
-  .hero-now {
-    margin-top: 0.9rem;
-  }
   .edit-form {
     margin-top: 0.9rem;
     padding-top: 0.9rem;
@@ -585,9 +581,6 @@
     }
     h1 {
       font-size: 1.05rem;
-    }
-    .hero-now {
-      margin-top: 0.6rem;
     }
     .tags {
       margin-top: 0.4rem;

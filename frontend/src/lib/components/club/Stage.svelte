@@ -15,8 +15,10 @@
     canModerate?: boolean
     /** Is the local user a club member? Only members may take the stage. */
     isMember?: boolean
+    /** The now-playing card — rendered inside the stage card (the track plays on the stage). */
+    children?: import('svelte').Snippet
   }
-  let { groupId, canModerate = false, isMember = false }: Props = $props()
+  let { groupId, canModerate = false, isMember = false, children }: Props = $props()
 
   let busy = $state(false)
   let error = $state('')
@@ -82,6 +84,8 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
+  {#if children}<div class="now-wrap">{@render children()}</div>{/if}
+
   <div class="slots">
     {#each djs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
@@ -134,6 +138,9 @@
   .full {
     font-size: 0.8rem;
     color: var(--text-dim);
+  }
+  .now-wrap {
+    margin-bottom: 0.9rem;
   }
   .slots {
     display: flex;
