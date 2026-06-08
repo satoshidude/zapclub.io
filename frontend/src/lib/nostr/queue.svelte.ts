@@ -135,6 +135,20 @@ async function publishMyQueue(groupId: string, tracks: QueueTrack[]): Promise<vo
   })
 }
 
+/**
+ * Folds the artist into one of MY tracks' titles ("Artist - Title") and republishes — so a
+ * channel-derived artist (learned from the YouTube embed when the track plays) PERSISTS and
+ * shows in the Live Set, "Up next", and saved playlists, not just live in the now-playing card.
+ * No-op unless the track is mine and its title is still bare (no spaced dash) — never clobbers a
+ * title that already carries an artist.
+ */
+export function enrichMyTrackTitle(groupId: string, videoId: string, title: string): Promise<void> {
+  const tracks = myTracks()
+  const idx = tracks.findIndex((t) => t.videoId === videoId)
+  if (idx < 0 || tracks[idx].title === title || / [–—-] /.test(tracks[idx].title)) return Promise.resolve()
+  return publishMyQueue(groupId, tracks.map((t, i) => (i === idx ? { ...t, title } : t)))
+}
+
 /** Sets a track's active state (by videoId) + publishes (only on change). */
 export function setTrackActive(groupId: string, videoId: string, active: boolean): Promise<void> {
   const tracks = myTracks()

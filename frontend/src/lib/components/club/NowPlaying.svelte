@@ -4,6 +4,7 @@
   import { goUser } from '../../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
+  import { enrichMyTrackTitle } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
   import Player from './Player.svelte'
@@ -78,18 +79,16 @@
     return ''
   }
 
-  // Show the artist as its own line. Server enrichment writes "Artist – Title" (en-dash); many
-  // raw YouTube titles use "Artist - Title" (hyphen) or an em-dash → split on the FIRST spaced
-  // dash (surrounding spaces avoid splitting "Hip-Hop"/"Toni-L"). When the stored title is a
-  // bare song name (no artist, e.g. older tracks), fall back to the channel the embed reports.
-  const track = $derived.by(() => {
+  // The artist belongs IN the title ("Artist - Title"), shown the same everywhere (card, Live
+  // Set, playlists). Server-enriched titles already carry a spaced dash → shown as-is. For a
+  // bare title we prepend the artist the embed reports (getVideoData channel, e.g. "X - Topic").
+  const channelArtist = $derived(
+    np?.videoId && ytMeta.vid === np.videoId ? artistFromChannel(ytMeta.author) : '',
+  )
+  const displayTitle = $derived.by(() => {
     const full = np?.title || np?.videoId || ''
-    const m = full.match(/ [–—-] /)
-    if (m && m.index !== undefined && m.index > 0) {
-      return { artist: full.slice(0, m.index), title: full.slice(m.index + m[0].length) }
-    }
-    const author = np?.videoId && ytMeta.vid === np.videoId ? ytMeta.author : ''
-    return { artist: artistFromChannel(author), title: full }
+    if (/ [–—-] /.test(full)) return full // already has an artist
+    return channelArtist ? `${channelArtist} - ${full}` : full
   })
   const dj = $derived(np?.dj ?? '')
   const profile = $derived(dj ? useProfile(dj) : null)
@@ -119,7 +118,16 @@
   {#if np}<div class="zap-corner"><ZapButton club={clubId} /></div>{/if}
   <div class="np-main">
     <div class="video">
-      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => { if (np) ytMeta = { vid: np.videoId, author } }} />
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
+        if (!np) return
+        ytMeta = { vid: np.videoId, author }
+        // If this is MY track and its stored title is still bare, fold the artist in so it
+        // persists into the Live Set / playlists too (not just live in this card).
+        const a = artistFromChannel(author)
+        if (a && np.dj === auth.pubkey && np.title && !/ [–—-] /.test(np.title)) {
+          void enrichMyTrackTitle(clubId, np.videoId, `${a} - ${np.title}`)
+        }
+      }} />
       <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
         {zoomed ? '⤡' : '⤢'}
       </button>
@@ -129,9 +137,8 @@
         <div class="info">
           <div class="title-row">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="title">{track.title}</span>
+            <span class="title">{displayTitle}</span>
           </div>
-          {#if track.artist}<div class="artist">{track.artist}</div>{/if}
           <div class="dj-row">
             <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
               <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
@@ -257,14 +264,6 @@
   .title {
     font-weight: 700;
     font-size: 0.98rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .artist {
-    margin-top: 0.12rem;
-    font-size: 0.82rem;
-    color: var(--text-dim);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
