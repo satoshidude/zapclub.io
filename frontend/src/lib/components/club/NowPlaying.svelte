@@ -115,7 +115,15 @@
 </script>
 
 <div class="np card" class:zoomed>
-  {#if np}<div class="zap-corner"><ZapButton club={clubId} /></div>{/if}
+  {#if np}
+    <div class="np-head">
+      <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
+        <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
+        {displayName(dj, profile)}
+      </a>
+      <ZapButton club={clubId} />
+    </div>
+  {/if}
   <div class="np-main">
     <div class="video">
       <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
@@ -138,12 +146,6 @@
           <div class="title-row">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="title">{displayTitle}</span>
-          </div>
-          <div class="dj-row">
-            <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
-              <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-              {displayName(dj, profile)}
-            </a>
           </div>
         </div>
         <div class="meta-foot">
@@ -174,22 +176,18 @@
 
 <style>
   .np {
-    position: relative;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.8rem 1rem;
   }
-  /* Zap chip pinned to the top-right corner of the card. */
-  .zap-corner {
-    position: absolute;
-    top: 0.55rem;
-    right: 0.65rem;
-    z-index: 5;
-  }
-  /* Keep the title/artist/dj clear of the corner chip (non-zoomed: meta sits top-right). */
-  .np:not(.zoomed) .info {
-    padding-right: 4.2rem;
+  /* Header row: the DJ (left) and the zap chip (right), on the same line above the video. */
+  .np-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
   }
   .np-main {
     display: flex;
@@ -268,20 +266,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .dj-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.2rem;
-  }
   .dj {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: var(--text-dim);
     text-decoration: none;
     min-width: 0;
+    overflow: hidden;
+  }
+  .dj .avatar {
+    flex: 0 0 auto;
   }
   .avatar {
     width: 18px;
