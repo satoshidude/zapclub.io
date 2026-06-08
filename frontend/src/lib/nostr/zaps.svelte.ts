@@ -1,7 +1,8 @@
 import type { Event } from 'nostr-tools/pure'
-import { verifyEvent } from 'nostr-tools/pure'
+import { verifyEvent, finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { pool, ZAP_RELAYS } from './pool'
 import { signEvent } from './nostrLogin'
+import { auth } from './auth.svelte'
 
 const KIND_ZAP_RECEIPT = 9735
 
@@ -81,9 +82,13 @@ export interface ZapInvoice {
 
 /**
  * Builds a zap invoice for a recipient (NIP-57). Signs a kind-9734 zap request (so the
- * payment is attributable to the DJ and produces a 9735 receipt) when the LNURL server
- * supports nostr; otherwise a plain LNURL payment. Returns the bolt11 invoice to pay —
+ * payment produces a 9735 receipt the room sees and that lifts the DJ's score) when the LNURL
+ * server supports nostr; otherwise a plain LNURL payment. Returns the bolt11 invoice to pay —
  * by any wallet (Alby Go via the lightning: link, copy, or QR).
+ *
+ * A logged-in user signs with their own key (attributable zap). A GUEST (no signer / read-only)
+ * zaps ANONYMOUSLY with a throwaway ephemeral key — still a valid NIP-57 zap that pays the DJ
+ * and yields a 9735, so guests can support DJs on stage too (no login prompt).
  */
 export async function requestZapInvoice(
   recipientPubkey: string,
@@ -104,7 +109,7 @@ export async function requestZapInvoice(
   url.searchParams.set('amount', String(msats))
   // recipientPubkey === '' → a plain LNURL payment (e.g. a donation), no zap request.
   if (data.allowsNostr && recipientPubkey) {
-    const zr = await signEvent({
+    const req = {
       kind: 9734,
       created_at: nowSec(),
       tags: [
@@ -113,7 +118,9 @@ export async function requestZapInvoice(
         ['p', recipientPubkey],
       ],
       content: comment || '',
-    })
+    }
+    // Logged-in → sign with the user's key; guest → anonymous zap with an ephemeral key.
+    const zr = auth.canSign ? await signEvent(req) : finalizeEvent(req, generateSecretKey())
     url.searchParams.set('nostr', JSON.stringify(zr))
   } else if (comment) {
     url.searchParams.set('comment', comment.slice(0, 120))

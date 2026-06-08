@@ -1,5 +1,6 @@
 import { pollPaid, creditZap, watchInvoicePaid } from './zaps.svelte'
 import { publishZapBroadcast } from './groups'
+import { auth } from './auth.svelte'
 
 // Global "pay this Lightning invoice" modal — shared by the DJ zap button and the
 // footer donation. Shows a QR + "open in wallet" + copy, and auto-closes (paid state)
@@ -75,7 +76,8 @@ export function markPaid(): void {
   if (state.dj && state.invoice) {
     creditZap(state.dj, state.sats, state.invoice) // optimistic local credit (the zapper)
     // Tell the rest of the club live — the DJ's LNURL may never publish a 9735 receipt.
-    if (state.club) void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
+    // Only a signer can write to the club relay; a guest's zap reaches the room via its 9735.
+    if (state.club && auth.canSign) void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
   }
   if (onPaidCb) {
     const cb = onPaidCb

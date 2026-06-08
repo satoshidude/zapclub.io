@@ -55,7 +55,7 @@
 </script>
 
 {#if show}
-  <button class="zap-mini" onclick={() => (open = !open)} disabled={!auth.canSign} title="Zap {displayName(dj, djProfile)} · {total} sats received">
+  <button class="zap-mini" onclick={() => (open = !open)} title="Zap {displayName(dj, djProfile)} · {total} sats received">
     <span class="bolt">⚡</span>
     <span class="lbl">zap</span>
     {#if total > 0}<span class="score">{fmtSats(total)} sats</span>{/if}
