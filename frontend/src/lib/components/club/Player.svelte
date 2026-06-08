@@ -230,7 +230,7 @@
          pointer-events:none so the full-area shield button underneath catches the tap. -->
     {#if needsSoundTap}
       <div class="sound-tap" aria-hidden="true">
-        <span class="sound-pill">🔊 Tap for sound</span>
+        <span class="sound-pill">🔊</span>
       </div>
     {/if}
 
@@ -310,6 +310,7 @@
   }
   /* iOS "tap for sound" prompt — visible hint over the (muted) synced stream; the tap is
      handled by the full-area shield button beneath it. */
+  /* Subtle, finer "tap for sound": just a small speaker icon (no heavy overlay / text). */
   .sound-tap {
     position: absolute;
     inset: 0;
@@ -317,25 +318,29 @@
     display: grid;
     place-items: center;
     pointer-events: none;
-    background: rgba(0, 0, 0, 0.35);
   }
   .sound-pill {
-    background: var(--accent);
-    color: var(--accent-ink);
-    font-weight: 800;
-    font-size: 0.95rem;
-    padding: 0.6rem 1.1rem;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
     border-radius: 999px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-    animation: sound-pulse 1.8s ease-in-out infinite;
+    font-size: 1.15rem;
+    line-height: 1;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(2px);
+    animation: sound-pulse 2.2s ease-in-out infinite;
   }
   @keyframes sound-pulse {
     0%,
     100% {
-      transform: scale(1);
+      box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.3);
     }
     50% {
-      transform: scale(1.06);
+      box-shadow: 0 0 0 7px rgba(255, 255, 255, 0);
     }
   }
   @media (prefers-reduced-motion: reduce) {

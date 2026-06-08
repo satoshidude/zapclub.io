@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -235,6 +236,57 @@ func ytVideo(ctx context.Context, id string) ([]searchResult, error) {
 	return nil, nil
 }
 
+// oEmbed gives a video's channel (author_name) + title WITHOUT extraction — so it is NOT
+// bot-gated (unlike the watch page). Cheap HTTP; lets us backfill the artist into a playlist's
+// titles the same way the search path does (buildTitle folds the channel artist in).
+var oembedClient = &http.Client{Timeout: 6 * time.Second}
+
+type oembedResp struct {
+	Title  string `json:"title"`
+	Author string `json:"author_name"`
+}
+
+// oembedEnrich resolves id→"Artist – Title" via YouTube oEmbed, in parallel. Failed/unknown ids
+// (private, deleted, no music-channel) are simply omitted.
+func oembedEnrich(ctx context.Context, ids []string) map[string]string {
+	out := make(map[string]string, len(ids))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8) // cap parallel HTTP
+	for _, id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			u := "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=" + id
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+			if err != nil {
+				return
+			}
+			resp, err := oembedClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+			var o oembedResp
+			if json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&o) != nil {
+				return
+			}
+			if title := buildTitle(o.Title, "", o.Author); title != "" {
+				mu.Lock()
+				out[id] = title
+				mu.Unlock()
+			}
+		}(id)
+	}
+	wg.Wait()
+	return out
+}
+
 func ytSearch(ctx context.Context, query string) ([]searchResult, error) {
 	cmd := exec.CommandContext(ctx, "/usr/local/bin/yt-dlp",
 		"--flat-playlist", "--no-cache-dir", "--no-warnings",
@@ -320,6 +372,23 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ytLimiter.allow(clientIP(r)) {
 		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		return
+	}
+	// Enrich mode: ?ids=a,b,c → {id:"Artist – Title"} via oEmbed (backfills playlist titles
+	// with the channel artist; not bot-gated, no yt-dlp). Capped + validated.
+	if idsParam := r.URL.Query().Get("ids"); idsParam != "" {
+		var ids []string
+		for _, s := range strings.Split(idsParam, ",") {
+			if s = strings.TrimSpace(s); videoIDRe.MatchString(s) {
+				ids = append(ids, s)
+			}
+			if len(ids) >= 40 {
+				break
+			}
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		_ = json.NewEncoder(w).Encode(oembedEnrich(ctx, ids))
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))

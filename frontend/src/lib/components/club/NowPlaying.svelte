@@ -155,17 +155,17 @@
           </div>
         </div>
         <div class="meta-foot">
-          <div class="actions">
-            <ZapButton club={clubId} showDj />
-            <button
-              class="like"
-              class:on={liked}
-              onclick={toggleLike}
-              disabled={!auth.canSign}
-              title={liked ? 'Liked — tap to remove' : 'Like this track'}
-            >🔥</button>
-          </div>
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
+        </div>
+        <div class="actions">
+          <ZapButton club={clubId} showDj />
+          <button
+            class="like"
+            class:on={liked}
+            onclick={toggleLike}
+            disabled={!auth.canSign}
+            title={liked ? 'Liked — tap to remove' : 'Like this track'}
+          >🔥</button>
         </div>
       {:else}
         <div class="idle">
@@ -182,11 +182,12 @@
 </div>
 
 <style>
+  /* No border/padding/bg of its own — it sits inside the stage card; this saves vertical space
+     (the stage card already provides the frame + padding). */
   .np {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.8rem 1rem;
+    background: transparent;
+    border: none;
+    padding: 0;
   }
   .np-main {
     display: flex;
@@ -255,16 +256,15 @@
   .meta-foot {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 0.5rem;
+    margin-top: 0.35rem;
   }
-  /* Zap (with DJ) + like, sitting under the title. */
+  /* Zap (with DJ) + like, on their own row UNDER the time. */
   .actions {
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    margin-top: 0.4rem;
   }
   .title {
     flex: 1;

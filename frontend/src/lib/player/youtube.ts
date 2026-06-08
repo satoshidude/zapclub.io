@@ -159,6 +159,20 @@ export async function searchYouTube(query: string): Promise<SearchHit[]> {
   }
 }
 
+/** Resolves "Artist – Title" for the given video ids via the relay (oEmbed channel lookup, no
+ *  bot gate, no yt-dlp). Returns id→title only for ids that yielded an artist. Used to backfill
+ *  a playlist's bare titles with the interpreter. */
+export async function enrichTitles(ids: string[]): Promise<Record<string, string>> {
+  if (ids.length === 0) return {}
+  try {
+    const res = await fetch(`/yt-search?ids=${encodeURIComponent(ids.join(','))}`)
+    if (!res.ok) return {}
+    return (await res.json()) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
 /** Extracts the playlist id (`list=`) from a YouTube URL, if present. */
 export function parseYouTubePlaylistId(input: string): string | null {
   const m = input.trim().match(/[?&]list=([\w-]{10,64})/)

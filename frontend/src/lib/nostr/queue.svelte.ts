@@ -1,6 +1,7 @@
 import type { Event } from 'nostr-tools/pure'
 import { KIND_QUEUE, publishClub, fetchClubQueues } from './groups'
 import { auth } from './auth.svelte'
+import { enrichTitles } from '../player/youtube'
 import { isValidVideoId } from '../util'
 import type { DjQueue, QueueTrack } from './types'
 
@@ -147,6 +148,32 @@ export function enrichMyTrackTitle(groupId: string, videoId: string, title: stri
   const idx = tracks.findIndex((t) => t.videoId === videoId)
   if (idx < 0 || tracks[idx].title === title || / [–—-] /.test(tracks[idx].title)) return Promise.resolve()
   return publishMyQueue(groupId, tracks.map((t, i) => (i === idx ? { ...t, title } : t)))
+}
+
+/**
+ * Backfills MY queue's BARE titles (no "Artist - Title" yet) with the interpreter — resolved via
+ * the relay's oEmbed channel lookup (one batch, not bot-gated). One republish for all changes.
+ * So the Live Set / saved playlists show the artist like the card, not just played/new tracks.
+ */
+export async function enrichQueueTitles(groupId: string): Promise<void> {
+  const me = auth.pubkey
+  if (!me) return
+  const tracks = state.byDj[me]?.tracks
+  if (!tracks?.length) return
+  const bare = tracks.filter((t) => !/ [–—-] /.test(t.title)).map((t) => t.videoId).slice(0, 40)
+  if (bare.length === 0) return
+  const map = await enrichTitles(bare)
+  let changed = false
+  const next = tracks.map((t) => {
+    const nt = map[t.videoId]
+    // Only adopt a resolved title that actually adds an artist (a spaced dash) and differs.
+    if (nt && nt !== t.title && / [–—-] /.test(nt)) {
+      changed = true
+      return { ...t, title: nt }
+    }
+    return t
+  })
+  if (changed) await publishMyQueue(groupId, next)
 }
 
 /** Sets a track's active state (by videoId) + publishes (only on change). */

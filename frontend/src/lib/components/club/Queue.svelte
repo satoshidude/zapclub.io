@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, republishQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, republishQueue, enrichQueueTitles } from '../../nostr/queue.svelte'
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
@@ -17,6 +17,17 @@
   // Saved playlists (library): load once when signed in.
   $effect(() => {
     if (me && !playlists.loaded) void loadMyPlaylists()
+  })
+
+  // Backfill bare titles with the interpreter (like the card) — once per mount, when my queue
+  // has tracks still missing an artist. Resolved via the relay (oEmbed), persisted to the queue.
+  let titlesEnriched = false
+  $effect(() => {
+    if (titlesEnriched || !me) return
+    if (tracks.some((t) => !/ [–—-] /.test(t.title))) {
+      titlesEnriched = true
+      void enrichQueueTitles(groupId)
+    }
   })
   let saving = $state(false)
   let saveName = $state('')
