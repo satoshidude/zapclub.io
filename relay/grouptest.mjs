@@ -136,6 +136,34 @@ await sleep(400)
 const replay = await joinWith(joiner, good) // try to rejoin reusing the SAME receipt
 assert(replay[0] === false && /already used/i.test(replay[1] || ''), 'replayed entry proof rejected: ' + ok(replay))
 
+// 4c. Server conductor: with a DJ on stage and a non-empty queue, the RELAY itself (not any
+//     client) publishes now_playing and advances the round-robin — the autonomous-playback
+//     core. Also verifies the relay honors a skip-request (kind 30107). Long track durations
+//     keep it deterministic (no time-based auto-advance/loop during the test). Needs RELAY_PK.
+if (process.env.RELAY_PK) {
+  const RPK = process.env.RELAY_PK
+  const C = 'zc' + Math.random().toString(16).slice(2, 16)
+  await host.ev({ kind: 9007, created_at: now(), tags: [['h', C]], content: '' })
+  await host.ev({ kind: 9002, created_at: now(), tags: [['h', C], ['name', 'Conductor'], ['open'], ['public']], content: '' })
+  await sleep(500)
+  // host steps on stage (30102) and posts a 2-track queue (30103). Long durations → only an
+  // explicit skip advances during the test window.
+  await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
+  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300']], content: '' })
+  await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
+  const npA = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  assert(!!npA, 'conductor: the RELAY published now_playing')
+  assert(!!npA && npA.tags.find((t) => t[0] === 'dj')?.[1] === host.pub, 'conductor: now_playing dj = the stage DJ')
+  const firstTrack = npA && npA.tags.find((t) => t[0] === 'track')?.[1]
+  const pos0 = (npA && npA.tags.find((t) => t[0] === 'pos')?.[1]) || '0'
+  // a skip-request for the running track → the relay advances to the next track.
+  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', pos0]], content: '' })
+  await sleep(4000)
+  const npB = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  assert(!!npB && npB.tags.find((t) => t[0] === 'track')?.[1] !== firstTrack, 'conductor: advanced to the next track on a skip-request (30107)')
+  await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
+}
+
 // 5. Superadmin HTTP API (NIP-98): ban + purge + replay + unban + delete-club.
 //    Only runs when ADMIN_SK (whose pubkey the relay was booted with as RELAY_SUPERADMIN)
 //    and ADMIN_URL are set — see e2e.sh, which wires it all up.

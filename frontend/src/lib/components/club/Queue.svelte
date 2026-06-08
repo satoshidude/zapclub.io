@@ -1,13 +1,13 @@
 <script lang="ts">
   import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, republishQueue } from '../../nostr/queue.svelte'
-  import { skipTrack, canSkip, applyOrderNow } from '../../nostr/sync.svelte'
+  import { requestSkip, canSkip, applyOrderNow } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
   import type { QueueTrack, Playlist } from '../../nostr/types'
 
-  let { groupId }: { groupId: string } = $props()
+  let { groupId, canModerate = false }: { groupId: string; canModerate?: boolean } = $props()
 
   const me = $derived(auth.pubkey)
   const onStage = $derived(stage.isOnStage(me))
@@ -116,8 +116,8 @@
   <div class="head">
     <h3>My set <span class="count">{tracks.length}</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
     <div class="head-actions">
-      {#if canSkip()}
-        <button class="btn btn-ghost btn-sm" onclick={() => skipTrack(groupId)} title="Skip current track">⏭ Skip</button>
+      {#if canSkip(canModerate)}
+        <button class="btn btn-ghost btn-sm" onclick={() => requestSkip(groupId)} title="Skip current track">⏭ Skip</button>
       {/if}
       {#if tracks.length > 0}
         <button class="mini" onclick={() => { republishQueue(groupId); applyOrderNow(groupId) }} title="Apply current order to the round-robin">↻</button>

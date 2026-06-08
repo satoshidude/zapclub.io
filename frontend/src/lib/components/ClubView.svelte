@@ -37,6 +37,7 @@
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
   import { registerActiveClub } from '../nostr/miniplay.svelte'
+  import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
@@ -100,11 +101,12 @@
         admins = parseAdmins(ev)
         ownerPk = parseOwner(ev)
       },
-      // Hijack protection: accept now_playing only from a DJ currently on stage — the
-      // elected conductor OR a rescuer that took over a silent/phantom conductor. A rogue
-      // non-DJ member can't steer playback. (Before any stage event is known: bootstrap.)
+      // The RELAY is the conductor: accept now_playing authored by the relay key. (Still accept
+      // an on-stage DJ's now_playing as a transition fallback for any not-yet-migrated event;
+      // a rogue non-DJ member can't steer playback.)
       onNowPlaying: (ev) => {
-        if (stage.djs.length === 0 || stage.isOnStage(ev.pubkey)) ingestNowPlaying(ev)
+        if (ev.pubkey === CLUB_RELAY_PUBKEY || stage.djs.length === 0 || stage.isOnStage(ev.pubkey))
+          ingestNowPlaying(ev)
       },
       onStage: ingestStage,
       onStageKick: (ev) => {
@@ -462,7 +464,7 @@
       />
     </Stage>
     {#if isMember}
-      <Queue {groupId} />
+      <Queue {groupId} {canModerate} />
     {:else}
       <section class="join-hint">Join the club to step on stage and queue tracks.</section>
     {/if}

@@ -21,6 +21,14 @@ export const PROFILE_RELAYS = [
 export const CLUB_RELAY = 'wss://relay.zapclub.io'
 
 /**
+ * Public key of our NIP-29 relay (its NIP-11 `pubkey`, derived from RELAY_SECRET_KEY).
+ * The relay IS the conductor: it authors now_playing (30100) + the play-log (1313) for every
+ * club, so clients accept those events from this key (not from an on-stage DJ) and never write
+ * now_playing themselves. Must match the live relay's key — verify via NIP-11 if it ever rotates.
+ */
+export const CLUB_RELAY_PUBKEY = 'b095f4347bab926917ccd36f371d1741e71d99079bb30562c2227dda29e0b8b1'
+
+/**
  * Relays for NIP-57 zap receipts (kind 9735). The DJ's LNURL server publishes the
  * receipt to the relays named in the zap request; the client reads them from the same
  * list. Public relays — zap receipts are global, not club-scoped (the NIP-29 relay

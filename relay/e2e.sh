@@ -12,11 +12,12 @@ PORT=3344
 # ESM ignores NODE_PATH → symlink a node_modules that has nostr-tools (the frontend's).
 ln -sfn ../frontend/node_modules node_modules
 
-# Generate admin (superadmin) + relay keys. Output: "<adminSK> <adminPK> <relaySK>".
-KEYS=$(node -e 'import("nostr-tools/pure").then(m=>{const sk=m.generateSecretKey();const r=m.generateSecretKey();process.stdout.write(Buffer.from(sk).toString("hex")+" "+m.getPublicKey(sk)+" "+Buffer.from(r).toString("hex"))})')
+# Generate admin (superadmin) + relay keys. Output: "<adminSK> <adminPK> <relaySK> <relayPK>".
+KEYS=$(node -e 'import("nostr-tools/pure").then(m=>{const sk=m.generateSecretKey();const r=m.generateSecretKey();process.stdout.write(Buffer.from(sk).toString("hex")+" "+m.getPublicKey(sk)+" "+Buffer.from(r).toString("hex")+" "+m.getPublicKey(r))})')
 ASK=$(printf %s "$KEYS" | cut -d' ' -f1)
 APK=$(printf %s "$KEYS" | cut -d' ' -f2)
 RSK=$(printf %s "$KEYS" | cut -d' ' -f3)
+RPK=$(printf %s "$KEYS" | cut -d' ' -f4)
 
 DB=$(mktemp -d)
 go build -o /tmp/zc-e2e-relay .
@@ -26,5 +27,5 @@ RPID=$!
 trap 'kill $RPID 2>/dev/null; rm -rf "$DB" node_modules /tmp/zc-e2e-relay' EXIT
 sleep 1.5
 
-RELAY_URL="ws://127.0.0.1:$PORT" ADMIN_URL="http://127.0.0.1:$PORT" ADMIN_SK="$ASK" \
+RELAY_URL="ws://127.0.0.1:$PORT" ADMIN_URL="http://127.0.0.1:$PORT" ADMIN_SK="$ASK" RELAY_PK="$RPK" \
   node grouptest.mjs

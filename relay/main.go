@@ -222,6 +222,15 @@ func main() {
 		},
 	)
 
+	// The relay IS the conductor: a background scheduler drives now_playing (kind 30100) + the
+	// play-log (1313) for every club with active stage DJs, so playback continues round-robin
+	// even when no client is in the foreground. Single always-on writer → no client election/
+	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
+	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
+	cond := newConductor(db, relay, sk)
+	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence)
+	go cond.run()
+
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 

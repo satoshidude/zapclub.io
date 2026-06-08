@@ -4,7 +4,6 @@ import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
 import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
-import { shouldConduct } from './conductor'
 import { presence } from './presence.svelte'
 import { sessionPlayed } from './playlog.svelte'
 import { isValidVideoId } from '../util'
@@ -14,10 +13,6 @@ import type { NowPlaying } from './types'
  *  matching the stickier stage — brief stalls/background don't trigger an unnecessary
  *  conductor switch. */
 const FAILOVER_MS = 45_000
-/** A DIFFERENT present DJ rescues a silent conductor only after this much staleness — larger
- *  than a backgrounded tab's worst-case heartbeat gap (~60s) so we don't fight a merely
- *  backgrounded-but-alive conductor; far below the lobby fallback. */
-const RESCUE_STALE_MS = 90_000
 /** Listeners stop showing a track and fall back to the lobby once now_playing has been
  *  silent this long — a phantom conductor (navigated away while sticky-on-stage) must not
  *  freeze the room indefinitely. Beyond RESCUE_STALE_MS so a present DJ takes over first.
@@ -292,21 +287,14 @@ function advance(groupId: string): void {
 }
 
 /**
- * Whether the local user should DRIVE playback right now — the elected conductor normally,
- * or (if that conductor went silent while staying sticky-on-stage) the deterministic rescuer.
- * Bridges the lifecycle gap between conducting (club-view only) and stage presence (sticky).
+ * Whether the local user drives playback. Always FALSE now: the RELAY is the sole conductor
+ * (it writes now_playing for every club, on its always-on server clock). Clients are pure
+ * consumers — they read now_playing, drift-correct, and play; they request changes (queue,
+ * stage, skip) but never write now_playing. No client election / failover / rescue.
+ * (The conductor-write code below stays dead for now; Phase 3 removes it.)
  */
 export function isActingConductor(): boolean {
-  const np = state.np
-  return shouldConduct(
-    auth.pubkey,
-    stage.conductor,
-    stage.djs.map((d) => d.pubkey),
-    np?.writer ?? null,
-    np ? Date.now() - np.sentAt : Infinity,
-    RESCUE_STALE_MS,
-    (pk) => presence.isOnline(pk),
-  )
+  return false
 }
 
 /**
@@ -445,36 +433,26 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
   return out
 }
 
-/** Track end reported by the player — only the acting conductor advances. */
+/**
+ * Track end reported by the local player. The RELAY advances by the track's duration on its own
+ * clock (so playback continues even with no client present), but the player's `ended` is the
+ * precise signal — so we ask the relay to advance NOW via a skip-request for the running track.
+ * The relay advances once (the request names the current pos); a stale/duplicate end no-ops.
+ */
 export function onTrackEnded(groupId: string): void {
-  if (!isActingConductor() || !state.np) return
-  errorStreak = 0 // clean end → reset error streak
-  advance(groupId)
+  if (!state.np) return
+  void requestSkip(groupId)
 }
 
-// Guard against an endless skip if (almost) all tracks are unplayable.
-let errorWindowStart = 0
-let errorStreak = 0
-
 /**
- * Playback error reported by the player (deleted, region-locked, embedding off). Only the
- * conductor advances — otherwise the whole room would hang on the dead track. If errors
- * pile up (≥6 in 30s), the club falls back to the lobby track.
+ * Playback error reported by the player (deleted, region-locked, embedding off). The relay can't
+ * detect this itself, so we ask it to skip the dead track via a skip-request. Members only (the
+ * relay rejects non-member writes); when the next track is also dead the cycle repeats one step
+ * at a time until a playable one is found.
  */
 export function onTrackError(groupId: string, videoId: string): void {
-  if (!isActingConductor() || !state.np) return
-  if (state.np.videoId !== videoId) return // stale error of an old track
-  const nowMs = Date.now()
-  if (nowMs - errorWindowStart > 30_000) {
-    errorWindowStart = nowMs
-    errorStreak = 0
-  }
-  errorStreak++
-  if (errorStreak >= 6) {
-    state.np = null // too many dead tracks → lobby takes over
-    return
-  }
-  advance(groupId)
+  if (!state.np || state.np.videoId !== videoId) return // stale error of an old track
+  void requestSkip(groupId)
 }
 
 export function resetSync(): void {
