@@ -26,7 +26,6 @@
   const me = $derived(auth.pubkey)
   const djs = $derived(stage.djs)
   const onStage = $derived(stage.isOnStage(me))
-  const conductor = $derived(stage.conductor)
   // The DJ whose track is actually playing right now (pulsing highlight).
   const liveDj = $derived(sync.live?.dj ?? '')
   const emptySlots = $derived(Math.max(0, MAX_DJS - djs.length))
@@ -92,7 +91,6 @@
       <div class="slot filled" class:live={dj.pubkey === liveDj}>
         <img class="avatar" class:online={presence.isOnline(dj.pubkey)} src={avatarUrl(dj.pubkey, profile)} alt="" width="44" height="44" title={presence.isOnline(dj.pubkey) ? 'online now' : ''} />
         <a class="name" href={`/user/${npubEncode(dj.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj.pubkey)) }}>{displayName(dj.pubkey, profile)}</a>
-        {#if dj.pubkey === conductor}<span class="badge">conductor</span>{/if}
         {#if canModerate && dj.pubkey !== me}
           <button class="kick" onclick={() => kick(dj.pubkey)} title="Remove from stage">✕</button>
         {/if}
@@ -228,12 +226,6 @@
   }
   .name:hover {
     text-decoration: underline;
-  }
-  .badge {
-    font-size: 0.62rem;
-    color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
   .plus {
     font-size: 1.6rem;

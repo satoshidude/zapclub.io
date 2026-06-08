@@ -1,58 +1,36 @@
 import type { Event } from 'nostr-tools/pure'
-import { KIND_NOW_PLAYING, KIND_SKIP, publishClub, publishPlay } from './groups'
+import { KIND_SKIP, publishClub, reportBrokenTrack } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
-import { posToSlot, nextPlayablePos, firstPlayablePos, reanchoredPos } from './roundrobin'
+import { posToSlot, nextPlayablePos } from './roundrobin'
 import { presence } from './presence.svelte'
 import { sessionPlayed } from './playlog.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
-/** The conductor counts as down if the last now_playing is older (ms). Generous (45s),
- *  matching the stickier stage — brief stalls/background don't trigger an unnecessary
- *  conductor switch. */
-const FAILOVER_MS = 45_000
-/** Listeners stop showing a track and fall back to the lobby once now_playing has been
- *  silent this long — a phantom conductor (navigated away while sticky-on-stage) must not
- *  freeze the room indefinitely. Beyond RESCUE_STALE_MS so a present DJ takes over first.
- *  Exported as the SINGLE source for the play-log's session-gap (playlog.svelte.ts): a gap
- *  larger than the lobby-fallback == the room was in the lobby == a new playback session. */
-export const LIVE_STALE_MS = 150_000
-/** Off-club (ConductorService) the only track-end signal is conductorTick comparing elapsed vs
- *  duration — so a track with NO duration (yt-dlp returned 0) would never advance and the room
- *  would hang. Cap such tracks at this fallback length. On-club the player's `ended` event
- *  advances earlier, so this only bites the (rare) duration-less off-club case. */
-const MAX_TRACK_FALLBACK_S = 600
-/** Steady-state heartbeat publish cadence. The conductor tick fires more often (so the cheap,
- *  local track-end check stays precise), but the COSTLY now_playing republish is throttled to
- *  this — halving conductor writes. Well inside FAILOVER_MS (45s) and LIVE_STALE_MS (150s), so
- *  late-joiners (who get the replaceable event instantly on subscribe anyway) and failover are
- *  unaffected. A real track change / reorder / takeover still publishes immediately. */
-const HEARTBEAT_PUBLISH_MS = 15_000
-/** Wall-clock (ms) of the last now_playing publish — gates the throttled steady-state beat. */
-let lastHeartbeatMs = 0
+// The RELAY is the conductor — it is the sole writer of now_playing (kind 30100). This module is
+// now purely a CONSUMER: it ingests now_playing, drift-corrects the playback position, exposes
+// the live track, previews "Up next" (read-only mirror of the relay's round-robin), and lets an
+// owner/mod request a skip (kind 30107, the relay enacts + role-validates). No client conducting.
 
-/** Has the running track played out? Uses a fallback cap when its duration is unknown (<=0). */
-function trackFinished(np: NowPlaying): boolean {
-  const dur = np.duration > 0 ? np.duration : MAX_TRACK_FALLBACK_S
-  return (Date.now() - np.startedAt) / 1000 >= dur
-}
+/** Listeners fall back to the lobby once now_playing has been silent this long (relay down /
+ *  no DJ). Also the SINGLE source for the play-log's session-gap (playlog.svelte.ts): a gap
+ *  larger than this == the room was in the lobby == a new playback session. */
+export const LIVE_STALE_MS = 150_000
 
 interface SyncState {
   np: NowPlaying | null
-  /** offset = conductor clock − local clock (ms), recalibrated per event. */
+  /** offset = conductor (relay) clock − local clock (ms), recalibrated per event. */
   offsetMs: number
-  /** Latest skip request (from an owner/mod without the conductor role). */
-  skipIntent: { pos: number; author: string; at: number } | null
   /** Reactive clock (ms) so `live` re-evaluates staleness even when no events arrive. */
   now: number
 }
 
-const state = $state<SyncState>({ np: null, offsetMs: 0, skipIntent: null, now: Date.now() })
+const state = $state<SyncState>({ np: null, offsetMs: 0, now: Date.now() })
 
-// Reactive clock: without incoming events, `live` must still flip to the lobby once the
-// conductor goes silent. A plain Date.now() in the getter wouldn't be reactive.
+// Reactive clock: without incoming events, `live` must still flip to the lobby once the relay
+// goes silent. A plain Date.now() in the getter wouldn't be reactive.
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     state.now = Date.now()
@@ -65,8 +43,7 @@ export const sync = {
   },
   /**
    * What's actually playing: a now_playing only counts if someone is on stage AND it's been
-   * refreshed recently. A silent conductor (navigated away while sticky-on-stage) must not
-   * keep the room frozen on a dead track — past LIVE_STALE_MS we return null → lobby track.
+   * refreshed recently. If the relay goes silent past LIVE_STALE_MS we return null → lobby track.
    */
   get live() {
     const np = state.np
@@ -76,9 +53,6 @@ export const sync = {
   },
   get isPlaying() {
     return state.np?.status === 'playing'
-  },
-  get skipIntent() {
-    return state.skipIntent
   },
 }
 
@@ -97,7 +71,7 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
     dj: tag('dj') ?? ev.pubkey,
     pos: Number(tag('pos')) || 0,
     title: ev.content,
-    writer: ev.pubkey, // who is actually driving — for phantom-conductor detection
+    writer: ev.pubkey,
   }
 }
 
@@ -110,7 +84,7 @@ export function ingestNowPlaying(ev: Event): void {
   state.np = np
 }
 
-/** Current target position of the track in seconds (conductor-clock calibrated). */
+/** Current target position of the track in seconds (relay-clock calibrated). */
 export function targetPosition(): number {
   const np = state.np
   if (!np) return 0
@@ -118,270 +92,61 @@ export function targetPosition(): number {
   return Math.max(0, (refMs - np.startedAt) / 1000)
 }
 
-// ── Conductor (time authority, round-robin progress) ───────────────────────
+// ── "Up next" preview (read-only mirror of the relay's round-robin) ──────────
 
 /**
- * Publishes a CONCRETE track as now_playing (fresh sent_at). The source of truth for the
- * running track is this object — NOT pos+queue. That keeps the track stable no matter how
- * stage/queues change.
+ * Playability matrix mirroring the relay's conductor (conductor.go matrix()): a slot is playable
+ * if the track is active (`off`!==true), not the currently-playing one, and — for an AWAY DJ —
+ * not already played this session. A PRESENT DJ's own `active`/`off` flags are authoritative (so
+ * a reactivated track shows again); the shared played-set (from the 1313 log) only guards away
+ * DJs whose client couldn't mark a played track `off`. Read-only — the relay drives the actual
+ * rotation; this is just the preview, kept in lockstep with the relay's rule.
  */
-function publishNp(groupId: string, np: NowPlaying): void {
-  const sentAt = Date.now()
-  lastHeartbeatMs = sentAt // any publish (track change, reorder, beat) resets the beat clock
-  state.np = { ...np, sentAt, writer: auth.pubkey ?? np.writer }
-  state.offsetMs = 0
-  void publishClub({
-    kind: KIND_NOW_PLAYING,
-    created_at: Math.floor(sentAt / 1000),
-    tags: [
-      ['h', groupId],
-      ['d', groupId],
-      ['track', `yt:${np.videoId}`],
-      ['dj', np.dj ?? ''],
-      ['pos', String(np.pos ?? 0)],
-      ['started_at', String(np.startedAt)],
-      ['sent_at', String(sentAt)],
-      ['duration', String(np.duration)],
-      ['status', np.status],
-    ],
-    content: np.title,
-  })
-}
-
-/** Derives the concrete track from `pos` and starts it (a real track change). */
-function startAt(groupId: string, pos: number, startedAtMs: number): void {
-  const djs = stage.djs.map((d) => d.pubkey)
-  if (djs.length === 0) return
-  const { djIndex, trackIndex } = posToSlot(pos, djs.length)
-  const dj = djs[djIndex]
-  const track = queues.trackAt(dj, trackIndex)
-  if (!track) return
-  publishNp(groupId, {
-    videoId: track.videoId,
-    title: track.title,
-    duration: track.duration,
-    startedAt: startedAtMs,
-    sentAt: Date.now(),
-    status: 'playing',
-    dj,
-    pos,
-  })
-  // Shared play record (now_playing is replaceable, keeps no history): the conductor-
-  // independent source of round-robin progress, carrying pos + the current loop epoch.
-  void publishPlay(groupId, dj, track.videoId, startedAtMs, pos, currentLoopEpoch)
-}
-
-/**
- * Re-anchors `pos` to the index the CURRENTLY-PLAYING track now sits at in its DJ's queue.
- * The round-robin is positional (`pos`→`trackIndex`), so when a DJ reorders, the playing
- * track may move to a different index; without re-anchoring the next `advance()` would
- * follow stale positions (and a track moved before the play head would be skipped until a
- * wrap). We keep the playing track untouched — only correct `pos` — so reorders take
- * effect on the NEXT track, in the new order.
- */
-function reanchorPos(np: NowPlaying): NowPlaying {
-  const djs = stage.djs.map((d) => d.pubkey)
-  const pos = reanchoredPos(djs, np.dj, np.pos, np.videoId, (dj) =>
-    (queues.get(dj)?.tracks ?? []).map((t) => t.videoId),
-  )
-  return pos === np.pos ? np : { ...np, pos }
-}
-
-/** Heartbeat: re-send the same running track (only sent_at fresh), pos re-anchored. */
-function heartbeat(groupId: string): void {
-  if (!state.np) return
-  state.np = reanchorPos(state.np)
-  publishNp(groupId, state.np)
-}
-
-/** Throttled steady-state beat: only republish once the publish cadence has elapsed, so the
- *  frequent tick keeps track-end detection precise without a write every tick. */
-function maybeHeartbeat(groupId: string): void {
-  if (Date.now() - lastHeartbeatMs < HEARTBEAT_PUBLISH_MS) return
-  heartbeat(groupId)
-}
-
-// Tracks the conductor has already played THIS session (by videoId). Needed because a track's
-// `off` flag is written by its own DJ — when that DJ is away (sticky on stage, client gone),
-// the conductor plays their tracks but can't mark them off, so a top-down scan would keep
-// re-picking the same just-played track → an endless 2-song skip loop. Excluding played
-// videoIds breaks that; cleared on exhaustion (to loop the rotation) and on reset.
-const playedThisSession = new Set<string>()
-
-/** Rotation epoch. advance() bumps it on exhaustion so a replay is agreed across clients via
- *  the 1313 `loop` tag (see playlog.ts), instead of each conductor silently looping locally. */
-let currentLoopEpoch = 0
-
-/**
- * Merge the SHARED played-set (reconstructed from the 1313 play-log) into the local set, so a
- * fresh / rescuing / bootstrapping conductor continues exactly where the room left off instead
- * of replaying away DJs' tracks. Additive — never un-excludes what advance() has locally added.
- *  - log epoch > local → another conductor looped the rotation; adopt it and reset locally.
- *  - log epoch < local → we just bumped and our publishPlay hasn't echoed back yet; skip, our
- *    cleared local set is authoritative until the log catches up (avoids re-adding old plays).
- */
-function seedPlayedFromLog(): void {
-  const { played, loop } = sessionPlayed(state.np?.videoId ?? null)
-  if (loop < currentLoopEpoch) return
-  if (loop > currentLoopEpoch) {
-    currentLoopEpoch = loop
-    playedThisSession.clear()
-  }
-  for (const v of played) playedThisSession.add(v)
-}
-
-/**
- * Playability matrix: a slot is playable if the track is active (`off`!==true) AND not the
- * currently-playing one AND (for an AWAY DJ) not already played this session.
- *
- * The shared session played-set (1313) only needs to guard an AWAY DJ: their client is gone,
- * so it can't mark their just-played track `off`, and a top-down scan would re-pick it forever.
- * For a PRESENT DJ — and always for myself — the queue's own `active`/`off` flags are
- * authoritative: a present DJ marks tracks `off` as they play (markMyTrackPlayed) AND can
- * reactivate one to replay it. So a present DJ's reactivated track is eligible again instead of
- * staying wrongly excluded by the played-set (the bug: a reactivated track sitting before the
- * play head got skipped — the rotation jumped to the next unplayed track after the current one).
- */
-function playableExcluding(djs: string[]): boolean[][] {
+function playableMatrix(djs: string[]): boolean[][] {
   const cur = state.np?.videoId
+  const { played } = sessionPlayed(cur ?? null)
   return djs.map((pk) => {
     const here = pk === auth.pubkey || presence.isOnline(pk)
     return (queues.get(pk)?.tracks ?? []).map(
-      (t) =>
-        t.active !== false && // not explicitly played/disabled by its DJ
-        t.videoId !== cur && // never re-pick the currently-playing track
-        (here || !playedThisSession.has(t.videoId)), // away DJ → shared played-set guard
+      (t) => t.active !== false && t.videoId !== cur && (here || !played.has(t.videoId)),
     )
   })
 }
 
-/**
- * Advances to the next track. ALWAYS scans from the TOP: the next track is the first active
- * track per DJ in round-robin order, skipping `off`, the current track, AND anything already
- * played this session (so a skip never loops back to a just-played track even when its DJ is
- * away and never marked it off). When everything's been played, the session history is cleared
- * so the rotation loops; truly nothing playable → lobby.
- */
-function advance(groupId: string): void {
+/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans from the TOP (the
+ *  first active track per DJ, round-robin), excluding the running track — what the relay plays. */
+export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
-  if (djs.length === 0) {
-    state.np = null
-    return
+  if (djs.length === 0) return []
+  const playable = playableMatrix(djs)
+  const out: { dj: string; videoId: string; title: string }[] = []
+  let pos = -1
+  for (let i = 0; i < max; i++) {
+    const next = nextPlayablePos(pos, djs.length, playable)
+    if (next === -1) break
+    const { djIndex, trackIndex } = posToSlot(next, djs.length)
+    const dj = djs[djIndex]
+    const track = queues.trackAt(dj, trackIndex)
+    if (track) out.push({ dj, videoId: track.videoId, title: track.title })
+    pos = next
   }
-  seedPlayedFromLog() // continue from the SHARED progress, not just this client's local set
-  if (state.np?.videoId) playedThisSession.add(state.np.videoId)
-  let next = firstPlayablePos(djs.length, playableExcluding(djs))
-  if (next === -1) {
-    // Rotation exhausted → bump the loop epoch (so all clients agree on the replay via the
-    // 1313 `loop` tag) and forget history. The current track stays excluded so we don't
-    // immediately replay it.
-    currentLoopEpoch++
-    playedThisSession.clear()
-    next = firstPlayablePos(djs.length, playableExcluding(djs))
-  }
-  if (next === -1) {
-    state.np = null // nothing active at all → lobby
-    return
-  }
-  startAt(groupId, next, Date.now())
+  return out
+}
+
+// ── skip (owner/mod or the playing DJ → the relay enacts + role-validates) ───
+
+/** Whether the local user may skip — an owner/moderator (the relay validates the role too). */
+export function canSkip(canModerate = false): boolean {
+  return !!auth.pubkey && !!sync.live && canModerate
 }
 
 /**
- * Whether the local user drives playback. Always FALSE now: the RELAY is the sole conductor
- * (it writes now_playing for every club, on its always-on server clock). Clients are pure
- * consumers — they read now_playing, drift-correct, and play; they request changes (queue,
- * stage, skip) but never write now_playing. No client election / failover / rescue.
- * (The conductor-write code below stays dead for now; Phase 3 removes it.)
- */
-export function isActingConductor(): boolean {
-  return false
-}
-
-/**
- * Called periodically (by ClubView). Only the acting conductor acts: starts the first track,
- * keeps the heartbeat, takes over on failover — and rescues a silent/phantom conductor.
- * IMPORTANT: the heartbeat leaves the running track untouched — stage/queue changes only
- * affect the NEXT track (on end or skip).
- */
-export function conductorTick(groupId: string): void {
-  if (!isActingConductor()) return // acting conductor only
-
-  const djs = stage.djs.map((d) => d.pubkey)
-  const np = state.np
-
-  // Orphan guard: never keep playing a track whose DJ is no longer on an active stage slot
-  // (left / went stale). Their leftover now_playing lingers (kind 30100 is replaceable); advance
-  // to an active DJ's track. An away-but-sticky DJ is still in stage.djs, so their curated set
-  // keeps playing — only a truly off-stage DJ triggers this.
-  if (np && djs.length > 0 && np.dj && !djs.includes(np.dj)) {
-    advance(groupId)
-    return
-  }
-
-  const npFresh = !!np && Date.now() - np.sentAt < FAILOVER_MS
-
-  if (!np) {
-    // Bootstrap. advance() seeds from the SHARED play-log (playlog) first, so a fresh takeover
-    // / lobby-recovery continues the session instead of replaying from the top, and loops via
-    // the shared epoch when everything's been played. Empty/away DJs' slots are skipped.
-    advance(groupId)
-    return
-  }
-
-  if (!npFresh) {
-    // Very old now_playing = residue of an earlier session (kind 30100 is replaceable and
-    // lingers on the relay). Don't resurrect a long-dead track at a stale pos — advance()
-    // continues from the shared progress (and won't replay, since the residue is excluded).
-    if (Date.now() - np.sentAt > 120_000) {
-      advance(groupId)
-      return
-    }
-    // Real failover (conductor only briefly away): KEEP the running track; only advance if
-    // it actually finished within this window.
-    if (trackFinished(np)) advance(groupId)
-    else heartbeat(groupId) // same track, new conductor takes over the heartbeat
-    return
-  }
-
-  // Fresh & I'm conductor. The track-end advance is normally driven by the player's `ended`
-  // event (onTrackEnded) — but that only fires while a club view's player is mounted. So the
-  // tick is ALSO self-driving: if the running track has played out, advance here. This is what
-  // lets the conductor keep the rotation going off the club page (ConductorService) — and is a
-  // harmless backstop on-club (onTrackEnded usually fires first; the just-started next track
-  // is fresh → no double-advance).
-  if (trackFinished(np)) advance(groupId)
-  else maybeHeartbeat(groupId) // track frozen; republish only when the beat cadence is due
-}
-
-/**
- * Conductor: immediately re-anchor pos to the running track and republish now_playing, so
- * a just-made reorder is pushed to everyone's Up next without waiting for the heartbeat.
- * No-op for a non-conductor (their republished queue reaches the conductor instead).
- */
-export function applyOrderNow(groupId: string): void {
-  if (!isActingConductor() || !state.np) return
-  state.np = reanchorPos(state.np)
-  publishNp(groupId, state.np)
-}
-
-/** Manual skip to the next track — ONLY the acting conductor. */
-export function skipTrack(groupId: string): void {
-  if (!isActingConductor() || !state.np) return
-  advance(groupId)
-}
-
-/**
- * Skip the current track. The conductor does it directly. An owner/moderator who is NOT
- * the conductor (maybe not even on stage) publishes a skip request that the conductor
- * enacts — only the conductor writes now_playing, so this is the safe path.
+ * Request a skip of the current track (kind 30107). The relay is the conductor: it advances on a
+ * matching skip-request only from an authorized author (owner/mod, or the playing DJ). Posting it
+ * requires club membership (relay write-protection).
  */
 export async function requestSkip(groupId: string): Promise<void> {
-  const me = auth.pubkey
-  if (!me || !state.np) return
-  if (isActingConductor()) {
-    skipTrack(groupId)
-    return
-  }
+  if (!auth.pubkey || !state.np) return
   await publishClub({
     kind: KIND_SKIP,
     created_at: Math.floor(Date.now() / 1000),
@@ -394,50 +159,10 @@ export async function requestSkip(groupId: string): Promise<void> {
   })
 }
 
-/** A skip request seen on the relay (the conductor validates the author's role). */
-export function ingestSkipIntent(ev: Event): void {
-  const pos = Number(ev.tags.find((t) => t[0] === 'pos')?.[1])
-  if (Number.isNaN(pos)) return
-  const at = ev.created_at * 1000
-  if (state.skipIntent && state.skipIntent.at >= at) return
-  state.skipIntent = { pos, author: ev.pubkey, at }
-}
-
-export function clearSkipIntent(): void {
-  state.skipIntent = null
-}
-
-/** Whether the local user may skip — the acting conductor, OR an owner/moderator. */
-export function canSkip(canModerate = false): boolean {
-  return !!auth.pubkey && !!sync.live && (isActingConductor() || canModerate)
-}
-
-/** Preview of the next round-robin tracks (across all DJs), max `max`. Mirrors advance():
- *  scans from the TOP (the first active track per DJ, round-robin), excluding the running
- *  track — so "Up next" shows exactly what will play. */
-export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
-  const djs = stage.djs.map((d) => d.pubkey)
-  if (djs.length === 0) return []
-  const playable = playableExcluding(djs)
-  const out: { dj: string; videoId: string; title: string }[] = []
-  let pos = -1
-  for (let i = 0; i < max; i++) {
-    const next = nextPlayablePos(pos, djs.length, playable) // walk active slots from the top
-    if (next === -1) break // no more active tracks
-    const { djIndex, trackIndex } = posToSlot(next, djs.length)
-    const dj = djs[djIndex]
-    const track = queues.trackAt(dj, trackIndex)
-    if (track) out.push({ dj, videoId: track.videoId, title: track.title })
-    pos = next
-  }
-  return out
-}
-
 /**
- * Track end reported by the local player. No-op: the RELAY advances by the track's duration on
- * its own clock (so playback continues even with no client present), and a skip-request is a
- * MODERATION action the relay role-gates — a normal listener's "ended" must not skip. The relay
- * advancing within its tick after the duration elapses is the single authority.
+ * Track end reported by the local player. No-op: the relay advances by the track's duration on
+ * its own clock (so playback continues even with no client present). Track end is not a client
+ * decision.
  */
 export function onTrackEnded(_groupId: string): void {
   /* relay-driven: nothing to do */
@@ -445,20 +170,16 @@ export function onTrackEnded(_groupId: string): void {
 
 /**
  * Playback error reported by the player (deleted, region-locked, embedding off). The relay can't
- * detect this itself, so we ask it to skip the dead track via a skip-request — honored only when
- * the local user is authorized (owner/mod, or the playing DJ skipping their own broken track).
- * For an unattended-by-mods room a broken track plays out its duration (noted; a quorum-based
- * broken-track skip is a later hardening).
+ * detect this itself, so we report the track unplayable (kind 20102); the relay skips it when an
+ * authorized user (owner/mod/playing-DJ) or a quorum of members reports it. Any member may report
+ * — it's "I can't play this", not a moderation skip.
  */
 export function onTrackError(groupId: string, videoId: string): void {
   if (!state.np || state.np.videoId !== videoId) return // stale error of an old track
-  void requestSkip(groupId)
+  void reportBrokenTrack(groupId, videoId)
 }
 
 export function resetSync(): void {
   state.np = null
   state.offsetMs = 0
-  state.skipIntent = null
-  playedThisSession.clear()
-  currentLoopEpoch = 0
 }

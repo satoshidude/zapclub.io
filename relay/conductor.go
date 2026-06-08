@@ -42,7 +42,10 @@ const (
 	kindQueue             = 30103
 	kindStageKick         = 30106
 	kindSkip              = 30107
+	kindBroken            = 20102 // ephemeral "I can't play this track" report (content = videoId)
 	kindPlay              = 1313
+	brokenWindowMS        = 120_000 // a broken-track report counts as fresh this long
+	brokenQuorum          = 2       // distinct members reporting a track broken → skip it
 )
 
 type condDJ struct {
@@ -82,11 +85,89 @@ type conductor struct {
 
 	presMu sync.Mutex
 	pres   map[string]map[string]int64 // club → pubkey → last presence beat (ms)
+
+	brokenMu sync.Mutex
+	broken   map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
 }
 
 func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
 	pub, _ := nostr.GetPublicKey(sk)
-	return &conductor{db: db, relay: relay, state: state, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}}
+	return &conductor{db: db, relay: relay, state: state, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}, broken: map[string]map[string]map[string]int64{}}
+}
+
+// observeBroken records an ephemeral "I can't play this track" report (kind 20102, content =
+// videoId). Registered on OnEphemeralEvent (like presence). The conductor skips the running
+// track when an AUTHORIZED reporter (owner/mod/playing-DJ) reports it broken, OR when a quorum
+// of distinct members do — fixing dead/region-locked videos that the relay can't detect itself,
+// without reopening skip to single-member abuse.
+func (c *conductor) observeBroken(_ context.Context, ev *nostr.Event) {
+	if ev.Kind != kindBroken {
+		return
+	}
+	club, vid := tagVal(ev, "h"), ev.Content
+	if club == "" || vid == "" {
+		return
+	}
+	c.brokenMu.Lock()
+	byVid := c.broken[club]
+	if byVid == nil {
+		byVid = map[string]map[string]int64{}
+		c.broken[club] = byVid
+	}
+	reps := byVid[vid]
+	if reps == nil {
+		reps = map[string]int64{}
+		byVid[vid] = reps
+	}
+	reps[ev.PubKey] = int64(ev.CreatedAt) * 1000
+	c.brokenMu.Unlock()
+}
+
+// brokenSkip reports whether the running track should be skipped as unplayable: an authorized
+// reporter (owner/mod or the playing DJ) reported it broken, or ≥ quorum distinct members did.
+func (c *conductor) brokenSkip(club string, pb *condClub, now int64) bool {
+	if !pb.playing || pb.videoID == "" {
+		return false
+	}
+	c.brokenMu.Lock()
+	reps := c.broken[club][pb.videoID]
+	fresh := make([]string, 0, len(reps))
+	for pk, ts := range reps {
+		if now-ts < brokenWindowMS {
+			fresh = append(fresh, pk)
+		}
+	}
+	c.brokenMu.Unlock()
+	if len(fresh) >= brokenQuorum {
+		return true
+	}
+	for _, pk := range fresh {
+		if c.isSkipAuthorized(club, pk, pb.dj) {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneBroken drops stale broken-track reports so the map stays bounded.
+func (c *conductor) pruneBroken(now int64) {
+	c.brokenMu.Lock()
+	defer c.brokenMu.Unlock()
+	for club, byVid := range c.broken {
+		for vid, reps := range byVid {
+			for pk, ts := range reps {
+				if now-ts >= brokenWindowMS {
+					delete(reps, pk)
+				}
+			}
+			if len(reps) == 0 {
+				delete(byVid, vid)
+			}
+		}
+		if len(byVid) == 0 {
+			delete(c.broken, club)
+		}
+	}
 }
 
 // isSkipAuthorized reports whether `pk` may skip the running track of `club`: a club owner or
@@ -196,6 +277,7 @@ func (c *conductor) tick() {
 	}
 	now := time.Now().UnixMilli()
 	c.prunePresence(now)
+	c.pruneBroken(now)
 	for club, djs := range active {
 		c.driveClub(ctx, club, djs, now)
 	}
@@ -362,10 +444,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
-	// Skip requested (kind 30107) for the running track → advance now. (Phase 1: any member's
-	// request is honored — manual skip + a client's dead-video auto-skip. Strict owner/mod role
-	// validation is Phase 2.)
+	// Skip requested (kind 30107, owner/mod/playing-DJ — validated in skipRequested).
 	if c.skipRequested(ctx, club, pb) {
+		c.advance(ctx, club, djPks, queues, pb, now)
+		return
+	}
+	// Track reported unplayable (kind 20102) by an authorized user or a quorum of members.
+	if c.brokenSkip(club, pb, now) {
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}

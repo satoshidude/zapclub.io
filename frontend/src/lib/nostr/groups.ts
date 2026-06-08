@@ -27,6 +27,7 @@ export const KIND_SKIP = 30107 // replaceable per club: owner/mod asks the condu
 export const KIND_PLAY = 1313 // non-replaceable play record (1 per real track start)
 export const KIND_CLUB_CONFIG = 30101 // replaceable per club (d=club), OWNER-authored: access/price
 export const KIND_PRESENCE = 20100 // ephemeral per-user heartbeat ("I'm here right now")
+export const KIND_BROKEN = 20102 // ephemeral "I can't play this track" report (content = videoId)
 export const KIND_ZAP_BROADCAST = 20101 // ephemeral, zapper-signed: "I zapped <p> N sats" (club-live zap signal when the DJ's LNURL doesn't publish a 9735 receipt)
 
 const RELAYS = [CLUB_RELAY]
@@ -179,6 +180,22 @@ export async function publishZapBroadcast(
   ]
   if (invoice) tags.push(['bolt11', invoice])
   await publishClub({ kind: KIND_ZAP_BROADCAST, created_at: now(), tags, content: '' })
+}
+
+/**
+ * Reports the running track as unplayable (kind 20102, ephemeral): deleted/region-locked/
+ * embedding-off — something the relay can't detect itself. The relay (the conductor) skips the
+ * track when an authorized reporter (owner/mod/playing-DJ) OR a quorum of distinct members
+ * reports it. Members only (relay write-protection); not a moderation action.
+ */
+export async function reportBrokenTrack(groupId: string, videoId: string): Promise<void> {
+  if (!videoId) return
+  await publishClub({
+    kind: KIND_BROKEN,
+    created_at: now(),
+    tags: [['h', groupId]],
+    content: videoId,
+  })
 }
 
 // ── Moderation (host/moderator only — the relay enforces the role) ────────────

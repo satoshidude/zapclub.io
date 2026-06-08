@@ -23,7 +23,6 @@
     stage,
     ingestStage,
     ingestStageKick,
-    setStageHost,
     clearStageView,
     joinStage,
     leaveStage,
@@ -31,7 +30,7 @@
   } from '../nostr/stage.svelte'
   import { ingestQueue, queues, resetQueues, startQueueSync, stopQueueSync, refreshQueues, reactivateMyQueue } from '../nostr/queue.svelte'
   import { ingestPlay, startPlayLogSync, stopPlayLogSync, refreshPlayLog, resetPlayLog } from '../nostr/playlog.svelte'
-  import { sync, ingestNowPlaying, conductorTick, onTrackEnded, onTrackError, resetSync, skipTrack, ingestSkipIntent, clearSkipIntent, isActingConductor } from '../nostr/sync.svelte'
+  import { sync, ingestNowPlaying, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
@@ -119,7 +118,6 @@
         const prev = configEvs[ev.pubkey]
         if (!prev || ev.created_at >= prev.created_at) configEvs = { ...configEvs, [ev.pubkey]: ev }
       },
-      onSkip: ingestSkipIntent,
       onPresence: ingestPresence,
       onZapBroadcast: ingestZapBroadcast,
       onPlay: ingestPlay,
@@ -132,24 +130,16 @@
       },
     })
 
-    // Reliable round-robin: besides the live push subscription above, periodically re-query
-    // all DJ queues so the rotation stays correct even if a 30103 push was missed (reconnect,
-    // relay restart). Idempotent ingest, so it never fights live updates or local edits.
+    // Reliable round-robin preview: besides the live push subscription above, periodically
+    // re-query all DJ queues so "Up next" stays correct even if a 30103 push was missed
+    // (reconnect, relay restart). Idempotent ingest, so it never fights live updates / edits.
     startQueueSync(id)
-    // Shared round-robin progress: keep the play-log (kind 1313) live so any conductor
-    // continues where the room left off instead of replaying away DJs' tracks.
+    // Shared round-robin progress: keep the play-log (kind 1313) live so the "Up next" preview
+    // mirrors what the relay (the conductor) will actually play.
     startPlayLogSync(id)
-
-    // Conductor tick: only the conductor acts inside conductorTick(). Touch queues so the
-    // effect re-evaluates when queue lengths change (reactivity).
-    const tick = setInterval(() => {
-      void queues
-      conductorTick(id)
-    }, 8000)
 
     return () => {
       stop()
-      clearInterval(tick)
       stopQueueSync()
       stopPlayLogSync()
       resetSync()
@@ -180,11 +170,6 @@
     return subscribeZaps(pks)
   })
 
-  // Owner (first admin) is the stage host = always conductor when on stage.
-  $effect(() => {
-    setStageHost(owner || null)
-  })
-
   // When the DJ roster changes (someone steps on/off stage), re-sync the queues right away
   // so a new DJ's playlist enters the round-robin immediately instead of waiting for the
   // next poll tick. Keyed on the DJ set so it only fires on actual roster changes.
@@ -204,21 +189,6 @@
   // Only the conductor writes now_playing, so it's the conductor that ENACTS a skip
   // requested by an owner/moderator (who may not be on stage). Validate the requester's
   // role here, match it to the running track's pos, then skip.
-  $effect(() => {
-    const intent = sync.skipIntent
-    if (!intent) return
-    if (!isActingConductor()) return
-    const authorized =
-      intent.author === owner || isModerator(intent.author) || intent.author === stage.conductor
-    const fresh = Date.now() - intent.at < 60_000
-    if (authorized && fresh && sync.live && intent.pos === sync.live.pos) {
-      clearSkipIntent()
-      skipTrack(groupId)
-    } else if (!sync.live || (sync.live && intent.pos !== sync.live.pos)) {
-      clearSkipIntent() // stale request (track already moved on)
-    }
-  })
-
   // Reload-resume: if the user was on this club's stage before reload, rejoin.
   $effect(() => {
     if (stageResumed || !auth.canSign) return

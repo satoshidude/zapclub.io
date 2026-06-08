@@ -170,6 +170,15 @@ if (process.env.RELAY_PK) {
   await sleep(4000)
   const npD = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
   assert(!!npD && npD.tags.find((t) => t[0] === 'track')?.[1] === trackB, 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
+  // broken-track quorum: 2 distinct members report the running track unplayable → relay skips it.
+  await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // stranger joins C
+  await sleep(800)
+  const curVid = (trackB || '').replace('yt:', '')
+  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
+  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
+  await sleep(4000)
+  const npE = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  assert(!!npE && npE.tags.find((t) => t[0] === 'track')?.[1] !== trackB, 'conductor: broken-track quorum (2 members) skips the unplayable track')
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 

@@ -228,7 +228,7 @@ func main() {
 	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
 	cond := newConductor(db, relay, state, sk)
-	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence)
+	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
 	go cond.run()
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)

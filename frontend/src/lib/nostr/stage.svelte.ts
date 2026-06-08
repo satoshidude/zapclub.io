@@ -1,7 +1,7 @@
 import type { Event } from 'nostr-tools/pure'
 import { KIND_STAGE, publishClub } from './groups'
 import { auth } from './auth.svelte'
-import { selectActiveDjs, pickConductor, MAX_DJS } from './conductor'
+import { selectActiveDjs, MAX_DJS } from './conductor'
 import type { StageDj } from './types'
 
 // zapclub: open stage — any member may take a free slot, up to MAX_DJS. The stage is a
@@ -68,38 +68,15 @@ interface StageState {
   kicks: Record<string, number>
   /** Reactive time tick so freshness filters re-evaluate. */
   tick: number
-  /** Current conductor (sticky — stays as long as active). */
-  conductorPk: string | null
 }
 
-const state = $state<StageState>({ djs: {}, kicks: {}, tick: 0, conductorPk: null })
-
-// Club owner (first admin). If on stage, they are ALWAYS the conductor (time authority) —
-// deterministic across all clients (everyone knows the same owner from 39001), which also
-// resolves the now_playing conflict between multiple "conductor" candidates.
-let hostPk: string | null = null
-export function setStageHost(pk: string | null): void {
-  if (pk === hostPk) return
-  hostPk = pk
-  resolveConductor()
-}
-
-/**
- * Determines the conductor STICKILY: the current conductor stays as long as they are
- * active — a newly joined DJ does NOT take over (not even on clock skew that could sort
- * their `since` falsely to the front). Only when the conductor leaves does the next
- * (oldest `since`) take over.
- */
-function resolveConductor(): void {
-  state.conductorPk = pickConductor(activeDjs(), hostPk, state.conductorPk)
-}
+const state = $state<StageState>({ djs: {}, kicks: {}, tick: 0 })
 
 let tickTimer: ReturnType<typeof setInterval> | null = null
 function ensureTicking(): void {
   if (tickTimer) return
   tickTimer = setInterval(() => {
     state.tick = Date.now()
-    resolveConductor()
   }, 5000)
 }
 
@@ -117,10 +94,6 @@ export const stage = {
   },
   get full(): boolean {
     return activeDjs().length >= MAX_DJS
-  },
-  /** Conductor (time authority): owner-on-stage, else sticky current, else oldest. */
-  get conductor(): string | null {
-    return pickConductor(activeDjs(), hostPk, state.conductorPk)
   },
   isOnStage(pubkey: string | null): boolean {
     return !!pubkey && activeDjs().some((d) => d.pubkey === pubkey)
@@ -140,7 +113,6 @@ export function ingestStage(ev: Event): void {
   // Otherwise long-watching clients keep a stale `since` on rejoin and the DJ order
   // (round-robin mapping pos%n) drifts between clients.
   state.djs[ev.pubkey] = { since, lastSeen, on }
-  resolveConductor()
 }
 
 /**
@@ -154,7 +126,6 @@ export function ingestStageKick(ev: Event): string | null {
   const kickMs = ev.created_at * 1000
   if (kickMs > (state.kicks[target] ?? 0)) {
     state.kicks[target] = kickMs
-    resolveConductor()
   }
   return target
 }
@@ -217,7 +188,6 @@ export async function leaveStage(groupId?: string): Promise<void> {
   const me = auth.pubkey
   if (me && state.djs[me]) {
     state.djs[me] = { ...state.djs[me], on: false, lastSeen: Date.now() }
-    resolveConductor()
   }
   if (gid) await postStage(gid, false)
 }
@@ -231,8 +201,6 @@ export async function leaveStage(groupId?: string): Promise<void> {
 export function clearStageView(): void {
   state.djs = {}
   state.kicks = {}
-  state.conductorPk = null
-  hostPk = null
 }
 
 export function resetStage(): void {
@@ -251,8 +219,6 @@ export function resetStage(): void {
   myGroupId = null
   state.djs = {}
   state.kicks = {}
-  state.conductorPk = null
-  hostPk = null
 }
 
 ensureTicking()
@@ -264,7 +230,6 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       state.tick = Date.now()
-      resolveConductor()
       if (myGroupId) void postStage(myGroupId, true)
     }
   })
