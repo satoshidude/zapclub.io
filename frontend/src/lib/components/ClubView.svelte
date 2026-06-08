@@ -259,6 +259,19 @@
   // Share this club: copy the link, share via the OS sheet, or post it publicly to Nostr.
   let shareOpen = $state(false)
   let shareMsg = $state('')
+  let sharing = $state(false)
+  let sharedAt = $state(0)
+  const SHARE_COOLDOWN_MS = 3_600_000 // don't re-post the same club to Nostr within an hour
+  const shareKey = $derived(`zapclub:shared:${groupId}`)
+  // Load the last-shared timestamp for this club (so the button reflects the cooldown).
+  $effect(() => {
+    try {
+      sharedAt = Number(localStorage.getItem(shareKey) || 0)
+    } catch {
+      sharedAt = 0
+    }
+  })
+  const sharedRecently = $derived(sharedAt > 0 && Date.now() - sharedAt < SHARE_COOLDOWN_MS)
   const clubUrl = $derived(`${location.origin}/club/${groupId}`)
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   async function copyLink() {
@@ -279,12 +292,25 @@
     shareOpen = false
   }
   async function shareOnNostr() {
+    if (sharing) return // guard a rapid double-click
+    let last = 0
+    try { last = Number(localStorage.getItem(shareKey) || 0) } catch { /* ignore */ }
+    if (Date.now() - last < SHARE_COOLDOWN_MS) {
+      shareMsg = 'Already shared this club in the last hour'
+      return
+    }
+    sharing = true
     try {
       await shareNote(`🎧 ${club?.name ?? 'A club'} on zapclub — collaborative, Nostr-native music.\n${clubUrl}`, clubUrl)
+      const now = Date.now()
+      try { localStorage.setItem(shareKey, String(now)) } catch { /* ignore */ }
+      sharedAt = now
       shareMsg = 'Posted to Nostr ✓'
       setTimeout(() => { shareMsg = ''; shareOpen = false }, 1400)
     } catch (e) {
       shareMsg = String((e as Error)?.message ?? 'Post failed')
+    } finally {
+      sharing = false
     }
   }
 
@@ -397,7 +423,9 @@
               <div class="share-backdrop" role="presentation" onclick={() => (shareOpen = false)}></div>
               <div class="share-menu" role="menu">
                 {#if auth.canSign}
-                  <button class="share-item" role="menuitem" onclick={shareOnNostr}>⚡ Share on Nostr</button>
+                  <button class="share-item" role="menuitem" onclick={shareOnNostr} disabled={sharing || sharedRecently}>
+                    {sharedRecently ? '✓ Shared (within 1h)' : sharing ? '⚡ Posting…' : '⚡ Share on Nostr'}
+                  </button>
                 {/if}
                 <button class="share-item" role="menuitem" onclick={copyLink}>🔗 Copy link</button>
                 {#if canNativeShare}
@@ -714,9 +742,14 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
   }
-  .share-item:hover {
+  .share-item:hover:not(:disabled) {
     background: var(--bg);
     color: var(--accent);
+  }
+  .share-item:disabled {
+    opacity: 0.55;
+    cursor: default;
+    color: var(--text-dim);
   }
   .share-msg {
     font-size: 0.72rem;

@@ -170,15 +170,15 @@
               <span class="title-text">{displayTitle}</span>
             </span>
           </div>
-          <div class="dj-row">
-            <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
-              <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-              {displayName(dj, profile)}
-            </a>
-          </div>
         </div>
         <div class="meta-foot">
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
+        </div>
+        <div class="dj-row">
+          <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
+            <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
+            {displayName(dj, profile)}
+          </a>
         </div>
       {:else}
         <div class="idle">

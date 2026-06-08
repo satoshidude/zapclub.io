@@ -230,7 +230,13 @@
          pointer-events:none so the full-area shield button underneath catches the tap. -->
     {#if needsSoundTap}
       <div class="sound-tap" aria-hidden="true">
-        <span class="sound-pill">🔊</span>
+        <span class="sound-pill">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none" />
+            <path d="M16 8.8a4.5 4.5 0 0 1 0 6.4" />
+            <path d="M18.7 6a8 8 0 0 1 0 12" />
+          </svg>
+        </span>
       </div>
     {/if}
 
@@ -322,25 +328,22 @@
   .sound-pill {
     display: grid;
     place-items: center;
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
     border-radius: 999px;
-    font-size: 1.15rem;
     line-height: 1;
-    color: #fff;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.35);
-    backdrop-filter: blur(2px);
+    color: #0b0a10;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 0 rgba(255, 255, 255, 0.5);
     animation: sound-pulse 2.2s ease-in-out infinite;
   }
   @keyframes sound-pulse {
     0%,
     100% {
-      box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.3);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 0 rgba(255, 255, 255, 0.55);
     }
     50% {
-      box-shadow: 0 0 0 7px rgba(255, 255, 255, 0);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 8px rgba(255, 255, 255, 0);
     }
   }
   @media (prefers-reduced-motion: reduce) {
