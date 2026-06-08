@@ -1,5 +1,8 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
+  import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
+  import { goUser } from '../../router.svelte'
+  import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { enrichMyTrackTitle } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -105,6 +108,8 @@
     ro.observe(el)
     return () => ro.disconnect()
   })
+  const dj = $derived(np?.dj ?? '')
+  const profile = $derived(dj ? useProfile(dj) : null)
   const pos = $derived.by(() => {
     void nowMs // re-evaluate on tick
     return np ? targetPosition() : 0
@@ -128,6 +133,18 @@
 </script>
 
 <div class="np card" class:zoomed>
+  {#if np}
+    <div class="np-head">
+      <ZapButton club={clubId} />
+      <button
+        class="like"
+        class:on={liked}
+        onclick={toggleLike}
+        disabled={!auth.canSign}
+        title={liked ? 'Liked — tap to remove' : 'Like this track'}
+      >🔥</button>
+    </div>
+  {/if}
   <div class="np-main">
     <div class="video">
       <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
@@ -153,19 +170,15 @@
               <span class="title-text">{displayTitle}</span>
             </span>
           </div>
+          <div class="dj-row">
+            <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
+              <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
+              {displayName(dj, profile)}
+            </a>
+          </div>
         </div>
         <div class="meta-foot">
           <div class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</div>
-        </div>
-        <div class="actions">
-          <ZapButton club={clubId} showDj />
-          <button
-            class="like"
-            class:on={liked}
-            onclick={toggleLike}
-            disabled={!auth.canSign}
-            title={liked ? 'Liked — tap to remove' : 'Like this track'}
-          >🔥</button>
         </div>
       {:else}
         <div class="idle">
@@ -188,6 +201,14 @@
     background: transparent;
     border: none;
     padding: 0;
+  }
+  /* Actions top-right of the block: zap (left) + like (right). */
+  .np-head {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
   }
   .np-main {
     display: flex;
@@ -259,12 +280,31 @@
     gap: 0.5rem;
     margin-top: 0.35rem;
   }
-  /* Zap (with DJ) + like, on their own row UNDER the time. */
-  .actions {
+  .dj-row {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.4rem;
+    margin-top: 0.2rem;
+  }
+  .dj {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .dj:hover {
+    color: var(--accent-2);
+  }
+  .avatar {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
   }
   .title {
     flex: 1;
