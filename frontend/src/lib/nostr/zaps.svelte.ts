@@ -31,6 +31,30 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+// A guest (no signer) zaps anonymously. We sign the 9734 with a STABLE per-browser ephemeral
+// key persisted here — so a guest's repeat zaps share ONE anonymous identity instead of a fresh
+// random npub every time (which cluttered recipients' "received" lists). It's a throwaway,
+// non-user key by design; storing it in localStorage is fine.
+const GUEST_KEY_LS = 'zapclub:guestZapKey'
+let guestSk: Uint8Array | null = null
+function guestZapKey(): Uint8Array {
+  if (guestSk) return guestSk
+  try {
+    const stored = localStorage.getItem(GUEST_KEY_LS)
+    const arr = stored ? (JSON.parse(stored) as number[]) : null
+    if (Array.isArray(arr) && arr.length === 32) return (guestSk = Uint8Array.from(arr))
+  } catch {
+    /* ignore — fall through to a fresh key */
+  }
+  guestSk = generateSecretKey()
+  try {
+    localStorage.setItem(GUEST_KEY_LS, JSON.stringify(Array.from(guestSk)))
+  } catch {
+    /* ignore */
+  }
+  return guestSk
+}
+
 interface LnurlPay {
   callback: string
   allowsNostr?: boolean
@@ -109,18 +133,15 @@ export async function requestZapInvoice(
   url.searchParams.set('amount', String(msats))
   // recipientPubkey === '' → a plain LNURL payment (e.g. a donation), no zap request.
   if (data.allowsNostr && recipientPubkey) {
-    const req = {
-      kind: 9734,
-      created_at: nowSec(),
-      tags: [
-        ['relays', ...ZAP_RELAYS],
-        ['amount', String(msats)],
-        ['p', recipientPubkey],
-      ],
-      content: comment || '',
-    }
-    // Logged-in → sign with the user's key; guest → anonymous zap with an ephemeral key.
-    const zr = auth.canSign ? await signEvent(req) : finalizeEvent(req, generateSecretKey())
+    const tags: string[][] = [
+      ['relays', ...ZAP_RELAYS],
+      ['amount', String(msats)],
+      ['p', recipientPubkey],
+    ]
+    if (!auth.canSign) tags.push(['anon']) // mark a guest zap anonymous → shown as "Anonymous"
+    const req = { kind: 9734, created_at: nowSec(), tags, content: comment || '' }
+    // Logged-in → sign with the user's key; guest → the stable per-browser anonymous key.
+    const zr = auth.canSign ? await signEvent(req) : finalizeEvent(req, guestZapKey())
     url.searchParams.set('nostr', JSON.stringify(zr))
   } else if (comment) {
     url.searchParams.set('comment', comment.slice(0, 120))
@@ -225,7 +246,9 @@ export async function pollPaid(verifyUrl: string, stillOpen: () => boolean): Pro
 
 // Parses a 9735 zap receipt to {recipient, sender, sats}, verifying the embedded 9734
 // request. sender = the zap-request author (the person who zapped).
-function parseReceiptDetail(ev: Event): { recipient: string; sender: string; sats: number } | null {
+function parseReceiptDetail(
+  ev: Event,
+): { recipient: string; sender: string; sats: number; anon: boolean } | null {
   const recipient = ev.tags.find((t) => t[0] === 'p')?.[1]
   const desc = ev.tags.find((t) => t[0] === 'description')?.[1]
   if (!recipient || !desc) return null
@@ -240,7 +263,8 @@ function parseReceiptDetail(ev: Event): { recipient: string; sender: string; sat
   const amountTag = req.tags.find((t) => t[0] === 'amount')?.[1]
   const sats = amountTag ? Math.round(Number(amountTag) / 1000) : 0
   if (!sats || sats <= 0) return null
-  return { recipient, sender: req.pubkey, sats }
+  const anon = req.tags.some((t) => t[0] === 'anon')
+  return { recipient, sender: req.pubkey, sats, anon }
 }
 
 function parseReceipt(ev: Event): { dj: string; sats: number } | null {
@@ -251,8 +275,13 @@ function parseReceipt(ev: Event): { dj: string; sats: number } | null {
 export interface ReceivedZaps {
   total: number
   count: number
-  bySender: { sender: string; sats: number; count: number }[]
+  /** Senders, sats-desc. Anonymous (guest) zaps are collapsed into one entry (sender='__anon__',
+   *  anon=true) so they show as a single "Anonymous" row instead of many throwaway npubs. */
+  bySender: { sender: string; sats: number; count: number; anon: boolean }[]
 }
+
+/** Bucket key under which all anonymous (guest) zaps aggregate. */
+const ANON_BUCKET = '__anon__'
 
 /** Aggregates all zaps a user has RECEIVED (9735 with #p = pubkey), grouped by sender. */
 export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
@@ -261,7 +290,7 @@ export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
     { kinds: [KIND_ZAP_RECEIPT], '#p': [pubkey] },
     { maxWait: 5000 },
   )
-  const map = new Map<string, { sats: number; count: number }>()
+  const map = new Map<string, { sats: number; count: number; anon: boolean }>()
   let total = 0
   let count = 0
   const dedup = new Set<string>()
@@ -272,10 +301,11 @@ export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
     if (!d || d.recipient !== pubkey) continue
     total += d.sats
     count++
-    const cur = map.get(d.sender) ?? { sats: 0, count: 0 }
+    const key = d.anon ? ANON_BUCKET : d.sender // all anonymous zaps collapse into one row
+    const cur = map.get(key) ?? { sats: 0, count: 0, anon: d.anon }
     cur.sats += d.sats
     cur.count++
-    map.set(d.sender, cur)
+    map.set(key, cur)
   }
   const bySender = [...map.entries()]
     .map(([sender, v]) => ({ sender, ...v }))

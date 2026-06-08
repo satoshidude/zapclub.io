@@ -305,13 +305,22 @@
       {/if}
       <ul class="senders">
         {#each received.bySender.slice(0, 12) as s (s.sender)}
-          {@const sp = useProfile(s.sender)}
-          <li>
-            <img class="av" src={avatarUrl(s.sender, sp)} alt="" width="22" height="22" />
-            <a class="who" href={`/user/${npubEncode(s.sender)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(s.sender)) }}>{displayName(s.sender, sp)}</a>
-            <span class="s-sats">{s.sats.toLocaleString()} sats</span>
-            <span class="s-count">{s.count}×</span>
-          </li>
+          {#if s.anon}
+            <li>
+              <span class="av anon-av" aria-hidden="true">⚡</span>
+              <span class="who anon">Anonymous</span>
+              <span class="s-sats">{s.sats.toLocaleString()} sats</span>
+              <span class="s-count">{s.count}×</span>
+            </li>
+          {:else}
+            {@const sp = useProfile(s.sender)}
+            <li>
+              <img class="av" src={avatarUrl(s.sender, sp)} alt="" width="22" height="22" />
+              <a class="who" href={`/user/${npubEncode(s.sender)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(s.sender)) }}>{displayName(s.sender, sp)}</a>
+              <span class="s-sats">{s.sats.toLocaleString()} sats</span>
+              <span class="s-count">{s.count}×</span>
+            </li>
+          {/if}
         {/each}
       </ul>
     </section>
@@ -682,6 +691,19 @@
   }
   .senders .who:hover {
     color: var(--accent-2);
+  }
+  /* Anonymous (guest) zaps: a neutral bolt avatar + dimmed label, no profile link. */
+  .senders .anon-av {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    font-size: 0.78rem;
+    border: 1px solid var(--border);
+  }
+  .senders .who.anon {
+    color: var(--text-dim);
+    font-style: italic;
   }
   .s-sats {
     color: var(--amber);
