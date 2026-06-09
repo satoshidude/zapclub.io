@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { router, goHome, goAbout } from './lib/router.svelte'
+  import { router, goHome, goAbout, goHowto, goAdmin } from './lib/router.svelte'
+  import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
   import LoginDialog from './lib/components/LoginDialog.svelte'
   import ClubList from './lib/components/ClubList.svelte'
   import ClubView from './lib/components/ClubView.svelte'
-  import Nav from './lib/components/Nav.svelte'
   import Turntable from './lib/components/Turntable.svelte'
   import UserProfile from './lib/components/UserProfile.svelte'
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
@@ -53,8 +53,13 @@
     <Turntable size={32} />
     <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
-  <Nav />
-  <div class="account"><LoginButton /></div>
+  <div class="top-actions">
+    <button class="icon-btn" onclick={goHowto} title="How it works" aria-label="How it works">?</button>
+    {#if isSuperadmin()}
+      <button class="icon-btn" onclick={goAdmin} title="Admin" aria-label="Admin">⚙️</button>
+    {/if}
+    <LoginButton />
+  </div>
 </header>
 
 {#if connection.known && !connection.clubConnected}
@@ -90,8 +95,6 @@
   <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 
-<Nav mobile />
-
 <MiniPlayer />
 <LoginDialog />
 <PayModal />
@@ -111,6 +114,30 @@
     background: rgba(7, 7, 10, 0.8);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border);
+  }
+  .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .icon-btn:hover {
+    border-color: var(--accent-2);
+    color: var(--text);
   }
   .brand {
     display: flex;
