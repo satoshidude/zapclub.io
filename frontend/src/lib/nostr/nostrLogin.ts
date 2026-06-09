@@ -15,7 +15,7 @@ import { fetchProfile } from './pool'
 import { goHome } from '../router.svelte'
 import { openLoginDialog, closeLoginDialog } from './loginDialog.svelte'
 import { resetSync } from './sync.svelte'
-import { resetStage } from './stage.svelte'
+import { resetStage, leaveStage } from './stage.svelte'
 import { resetQueues } from './queue.svelte'
 import { resetChat } from './chat.svelte'
 import { resetPlaylists } from './playlists.svelte'
@@ -266,6 +266,10 @@ export async function logout(): Promise<void> {
   // Mark a real, user-triggered logout → active$ undefined counts.
   intentionalLogout = true
   clearLite()
+  // Step off the stage WHILE the signer is still alive: removeAccount tears the signer down,
+  // after which resetStage's best-effort `off` can't sign — the DJ would stay stuck on stage
+  // for the full ~1h sticky window. Bounded so a hung NIP-46 bunker can't block logout.
+  await withTimeout(leaveStage(), 3000, 'logout: leave stage').catch(() => {})
   const acc = manager.active
   if (acc) manager.removeAccount(acc) // active$ → setLoggedOut + resetSession
   else {
