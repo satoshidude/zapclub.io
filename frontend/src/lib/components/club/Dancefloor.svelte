@@ -82,9 +82,19 @@
   // Energy: recent chat + emotes + a zap make the floor a touch faster.
   const hyped = $derived(Object.keys(bubbleByPubkey).length + emotes.items.length + (zapped ? 2 : 0) >= 4)
 
-  const EMOJIS = ['🔥', '🙌', '💜', '🕺', '👏']
-  function emit(e: string) {
-    if (groupId) void sendEmote(groupId, e)
+  // Send an ASCII shortcode (not the raw emoji): some signers/extensions choke on signing
+  // multi-byte unicode content, so we sign a stable code and render the emoji client-side.
+  const EMOTES = [
+    { e: '🔥', c: 'fire' },
+    { e: '🙌', c: 'raise' },
+    { e: '💜', c: 'love' },
+    { e: '🕺', c: 'dance' },
+    { e: '👏', c: 'clap' },
+  ]
+  const CODE2EMOJI: Record<string, string> = { fire: '🔥', raise: '🙌', love: '💜', dance: '🕺', clap: '👏' }
+  const showEmote = (content: string) => CODE2EMOJI[content] ?? content // fallback: raw emoji from other clients
+  function emit(code: string) {
+    if (groupId) void sendEmote(groupId, code)
   }
   // Deterministic horizontal lane (10–90%) for a flying emote, from its id.
   const emoteX = (id: string) => (hash(id) % 80) + 10
@@ -160,7 +170,7 @@
       <!-- Flying emotes rise over the floor (ephemeral floor reactions). -->
       <div class="emote-layer" aria-hidden="true">
         {#each emotes.items as e (e.id)}
-          <span class="fly" style={`left:${emoteX(e.id)}%`}>{e.emoji}</span>
+          <span class="fly" style={`left:${emoteX(e.id)}%`}>{showEmote(e.emoji)}</span>
         {/each}
       </div>
     </div>
@@ -168,8 +178,8 @@
 
   {#if canChat}
     <div class="emote-bar">
-      {#each EMOJIS as e (e)}
-        <button class="emo" onclick={() => emit(e)} title="Send to the floor">{e}</button>
+      {#each EMOTES as em (em.c)}
+        <button class="emo" onclick={() => emit(em.c)} title="Send to the floor">{em.e}</button>
       {/each}
     </div>
   {/if}
