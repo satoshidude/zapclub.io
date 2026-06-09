@@ -460,37 +460,37 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
-	// Otherwise: heartbeat on cadence (republish frozen track, pos re-anchored).
+	// Otherwise: heartbeat on cadence (republish the frozen track — pos is a stable token).
 	if now-pb.lastBeat >= condHeartbeatMS {
-		pb.pos = reanchoredPos(djPks, pb.dj, pb.pos, pb.videoID, queueIDsFn(queues))
 		c.publishNowPlaying(ctx, club, pb, now)
 	}
 }
 
-// advance picks the next playable track (scan-from-top, round-robin) and starts it. The next
-// track is position 1 of each DJ's queue (their first ACTIVE/not-`off` track), so a drag-and-drop
-// reorder takes effect immediately. The visible queue is the only truth — a played track is
-// `off` (client-marked) and drops out; truly nothing playable → lobby (stop). No hidden played-set.
+// advance picks the next playable track (fair round-robin) and starts it. The DJs take turns
+// starting after the one who just played; each offers its TOP ACTIVE (not-`off`) track — its
+// position 1 — so the interleave alternates fairly per DJ and a drag-and-drop reorder takes
+// effect immediately. The visible queue is the only truth — a played track is `off` (client-
+// marked) and drops out; truly nothing playable → lobby (stop). No hidden played-set. `pos` is
+// an opaque monotonic token per started track (skip-request matching + now_playing/play-log).
 func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) {
 	if len(djPks) == 0 {
 		c.stop(pb)
 		return
 	}
-	next := firstPlayablePos(len(djPks), c.matrix(djPks, queues, pb))
-	if next == -1 {
+	di, ti := fairNext(djPks, pb.dj, c.matrix(djPks, queues, pb))
+	if di == -1 {
 		// Every DJ's queue is fully played-off (or empty) → stop to the lobby. No auto-loop: a set
 		// plays through once, then the lobby runs until a DJ adds / re-activates tracks.
 		c.stop(pb)
 		return
 	}
-	di, ti := posToSlot(next, len(djPks))
 	tracks := queues[djPks[di]]
 	if ti >= len(tracks) {
 		c.stop(pb)
 		return
 	}
 	t := tracks[ti]
-	pb.pos = next
+	pb.pos++
 	pb.dj = djPks[di]
 	pb.videoID = t.videoID
 	pb.title = t.title
@@ -558,17 +558,6 @@ func (c *conductor) stop(pb *condClub) {
 	pb.playing = false
 	pb.videoID = ""
 	pb.dj = ""
-}
-
-func queueIDsFn(queues map[string][]condTrack) func(string) []string {
-	return func(dj string) []string {
-		tracks := queues[dj]
-		ids := make([]string, len(tracks))
-		for i, t := range tracks {
-			ids[i] = t.videoID
-		}
-		return ids
-	}
 }
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───

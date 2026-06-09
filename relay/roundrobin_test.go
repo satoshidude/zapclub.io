@@ -1,9 +1,6 @@
 package main
 
-import (
-	"reflect"
-	"testing"
-)
+import "testing"
 
 // allActive builds a playable matrix with every track active.
 func allActive(counts ...int) [][]bool {
@@ -18,128 +15,110 @@ func allActive(counts ...int) [][]bool {
 	return m
 }
 
-func TestPosToSlot(t *testing.T) {
-	cases := []struct{ pos, n, di, ti int }{
-		{0, 2, 0, 0}, {1, 2, 1, 0}, {2, 2, 0, 1}, {3, 2, 1, 1},
-		{18, 2, 0, 9}, // the diskbuster repro pos
-		{7, 1, 0, 7},  // single DJ: pos == trackIndex
-	}
-	for _, c := range cases {
-		di, ti := posToSlot(c.pos, c.n)
-		if di != c.di || ti != c.ti {
-			t.Errorf("posToSlot(%d,%d)=(%d,%d) want (%d,%d)", c.pos, c.n, di, ti, c.di, c.ti)
+// walk drives fairNext like the conductor does: pick a slot, mark it `off` (played), repeat —
+// collecting the order of (djIndex, trackIndex) slots until nothing is playable.
+func walk(djs []string, playable [][]bool, max int) [][2]int {
+	var out [][2]int
+	last := ""
+	for len(out) < max {
+		di, ti := fairNext(djs, last, playable)
+		if di == -1 {
+			break
 		}
+		out = append(out, [2]int{di, ti})
+		playable[di][ti] = false // played → off, drops out (visible queue is the only truth)
+		last = djs[di]
+	}
+	return out
+}
+
+func TestFairNextSingleDJ(t *testing.T) {
+	djs := []string{"A"}
+	// played(off) at the top skipped — next is first active below: [off, t1, t2]
+	p := [][]bool{{false, true, true}}
+	di, ti := fairNext(djs, "", p)
+	if di != 0 || ti != 1 {
+		t.Errorf("single-dj skip-off: got (%d,%d) want (0,1)", di, ti)
+	}
+	// full top-down walk for one DJ.
+	got := walk(djs, allActive(3), 9)
+	want := [][2]int{{0, 0}, {0, 1}, {0, 2}}
+	if !equalSlots(got, want) {
+		t.Errorf("single-dj walk: got %v want %v", got, want)
 	}
 }
 
-func TestNextPlayablePos(t *testing.T) {
-	p := allActive(3, 3)
-	if got := nextPlayablePos(-1, 2, p); got != 0 {
-		t.Errorf("interleave start: got %d want 0", got)
-	}
-	if got := nextPlayablePos(0, 2, p); got != 1 {
-		t.Errorf("interleave: got %d want 1", got)
-	}
-	if got := nextPlayablePos(1, 2, p); got != 2 {
-		t.Errorf("interleave: got %d want 2", got)
-	}
-
-	// dj0 has 3 tracks, dj1 has 1 → shorter queue skipped.
-	short := allActive(3, 1)
-	if got := nextPlayablePos(1, 2, short); got != 2 {
-		t.Errorf("short queue: got %d want 2", got)
-	}
-	if got := nextPlayablePos(2, 2, short); got != 4 {
-		t.Errorf("short queue: got %d want 4", got)
-	}
-	if got := nextPlayablePos(4, 2, short); got != -1 {
-		t.Errorf("short queue end: got %d want -1", got)
-	}
-
-	// played (off) track skipped without shifting neighbours: [t0, OFF, t2]
-	off := [][]bool{{true, false, true}}
-	if got := nextPlayablePos(0, 1, off); got != 2 {
-		t.Errorf("skip off: got %d want 2", got)
-	}
-
-	if got := nextPlayablePos(-1, 2, [][]bool{{false}, {false}}); got != -1 {
-		t.Errorf("nothing playable: got %d want -1", got)
-	}
-	if got := nextPlayablePos(-1, 0, nil); got != -1 {
-		t.Errorf("no djs: got %d want -1", got)
-	}
-}
-
-func TestFirstPlayablePos(t *testing.T) {
-	if got := firstPlayablePos(2, allActive(2, 2)); got != 0 {
-		t.Errorf("got %d want 0", got)
-	}
-	// dj0.t0 off, dj1.t0 active → first playable is pos 1
-	if got := firstPlayablePos(2, [][]bool{{false, true}, {true}}); got != 1 {
-		t.Errorf("got %d want 1", got)
-	}
-	if got := firstPlayablePos(0, nil); got != -1 {
-		t.Errorf("empty stage: got %d want -1", got)
-	}
-	// played(off) at the top skipped — next is first active below.
-	p := [][]bool{{false, false, true}, {false, true}}
-	if got := firstPlayablePos(2, p); got != 3 {
-		t.Errorf("scan-from-top: got %d want 3", got)
-	}
-	// running track masked → topmost OTHER active track.
-	masked := [][]bool{{false, true}, {true, true}}
-	if got := firstPlayablePos(2, masked); got != 1 {
-		t.Errorf("masked running: got %d want 1", got)
-	}
-}
-
-func TestReanchoredPos(t *testing.T) {
-	q := func(ids []string) func(string) []string {
-		return func(dj string) []string {
-			if dj == "A" {
-				return ids
-			}
-			return nil
-		}
-	}
-	if got := reanchoredPos([]string{"A"}, "A", 2, "c", q([]string{"a", "b", "c", "d"})); got != 2 {
-		t.Errorf("still aligned: got %d want 2", got)
-	}
-	if got := reanchoredPos([]string{"A"}, "A", 2, "c", q([]string{"c", "a", "b", "d"})); got != 0 {
-		t.Errorf("reordered to top: got %d want 0", got)
-	}
-	// two DJs: pos = djIndex(0) + newIdx(3)*n(2) = 6
-	qids := func(dj string) []string {
-		if dj == "A" {
-			return []string{"a", "b", "c", "x"}
-		}
-		return []string{"p", "q"}
-	}
-	if got := reanchoredPos([]string{"A", "B"}, "A", 0, "x", qids); got != 6 {
-		t.Errorf("two-dj interleave: got %d want 6", got)
-	}
-	if got := reanchoredPos([]string{"A"}, "A", 2, "gone", q([]string{"a", "b", "c"})); got != 2 {
-		t.Errorf("track removed: got %d want 2", got)
-	}
-	if got := reanchoredPos(nil, "A", 5, "x", q([]string{"x"})); got != 5 {
-		t.Errorf("empty stage: got %d want 5", got)
-	}
-	if got := reanchoredPos([]string{"B"}, "A", 5, "x", q([]string{"x"})); got != 5 {
-		t.Errorf("off-stage dj: got %d want 5", got)
-	}
-}
-
-func TestFullWalk(t *testing.T) {
-	p := allActive(2, 2)
-	var visited [][2]int
-	pos := firstPlayablePos(2, p)
-	for pos >= 0 && len(visited) < 4 {
-		di, ti := posToSlot(pos, 2)
-		visited = append(visited, [2]int{di, ti})
-		pos = nextPlayablePos(pos, 2, p)
-	}
+func TestFairNextInterleave(t *testing.T) {
+	djs := []string{"A", "B"}
+	got := walk(djs, allActive(2, 2), 9)
 	want := [][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
-	if !reflect.DeepEqual(visited, want) {
-		t.Errorf("walk: got %v want %v", visited, want)
+	if !equalSlots(got, want) {
+		t.Errorf("interleave: got %v want %v", got, want)
 	}
+}
+
+// The fairness bug: DJ0's off tracks sit at the TOP, DJ1's at the bottom. The rotation must still
+// alternate by each DJ's k-th PLAYABLE track, not by absolute queue index.
+func TestFairNextSkewedOffPositions(t *testing.T) {
+	djs := []string{"A", "B"}
+	// A active at indices 5,6,7 (top 5 off); B active at indices 0,1,2 (bottom off).
+	p := [][]bool{
+		{false, false, false, false, false, true, true, true},
+		{true, true, true, false, false, false, false, false},
+	}
+	got := walk(djs, p, 9)
+	// Fair: A.idx5, B.idx0, A.idx6, B.idx1, A.idx7, B.idx2 — strict alternation.
+	want := [][2]int{{0, 5}, {1, 0}, {0, 6}, {1, 1}, {0, 7}, {1, 2}}
+	if !equalSlots(got, want) {
+		t.Errorf("skewed off positions: got %v want %v", got, want)
+	}
+}
+
+func TestFairNextRotatesAfterLastDJ(t *testing.T) {
+	djs := []string{"A", "B", "C"}
+	p := allActive(2, 2, 2)
+	// Just played A → next is B (the one after A in the rotation).
+	if di, _ := fairNext(djs, "A", p); di != 1 {
+		t.Errorf("after A: got dj %d want 1 (B)", di)
+	}
+	// Just played C (last) → wraps to A.
+	if di, _ := fairNext(djs, "C", p); di != 0 {
+		t.Errorf("after C: got dj %d want 0 (A)", di)
+	}
+	// lastDJ not on stage → start at dj0.
+	if di, _ := fairNext(djs, "Z", p); di != 0 {
+		t.Errorf("unknown lastDJ: got dj %d want 0", di)
+	}
+}
+
+func TestFairNextSkipsDryDJs(t *testing.T) {
+	djs := []string{"A", "B", "C"}
+	// B has nothing playable → rotation skips it: A, C, A, C, …
+	p := [][]bool{{true, true}, {false}, {true, true}}
+	got := walk(djs, p, 9)
+	want := [][2]int{{0, 0}, {2, 0}, {0, 1}, {2, 1}}
+	if !equalSlots(got, want) {
+		t.Errorf("skip dry dj: got %v want %v", got, want)
+	}
+}
+
+func TestFairNextNothingPlayable(t *testing.T) {
+	if di, ti := fairNext([]string{"A", "B"}, "", [][]bool{{false}, {false}}); di != -1 || ti != -1 {
+		t.Errorf("nothing playable: got (%d,%d) want (-1,-1)", di, ti)
+	}
+	if di, _ := fairNext(nil, "", nil); di != -1 {
+		t.Errorf("no djs: got %d want -1", di)
+	}
+}
+
+func equalSlots(a, b [][2]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

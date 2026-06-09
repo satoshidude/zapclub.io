@@ -1,70 +1,55 @@
-// Pure round-robin logic (no Nostr/state) — easy to test.
+// Pure fair round-robin scheduling (no Nostr/state) — a mirror of relay/roundrobin.go (fairNext),
+// used only for the client's read-only "Up next" preview. The relay is the authority.
 //
-// Stage DJs in stable order [dj0..dj(n-1)], each with a queue. The global flow is a
-// running position `pos`:
-//   djIndex    = pos mod n
-//   trackIndex = floor(pos / n)
-// → dj0.t0, dj1.t0, …, dj(n-1).t0, dj0.t1, …  (round-robin).
-// Positions whose DJ has no track at `trackIndex` are skipped.
+// DJs take turns starting AFTER the currently-playing DJ; each contributes its TOP playable track
+// (first ACTIVE, not the currently-playing one). So the interleave alternates fairly by the k-th
+// PLAYABLE track of each DJ — never by absolute queue index — regardless of where each DJ's `off`
+// tracks sit. The visible queue is the single source of truth: a played track is `off` and drops
+// out, a reorder changes the top, a re-activated track returns. No hidden played-set.
 
 export interface Slot {
   djIndex: number
   trackIndex: number
 }
 
-export function posToSlot(pos: number, djCount: number): Slot {
-  return { djIndex: pos % djCount, trackIndex: Math.floor(pos / djCount) }
-}
-
 /**
- * Next playable position after `fromPos` (exclusive), or -1 if none.
- * `playable[i][j]` = true when DJ i has an ACTIVE (not yet played) track at index j.
- * Skips empty/exhausted queues AND played tracks (index unshifted → no skipping of
- * neighbouring tracks).
+ * The next `count` tracks the round-robin will play, as (djIndex, trackIndex) slots.
+ * `playable[i][j]` = true when DJ i's track j is ACTIVE (not `off`) and not the currently-playing
+ * one. `lastDjIndex` = index of the currently-playing DJ (or -1 to start from dj0). Looks ahead by
+ * simulating consumption (a picked track won't be picked again), so each DJ contributes its next
+ * active track each round — exactly the order the relay's repeated `advance` produces. Stops early
+ * when nothing is left.
  */
-export function nextPlayablePos(
-  fromPos: number,
+export function fairSequence(
   djCount: number,
   playable: boolean[][],
-): number {
-  if (djCount === 0) return -1
-  const maxLen = playable.length ? Math.max(0, ...playable.map((a) => a.length)) : 0
-  const maxPos = maxLen * djCount // upper bound: all tracks once through
-  for (let pos = fromPos + 1; pos < maxPos; pos++) {
-    const { djIndex, trackIndex } = posToSlot(pos, djCount)
-    if (playable[djIndex]?.[trackIndex]) return pos
+  lastDjIndex: number,
+  count: number,
+): Slot[] {
+  const out: Slot[] = []
+  if (djCount === 0) return out
+  const consumed = playable.map((row) => row.map(() => false))
+  let last = lastDjIndex
+  for (let k = 0; k < count; k++) {
+    let picked = -1
+    let pickedTi = -1
+    const start = last + 1 // -1 (none playing) → start at dj0
+    for (let o = 0; o < djCount; o++) {
+      const di = (((start + o) % djCount) + djCount) % djCount
+      const row = playable[di] ?? []
+      for (let ti = 0; ti < row.length; ti++) {
+        if (row[ti] && !consumed[di][ti]) {
+          picked = di
+          pickedTi = ti
+          break
+        }
+      }
+      if (picked >= 0) break
+    }
+    if (picked < 0) break
+    consumed[picked][pickedTi] = true
+    out.push({ djIndex: picked, trackIndex: pickedTi })
+    last = picked
   }
-  return -1
-}
-
-/** First playable position (start), or -1. */
-export function firstPlayablePos(djCount: number, playable: boolean[][]): number {
-  return nextPlayablePos(-1, djCount, playable)
-}
-
-/**
- * Re-anchors `pos` to the index the CURRENTLY-PLAYING track now sits at in its DJ's queue.
- * The round-robin is positional, so when a DJ reorders, the playing track may move to a
- * different index; without re-anchoring the next advance would follow stale positions (a
- * track moved before the play head would be skipped until a wrap). Returns the corrected
- * pos — or the original if already aligned, the stage is empty, the DJ isn't on stage, or
- * the playing track is no longer in the queue. `queueVideoIds(dj)` returns that DJ's track
- * ids in order. Pure.
- */
-export function reanchoredPos(
-  djs: string[],
-  dj: string,
-  pos: number,
-  videoId: string,
-  queueVideoIds: (dj: string) => string[],
-): number {
-  const n = djs.length
-  const djIndex = djs.indexOf(dj)
-  if (n === 0 || djIndex < 0) return pos
-  const { trackIndex } = posToSlot(pos, n)
-  const ids = queueVideoIds(dj)
-  if (ids[trackIndex] === videoId) return pos // still aligned — nothing to do
-  const newIdx = ids.indexOf(videoId)
-  if (newIdx < 0) return pos // playing track gone from queue → let advance() handle it
-  return djIndex + newIdx * n
+  return out
 }

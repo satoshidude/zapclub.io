@@ -3,7 +3,7 @@ import { KIND_SKIP, publishClub, reportBrokenTrack } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
-import { posToSlot, nextPlayablePos } from './roundrobin'
+import { fairSequence } from './roundrobin'
 import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
@@ -106,23 +106,20 @@ function playableMatrix(djs: string[]): boolean[][] {
   )
 }
 
-/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans from the TOP — the
- *  first PLAYABLE (active, not-off) track per DJ, round-robin — exactly like the relay's `advance`
- *  (each DJ's position 1 is next, so a reorder is reflected immediately). Off tracks drop out. */
+/** Preview of the next round-robin tracks (across all DJs), max `max`. Fair rotation starting
+ *  after the currently-playing DJ — each DJ contributes its TOP PLAYABLE (active, not-off) track in
+ *  turn, exactly like the relay's repeated `advance` (so a reorder is reflected immediately and the
+ *  interleave alternates fairly per DJ regardless of where off tracks sit). Off tracks drop out. */
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
   const playable = playableMatrix(djs)
+  const lastDjIndex = djs.indexOf(state.np?.dj ?? '')
   const out: { dj: string; videoId: string; title: string }[] = []
-  let pos = -1
-  for (let i = 0; i < max; i++) {
-    const next = nextPlayablePos(pos, djs.length, playable)
-    if (next === -1) break
-    const { djIndex, trackIndex } = posToSlot(next, djs.length)
+  for (const { djIndex, trackIndex } of fairSequence(djs.length, playable, lastDjIndex, max)) {
     const dj = djs[djIndex]
     const track = queues.trackAt(dj, trackIndex)
     if (track) out.push({ dj, videoId: track.videoId, title: track.title })
-    pos = next
   }
   return out
 }
