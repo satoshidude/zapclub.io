@@ -272,7 +272,7 @@
   })
   const sharedRecently = $derived(sharedAt > 0 && Date.now() - sharedAt < SHARE_COOLDOWN_MS)
   const clubUrl = $derived(`${location.origin}/club/${groupId}`)
-  const shareText = $derived(`🎧 ${club?.name ?? 'A club'} on zapclub — collaborative, Nostr-native music.`)
+  const shareText = $derived(`🎧 ${club?.name ?? 'A club'} on zapclub.io — Decentralized social music streaming. Open a club that belongs to you · Share your playlists and zap your crew.`)
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   // Social share-intent links (open the network's own composer in a new tab — the user posts
   // there, we never post on their behalf). Not Nostr-only.
