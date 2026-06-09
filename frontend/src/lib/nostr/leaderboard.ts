@@ -14,6 +14,26 @@ export interface ZapRank {
   zappers: number // distinct people who zapped this user
 }
 
+export interface LeaderboardEntry {
+  pubkey: string
+  sats: number
+  zaps: number
+  zappers: number
+  rank: number
+}
+
+/** The public top-N ranking of DJs by sats received, plus the total number of ranked users. */
+export async function fetchLeaderboard(): Promise<{ total: number; top: LeaderboardEntry[] }> {
+  try {
+    const res = await fetch(`${LEADERBOARD_BASE}/leaderboard`)
+    if (!res.ok) return { total: 0, top: [] }
+    const j = (await res.json()) as { total?: number; top?: LeaderboardEntry[] }
+    return { total: j.total ?? 0, top: Array.isArray(j.top) ? j.top : [] }
+  } catch {
+    return { total: 0, top: [] }
+  }
+}
+
 /** A user's global zap placement + totals, or null if they're not on the board (no zaps yet). */
 export async function fetchZapRank(pubkey: string): Promise<ZapRank | null> {
   try {

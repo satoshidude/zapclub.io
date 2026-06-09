@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome, goAbout, goHowto, goAdmin } from './lib/router.svelte'
+  import { router, goHome, goAbout, goHowto, goAdmin, goLeaderboard } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import { accountWatch, startAccountWatch } from './lib/nostr/accountWatch.svelte'
@@ -13,6 +13,7 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
   import About from './lib/components/About.svelte'
+  import Leaderboard from './lib/components/Leaderboard.svelte'
   import MiniPlayer from './lib/components/MiniPlayer.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
@@ -63,6 +64,7 @@
     <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <div class="top-actions">
+    <button class="icon-btn" onclick={goLeaderboard} title="Zap leaderboard" aria-label="Zap leaderboard">🏆</button>
     <button class="icon-btn" onclick={goHowto} title="How it works" aria-label="How it works">?</button>
     {#if isSuperadmin()}
       <button class="icon-btn" onclick={goAdmin} title="Admin" aria-label="Admin">⚙️</button>
@@ -97,6 +99,8 @@
     <HowTo />
   {:else if router.route.name === 'about'}
     <About />
+  {:else if router.route.name === 'leaderboard'}
+    <Leaderboard />
   {:else}
     <ClubList />
   {/if}
@@ -107,7 +111,7 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <span class="foot-note"><button class="foot-link" onclick={goAbout}>How it works</button> · <a class="foot-link" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a> · Powered by Nostr &amp; Lightning · no tracking</span>
+  <span class="foot-note"><button class="foot-link" onclick={goLeaderboard}>Leaderboard</button> · <button class="foot-link" onclick={goAbout}>How it works</button> · <a class="foot-link" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a> · Powered by Nostr &amp; Lightning · no tracking</span>
   <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 
