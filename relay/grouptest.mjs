@@ -148,7 +148,7 @@ if (process.env.RELAY_PK) {
   // host steps on stage (30102) and posts a 2-track queue (30103). Long durations → only an
   // explicit skip advances during the test window.
   await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
-  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300']], content: '' })
+  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300'], ['track', 'yt:VIDthird0003', 'Third', '300']], content: '' })
   await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
   const npRows = (await host.query({ kinds: [30100], '#h': [C] })).filter((e) => e.pubkey === RPK)
   const npA = npRows[0]
@@ -163,19 +163,28 @@ if (process.env.RELAY_PK) {
   await sleep(4000)
   const npB = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
   const trackB = npB && npB.tags.find((t) => t[0] === 'track')?.[1]
+  const posB = (npB && npB.tags.find((t) => t[0] === 'pos')?.[1]) || '1'
   assert(!!npB && trackB !== firstTrack, 'conductor: advanced to the next track on a skip-request (30107)')
+  // Regression: a SECOND skip must advance FORWARD to the third track — not bounce back to the
+  // first. The DJ is "present" but never marks tracks `off`, so a from-top scan would re-pick
+  // track 0 and oscillate; forward round-robin progression must reach track 2.
+  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posB]], content: '' })
+  await sleep(4000)
+  const npC = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  const trackC = npC && npC.tags.find((t) => t[0] === 'track')?.[1]
+  const posC = (npC && npC.tags.find((t) => t[0] === 'pos')?.[1]) || '2'
+  assert(!!npC && trackC !== firstTrack && trackC !== trackB, 'conductor: a second skip advances forward (no oscillation back to track 1)')
   // role validation: a plain MEMBER (not owner/mod, not the playing DJ) cannot skip.
   await mem.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // mem joins C
   await sleep(800)
-  const posB = (npB && npB.tags.find((t) => t[0] === 'pos')?.[1]) || '1'
-  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posB]], content: '' })
+  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posC]], content: '' })
   await sleep(4000)
   const npD = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  assert(!!npD && npD.tags.find((t) => t[0] === 'track')?.[1] === trackB, 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
+  assert(!!npD && npD.tags.find((t) => t[0] === 'track')?.[1] === trackC, 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
   // broken-track quorum: 2 distinct members report the running track unplayable → relay skips it.
   await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // stranger joins C
   await sleep(800)
-  const curVid = (trackB || '').replace('yt:', '')
+  const curVid = (trackC || '').replace('yt:', '')
   await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
   await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
   await sleep(4000)
