@@ -82,9 +82,9 @@
     <p class="eyebrow">Collaborative · Decentralized · Rewarding</p>
     <h1 class="hero-title">Drop in. Take the stage.<br />Own the night.</h1>
     <p class="hero-sub">
-      zapclub is one turntable, shared. Cue your tracks, take the deck, pass it on — the room
+      zapclub is one turntable, shared. Fill your playlists, take the deck, pass it on. The room
       rides every transition with you. Drop in with a key, not an email. Tip the DJ in sats,
-      not likes. Just you, the records and the crowd.
+      not likes. Just you, playlists and the crowd.
     </p>
     <div class="chips">
       <span class="chip">🎛️ Pass the deck</span>
