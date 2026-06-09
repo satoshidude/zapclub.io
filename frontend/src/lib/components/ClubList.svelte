@@ -92,9 +92,7 @@
       <span class="chip">🔑 Key in, no signup</span>
       <span class="chip">👥 Crowd-owned</span>
     </div>
-    {#if auth.canSign}
-      <button class="btn btn-primary hero-cta" onclick={() => (showCreate = true)}>🎛️ Start a club</button>
-    {:else}
+    {#if !auth.canSign}
       <button class="btn btn-primary hero-cta" onclick={launchLogin}>⚡ Sign in to play</button>
     {/if}
   </header>
