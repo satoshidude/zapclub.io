@@ -9,6 +9,7 @@
   import { chat } from '../../nostr/chat.svelte'
   import { emotes, sendEmote } from '../../nostr/emotes.svelte'
   import { zaps } from '../../nostr/zaps.svelte'
+  import { stage } from '../../nostr/stage.svelte'
 
   let {
     groupId,
@@ -34,10 +35,14 @@
     ondelete?: (eventId: string) => void
   } = $props()
 
-  // Crowd = the club's members. Only ONLINE members (recent presence beat) dance; offline members
+  // DJs currently on stage — shown on the floor with a frame (even if their presence beat is a
+  // little stale; being on stage means they're here).
+  const stageSet = $derived(new Set(stage.djs.map((d) => d.pubkey)))
+
+  // Crowd = the club's members. ONLINE members (recent presence beat) OR stage DJs dance; the rest
   // are part of the club but shown dimmed + still ("here vs away").
-  const online = $derived(members.filter((m) => presence.isOnline(m.pubkey)))
-  const offline = $derived(members.filter((m) => !presence.isOnline(m.pubkey)))
+  const online = $derived(members.filter((m) => presence.isOnline(m.pubkey) || stageSet.has(m.pubkey)))
+  const offline = $derived(members.filter((m) => !presence.isOnline(m.pubkey) && !stageSet.has(m.pubkey)))
 
   const CAP = 48
   const shownOnline = $derived(online.slice(0, CAP))
@@ -152,6 +157,7 @@
         {@const profile = useProfile(m.pubkey)}
         <button
           class="dancer"
+          class:stage-dj={stageSet.has(m.pubkey)}
           class:dj={m.pubkey === currentDj}
           class:zapped={zapped === m.pubkey}
           style={danceVars(m.pubkey)}
@@ -360,6 +366,11 @@
   }
   .dancer .av {
     border: 2px solid transparent;
+  }
+  /* On-stage DJ: a frame. The currently-playing DJ (.dj) additionally glows. */
+  .dancer.stage-dj .av {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 40%, transparent);
   }
   .dancer.dj .av {
     border-color: var(--accent);

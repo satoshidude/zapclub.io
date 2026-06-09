@@ -2,6 +2,8 @@
   import { router, goHome, goAbout, goHowto, goAdmin } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
+  import { accountWatch, startAccountWatch } from './lib/nostr/accountWatch.svelte'
+  import { logout, launchLogin } from './lib/nostr/nostrLogin'
   import LoginButton from './lib/components/LoginButton.svelte'
   import LoginDialog from './lib/components/LoginDialog.svelte'
   import ClubList from './lib/components/ClubList.svelte'
@@ -19,6 +21,13 @@
   import { fetchClub } from './lib/nostr/groups'
 
   startConnectionWatch()
+  startAccountWatch()
+
+  // Extension switched to a different account than we're logged in as → re-login as it.
+  function reloginExtension() {
+    logout()
+    launchLogin()
+  }
 
   // Reload-resume: pick up the club whose audio was playing and keep it going in the
   // mini-player (unless we land straight back on that club's page, which has its own).
@@ -64,6 +73,13 @@
 
 {#if connection.known && !connection.clubConnected}
   <div class="reconnect">Reconnecting to the club relay…</div>
+{/if}
+
+{#if accountWatch.mismatch}
+  <div class="reconnect mismatch">
+    Your Nostr extension is on a different account — zapclub can't sign as the one you're logged in as.
+    <button class="relogin" onclick={reloginExtension}>Re-login</button>
+  </div>
 {/if}
 
 <main>
@@ -163,6 +179,27 @@
     text-align: center;
     font-size: 0.8rem;
     padding: 0.4rem;
+  }
+  .reconnect.mismatch {
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .relogin {
+    background: var(--bg-elev);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .relogin:hover {
+    background: var(--danger);
+    color: #fff;
   }
   .footer {
     display: flex;
