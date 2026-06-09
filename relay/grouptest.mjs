@@ -84,16 +84,15 @@ assert(noPow[0] === false && /pow/i.test(noPow[1] || ''), 'chat without PoW reje
 const yesPow = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'mined' })
 assert(yesPow[0] === true, 'chat with PoW accepted: ' + ok(yesPow))
 
-// 3. now_playing ReplaceEvent dedup — two writes, expect ONE row, the latest
-console.log('np write 1 ->', ok(await mem.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:AAA'], ['pos', '0']], content: 'Artist – Track One' })))
-await sleep(300)
-console.log('np write 2 ->', ok(await mem.ev({ kind: 30100, created_at: now() + 1, tags: [['h', G], ['d', G], ['track', 'yt:BBB'], ['pos', '1']], content: 'Artist – Track Two' })))
-await sleep(600)
-const npByH = await host.query({ kinds: [30100], '#h': [G] })
-console.log('  query #h returned', npByH.length, '| query #d returned', (await host.query({ kinds: [30100], '#d': [G] })).length)
-const np = npByH
-assert(np.length === 1, `now_playing dedup: exactly 1 row (got ${np.length})`)
-assert(np[0]?.content === 'Artist – Track Two', 'now_playing keeps the latest version')
+// 3. now_playing (30100) + play-log (1313) are relay-authored ONLY — even a MEMBER's write is
+//    rejected (the relay is the sole conductor). Guards against per-author tombstones. The
+//    ReplaceEvent dedup of the relay's OWN writes is asserted in the conductor section below.
+const memNp = await mem.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:AAA'], ['pos', '0']], content: 'member now_playing' })
+assert(memNp[0] === false && /relay-authored/.test(memNp[1] || ''), 'member now_playing (30100) write rejected: ' + ok(memNp))
+const memPlay = await mem.ev({ kind: 1313, created_at: now(), tags: [['h', G], ['p', mem.pub], ['pos', '0']], content: 'yt:AAA' })
+assert(memPlay[0] === false && /relay-authored/.test(memPlay[1] || ''), 'member play-log (1313) write rejected: ' + ok(memPlay))
+const npNone = await host.query({ kinds: [30100], '#h': [G] })
+assert(npNone.length === 0, `no now_playing stored from a member write (got ${npNone.length})`)
 
 // 4. non-member write is rejected
 const strangerWrite = await stranger.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:EVIL']], content: 'intruder' })
@@ -151,8 +150,11 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
   await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300']], content: '' })
   await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
-  const npA = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  const npRows = (await host.query({ kinds: [30100], '#h': [C] })).filter((e) => e.pubkey === RPK)
+  const npA = npRows[0]
   assert(!!npA, 'conductor: the RELAY published now_playing')
+  // ReplaceEvent dedup on the real path: heartbeats republish 30100, must stay exactly 1 row.
+  assert(npRows.length === 1, `conductor: now_playing dedup — exactly 1 relay row (got ${npRows.length})`)
   assert(!!npA && npA.tags.find((t) => t[0] === 'dj')?.[1] === host.pub, 'conductor: now_playing dj = the stage DJ')
   const firstTrack = npA && npA.tags.find((t) => t[0] === 'track')?.[1]
   const pos0 = (npA && npA.tags.find((t) => t[0] === 'pos')?.[1]) || '0'

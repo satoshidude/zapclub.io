@@ -65,6 +65,41 @@ func pruneOldPlays(db *badger.BadgerBackend, cutoffSec int64) int {
 	return total
 }
 
+// isForeignConductorWrite reports whether an event is a now_playing (30100) / play-log (1313)
+// write from anyone but the relay key. The relay is the sole conductor; clients must not author
+// these kinds.
+func isForeignConductorWrite(kind int, pubkey, relayPub string) bool {
+	return (kind == kindNowPlaying || kind == kindPlay) && pubkey != relayPub
+}
+
+// purgeForeignNowPlaying deletes any now_playing (30100) NOT authored by the relay key. These
+// can only be pre-migration tombstones from the old client-conductor model (clients no longer
+// write 30100, and the reject rule now blocks new ones). 30100 is addressable → at most one per
+// (author, club), so the total is tiny and a single query returns them all (no store-cap loop
+// needed, unlike the high-volume 1313 play-log — which has no foreign authors anyway). The reject
+// rule guards both 30100 and 1313 going forward. Idempotent: finds nothing on later boots.
+func purgeForeignNowPlaying(db *badger.BadgerBackend, relayPub string) int {
+	ctx := context.Background()
+	ch, err := db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindNowPlaying}})
+	if err != nil {
+		log.Printf("purge foreign now_playing query: %v", err)
+		return 0
+	}
+	var foreign []*nostr.Event
+	for ev := range ch {
+		if ev.PubKey != relayPub {
+			foreign = append(foreign, ev)
+		}
+	}
+	deleted := 0
+	for _, ev := range foreign {
+		if db.DeleteEvent(ctx, ev) == nil {
+			deleted++
+		}
+	}
+	return deleted
+}
+
 func main() {
 	domain := env("RELAY_DOMAIN", "relay.zapclub.io")
 	port := env("RELAY_PORT", "3334")
@@ -73,6 +108,13 @@ func main() {
 	sk := os.Getenv("RELAY_SECRET_KEY")
 	if sk == "" {
 		log.Fatal("RELAY_SECRET_KEY not set")
+	}
+	// The relay key is the conductor — the SOLE author of now_playing (30100) and the play-log
+	// (1313). Derive its pubkey once: used to reject foreign writes of those kinds and to purge
+	// any pre-existing foreign copies (see below).
+	relayPub, err := nostr.GetPublicKey(sk)
+	if err != nil {
+		log.Fatalf("derive relay pubkey: %v", err)
 	}
 
 	db := &badger.BadgerBackend{Path: dbPath}
@@ -136,6 +178,20 @@ func main() {
 		func(_ context.Context, evt *nostr.Event) (bool, string) {
 			if bans.isBanned(evt.PubKey) {
 				return true, "blocked: banned by the relay administrator"
+			}
+			return false, ""
+		},
+	)
+
+	// now_playing (30100) and the play-log (1313) are relay-authored ONLY — the relay is the
+	// conductor. The relay's own writes go straight to the store and bypass this chain
+	// (conductor.go), so this only blocks CLIENTS: a member writing 30100/1313 used to be stored-
+	// but-ignored (clients accept now_playing only from the relay key), leaving stale per-author
+	// tombstones in badger. Reject them outright.
+	relay.RejectEvent = append(relay.RejectEvent,
+		func(_ context.Context, evt *nostr.Event) (bool, string) {
+			if isForeignConductorWrite(evt.Kind, evt.PubKey, relayPub) {
+				return true, "blocked: now_playing/play-log are relay-authored"
 			}
 			return false, ""
 		},
@@ -228,6 +284,10 @@ func main() {
 	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
 	cond := newConductor(db, relay, state, sk)
+	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
+	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
+		log.Printf("startup: purged %d foreign now_playing event(s)", n)
+	}
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
 	go cond.run()
 
