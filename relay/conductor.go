@@ -36,7 +36,6 @@ const (
 	condHeartbeatMS       = 15_000       // now_playing republish cadence (latecomers + drift)
 	condMaxTrackFallbackS = 600          // duration<=0 → cap so a missing-duration track ends
 	condTickMS            = 2500         // scheduler granularity (precise enough track-end)
-	condSessionLookbackMS = 150_000      // resume: plays within this window = the live session
 	kindNowPlaying        = 30100
 	kindStage             = 30102
 	kindQueue             = 30103
@@ -63,8 +62,6 @@ type condTrack struct {
 // per-club authoritative playback state (in-memory; rebuilt from the store on cold start).
 type condClub struct {
 	pos       int
-	loop      int
-	played    map[string]bool // videoIds played this rotation
 	videoID   string
 	dj        string
 	title     string
@@ -470,30 +467,19 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	}
 }
 
-// advance picks the next playable track (scan-from-top, round-robin) and starts it. Excludes
-// the current track and anything played this rotation; on exhaustion it bumps the loop epoch
-// and clears the played-set so the rotation repeats; truly nothing playable → lobby (stop).
+// advance picks the next playable track (scan-from-top, round-robin) and starts it. The next
+// track is position 1 of each DJ's queue (their first ACTIVE/not-`off` track), so a drag-and-drop
+// reorder takes effect immediately. The visible queue is the only truth — a played track is
+// `off` (client-marked) and drops out; truly nothing playable → lobby (stop). No hidden played-set.
 func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) {
 	if len(djPks) == 0 {
 		c.stop(pb)
 		return
 	}
-	if pb.played == nil {
-		pb.played = map[string]bool{}
-	}
-	if pb.videoID != "" {
-		pb.played[pb.videoID] = true
-	}
-	// Always scan from the TOP of each DJ's queue (round-robin over each DJ's first PLAYABLE
-	// track): the next track is position 1 of the playlist, so a DJ's drag-and-drop reorder takes
-	// effect immediately on the next advance. The played-set (excluded for ALL DJs in matrix())
-	// makes this safe — already-played tracks drop out, so "first playable" walks forward and can
-	// never oscillate (the old oscillation came from NOT excluding a present DJ's played tracks).
-	next := firstPlayablePos(len(djPks), c.matrix(club, djPks, queues, pb, now))
+	next := firstPlayablePos(len(djPks), c.matrix(djPks, queues, pb))
 	if next == -1 {
-		// Every DJ's queue is fully played (or disabled) → stop to the lobby. NO auto-loop: a set
-		// plays through exactly once, then the lobby placeholder runs until a DJ adds tracks (or
-		// the next DJ has a non-empty, not-yet-played queue). Replaying a track = the DJ re-adds it.
+		// Every DJ's queue is fully played-off (or empty) → stop to the lobby. No auto-loop: a set
+		// plays through once, then the lobby runs until a DJ adds / re-activates tracks.
 		c.stop(pb)
 		return
 	}
@@ -521,7 +507,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 // manually re-activated track (`off`→active) plays again. The relay does NOT keep its own hidden
 // played-set — that would override the visible queue (e.g. exclude a re-activated track the DJ
 // put back at the top). Mirrors the client's playableMatrix (sync.svelte.ts) exactly.
-func (c *conductor) matrix(club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) [][]bool {
+func (c *conductor) matrix(djPks []string, queues map[string][]condTrack, pb *condClub) [][]bool {
 	out := make([][]bool, len(djPks))
 	for i, pk := range djPks {
 		tracks := queues[pk]
@@ -617,7 +603,6 @@ func (c *conductor) publishPlay(ctx context.Context, club string, pb *condClub, 
 			{"p", pb.dj},
 			{"started_at", strconv.FormatInt(pb.startedAt, 10)},
 			{"pos", strconv.Itoa(pb.pos)},
-			{"loop", strconv.Itoa(pb.loop)},
 		},
 		Content: pb.videoID,
 	}
@@ -650,7 +635,7 @@ func (c *conductor) publish(ctx context.Context, ev *nostr.Event, replace bool) 
 // now_playing (continue the current track) + recent 1313 plays (re-seed the played-set/loop).
 // Best-effort: if no relay now_playing exists, returns an empty state (the next tick bootstraps).
 func (c *conductor) resume(ctx context.Context, club string) *condClub {
-	pb := &condClub{played: map[string]bool{}}
+	pb := &condClub{}
 	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindNowPlaying}, Tags: nostr.TagMap{"h": []string{club}}})
 	if err != nil {
 		return pb
@@ -674,26 +659,7 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 		pb.startedAt = v
 	}
 	pb.playing = pb.videoID != ""
-	c.seedPlayed(ctx, club, pb)
 	return pb
-}
-
-// seedPlayed marks recent (this-session) plays as played and adopts the highest loop epoch, so a
-// post-restart rotation continues instead of replaying from the top. Bounded window keeps it cheap.
-func (c *conductor) seedPlayed(ctx context.Context, club string, pb *condClub) {
-	since := nostr.Timestamp((time.Now().UnixMilli() - condSessionLookbackMS) / 1000)
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindPlay}, Tags: nostr.TagMap{"h": []string{club}}, Since: &since})
-	if err != nil {
-		return
-	}
-	for ev := range ch {
-		if vid := ev.Content; vid != "" && vid != pb.videoID {
-			pb.played[vid] = true
-		}
-		if l := atoiDefault(tagVal(ev, "loop"), 0); l > pb.loop {
-			pb.loop = l
-		}
-	}
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
