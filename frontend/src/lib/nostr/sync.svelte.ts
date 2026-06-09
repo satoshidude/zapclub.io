@@ -105,22 +105,26 @@ export function targetPosition(): number {
 function playableMatrix(djs: string[]): boolean[][] {
   const cur = state.np?.videoId
   const { played } = sessionPlayed(cur ?? null)
-  return djs.map((pk) => {
-    const here = pk === auth.pubkey || presence.isOnline(pk)
-    return (queues.get(pk)?.tracks ?? []).map(
-      (t) => t.active !== false && t.videoId !== cur && (here || !played.has(t.videoId)),
-    )
-  })
+  return djs.map((pk) =>
+    // Mirror the relay's matrix exactly (conductor.go): a track is playable if active, not the
+    // running one, and not already played this session — for ALL DJs (the relay's played-set is
+    // authoritative; `off` is just a manual disable). The session played-set comes from the 1313
+    // play-log the relay writes.
+    (queues.get(pk)?.tracks ?? []).map(
+      (t) => t.active !== false && t.videoId !== cur && !played.has(t.videoId),
+    ),
+  )
 }
 
-/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans from the TOP (the
- *  first active track per DJ, round-robin), excluding the running track — what the relay plays. */
+/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans FORWARD from the
+ *  relay's current `pos` (matching the relay's `advance` — it goes forward, not from the top),
+ *  excluding the running track. Falls back to the top only when nothing is playing yet. */
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
   const playable = playableMatrix(djs)
   const out: { dj: string; videoId: string; title: string }[] = []
-  let pos = -1
+  let pos = state.np?.pos ?? -1
   for (let i = 0; i < max; i++) {
     const next = nextPlayablePos(pos, djs.length, playable)
     if (next === -1) break
