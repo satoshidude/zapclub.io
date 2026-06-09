@@ -380,6 +380,22 @@ export async function listClubs(): Promise<Club[]> {
     .sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
 }
 
+/** Club ids that are LIVE right now: a fresh relay-authored now_playing (kind 30100) means DJs
+ *  are on stage and streaming. The window matches the client's lobby-fallback (150s) — the relay
+ *  republishes now_playing every ~15s while playing, then it goes stale. One #h-scoped query. */
+export async function fetchLiveClubIds(clubIds: string[]): Promise<Set<string>> {
+  const live = new Set<string>()
+  if (clubIds.length === 0) return live
+  const evs = await pool.querySync(RELAYS, { kinds: [30100], '#h': clubIds }, { maxWait: 4000 })
+  const now = Date.now()
+  for (const ev of evs) {
+    const h = ev.tags.find((t) => t[0] === 'h')?.[1]
+    const sent = Number(ev.tags.find((t) => t[0] === 'sent_at')?.[1]) || 0
+    if (h && now - sent < 150_000) live.add(h)
+  }
+  return live
+}
+
 /** Every distinct pubkey that is a member or admin/owner of ANY club — the candidate set of DJs
  *  for the zap leaderboard (anyone who could have received zaps on stage). */
 export async function fetchClubPeople(): Promise<string[]> {

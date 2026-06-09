@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listClubs, createClub, joinClub, type MyClub } from '../nostr/groups'
+  import { listClubs, createClub, joinClub, fetchLiveClubIds, type MyClub } from '../nostr/groups'
   import { fetchMyClubs } from '../nostr/groups'
   import { goClub, goUser, goLeaderboard } from '../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
@@ -13,6 +13,7 @@
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
   let topDjs = $state<LeaderboardEntry[]>([])
+  let liveClubIds = $state<Set<string>>(new Set())
   let loading = $state(true)
   let error = $state('')
 
@@ -44,8 +45,9 @@
     } finally {
       loading = false
     }
-    // Top-zapped DJs for the hero teaser (best-effort, non-blocking).
+    // Top-zapped DJs block + which clubs are live right now (green border) — best-effort.
     void fetchLeaderboard().then((r) => (topDjs = r.top.slice(0, 5)))
+    void fetchLiveClubIds(clubs.map((c) => c.id)).then((s) => (liveClubIds = s))
   }
 
   async function create() {
@@ -98,28 +100,6 @@
     </div>
   </header>
 
-  {#if topDjs.length}
-    <section class="top-djs">
-      <div class="head">
-        <h2>🏆 Top zapped DJs</h2>
-        <button class="btn btn-ghost btn-sm" onclick={goLeaderboard}>Leaderboard →</button>
-      </div>
-      <div class="board-rows">
-        {#each topDjs as e (e.pubkey)}
-          {@const p = useProfile(e.pubkey)}
-          {@const npub = npubEncode(e.pubkey)}
-          <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
-            <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
-            <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-            <span class="b-name">{displayName(e.pubkey, p)}</span>
-            <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
-            <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
-          </button>
-        {/each}
-      </div>
-    </section>
-  {/if}
-
   <div class="head">
     <h2>Clubs</h2>
     {#if auth.canSign}
@@ -155,8 +135,8 @@
     <div class="list">
       {#each displayClubs as club (club.id)}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="card row" class:onstage={club.id === onStageClub} role="button" tabindex="0" onclick={() => goClub(club.id)}>
-          {#if club.id === onStageClub}<span class="live-badge">● on stage</span>{/if}
+        <div class="card row" class:onstage={liveClubIds.has(club.id) || club.id === onStageClub} role="button" tabindex="0" onclick={() => goClub(club.id)}>
+          {#if liveClubIds.has(club.id) || club.id === onStageClub}<span class="live-badge">● on stage</span>{/if}
           <div class="pic">
             <img class="pic-img" src={club.picture || clubAvatar(club.owner || club.id)} alt="" />
           </div>
@@ -183,6 +163,28 @@
         </div>
       {/each}
     </div>
+  {/if}
+
+  {#if topDjs.length}
+    <section class="top-djs">
+      <div class="head">
+        <h2>🏆 Top zapped DJs</h2>
+        <button class="btn btn-ghost btn-sm" onclick={goLeaderboard}>Leaderboard →</button>
+      </div>
+      <div class="board-rows">
+        {#each topDjs as e (e.pubkey)}
+          {@const p = useProfile(e.pubkey)}
+          {@const npub = npubEncode(e.pubkey)}
+          <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
+            <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
+            <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
+            <span class="b-name">{displayName(e.pubkey, p)}</span>
+            <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
+            <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
   {/if}
 </div>
 
@@ -242,9 +244,9 @@
     color: var(--text);
     white-space: nowrap;
   }
-  /* Top zapped DJs — its own block on the home page. */
+  /* Top zapped DJs — its own block, below the clubs list. */
   .top-djs {
-    margin-bottom: 1.6rem;
+    margin-top: 2rem;
   }
   .board-rows {
     display: flex;
