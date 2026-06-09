@@ -86,7 +86,7 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <span class="foot-note"><button class="foot-link" onclick={goAbout}>How it works</button> · Powered by Nostr &amp; Lightning · no tracking</span>
+  <span class="foot-note"><button class="foot-link" onclick={goAbout}>How it works</button> · <a class="foot-link" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a> · Powered by Nostr &amp; Lightning · no tracking</span>
   <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 
