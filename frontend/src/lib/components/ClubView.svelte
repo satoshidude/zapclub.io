@@ -253,11 +253,13 @@
     }
   }
 
-  // Share this club: copy the link, share via the OS sheet, or post it publicly to Nostr.
+  // Share this club: copy the link, share via the OS sheet, post to a social network, or — with
+  // an explicit extra confirm, since it publishes a public note — post it to Nostr.
   let shareOpen = $state(false)
   let shareMsg = $state('')
   let sharing = $state(false)
   let sharedAt = $state(0)
+  let nostrConfirm = $state(false) // second-step confirm before the public Nostr post
   const SHARE_COOLDOWN_MS = 3_600_000 // don't re-post the same club to Nostr within an hour
   const shareKey = $derived(`zapclub:shared:${groupId}`)
   // Load the last-shared timestamp for this club (so the button reflects the cooldown).
@@ -270,7 +272,24 @@
   })
   const sharedRecently = $derived(sharedAt > 0 && Date.now() - sharedAt < SHARE_COOLDOWN_MS)
   const clubUrl = $derived(`${location.origin}/club/${groupId}`)
+  const shareText = $derived(`🎧 ${club?.name ?? 'A club'} on zapclub — collaborative, Nostr-native music.`)
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  // Social share-intent links (open the network's own composer in a new tab — the user posts
+  // there, we never post on their behalf). Not Nostr-only.
+  const socials = $derived([
+    { id: 'x', label: '𝕏 Share on X', url: `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(clubUrl)}` },
+    { id: 'tg', label: '✈️ Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(clubUrl)}&text=${encodeURIComponent(shareText)}` },
+    { id: 'wa', label: '💬 Share on WhatsApp', url: `https://wa.me/?text=${encodeURIComponent(`${shareText} ${clubUrl}`)}` },
+  ])
+  function closeShare() {
+    shareOpen = false
+    nostrConfirm = false
+    shareMsg = ''
+  }
+  function shareSocial(url: string) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    closeShare()
+  }
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(clubUrl)
@@ -286,24 +305,31 @@
     } catch {
       /* user cancelled */
     }
-    shareOpen = false
+    closeShare()
   }
-  async function shareOnNostr() {
-    if (sharing) return // guard a rapid double-click
+  // Step 1: a tap on "Share on Nostr" doesn't post — it asks for confirmation first (a public note).
+  function askNostrShare() {
     let last = 0
     try { last = Number(localStorage.getItem(shareKey) || 0) } catch { /* ignore */ }
     if (Date.now() - last < SHARE_COOLDOWN_MS) {
       shareMsg = 'Already shared this club in the last hour'
       return
     }
+    shareMsg = ''
+    nostrConfirm = true
+  }
+  // Step 2: confirmed → publish the public Nostr note.
+  async function confirmNostrShare() {
+    if (sharing) return // guard a rapid double-click
     sharing = true
     try {
-      await shareNote(`🎧 ${club?.name ?? 'A club'} on zapclub — collaborative, Nostr-native music.\n${clubUrl}`, clubUrl)
+      await shareNote(`${shareText}\n${clubUrl}`, clubUrl)
       const now = Date.now()
       try { localStorage.setItem(shareKey, String(now)) } catch { /* ignore */ }
       sharedAt = now
+      nostrConfirm = false
       shareMsg = 'Posted to Nostr ✓'
-      setTimeout(() => { shareMsg = ''; shareOpen = false }, 1400)
+      setTimeout(() => { closeShare() }, 1400)
     } catch (e) {
       shareMsg = String((e as Error)?.message ?? 'Post failed')
     } finally {
@@ -414,19 +440,35 @@
       <div class="actions">
         <div class="action-btns">
           <div class="share-wrap">
-            <button class="btn btn-ghost btn-sm" onclick={() => { shareOpen = !shareOpen; shareMsg = '' }} title="Share this club" aria-label="Share this club">↗</button>
+            <button class="btn btn-ghost btn-sm" onclick={() => { if (shareOpen) closeShare(); else { shareOpen = true; shareMsg = '' } }} title="Share this club" aria-label="Share this club">↗</button>
             {#if shareOpen}
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <div class="share-backdrop" role="presentation" onclick={() => (shareOpen = false)}></div>
+              <div class="share-backdrop" role="presentation" onclick={closeShare}></div>
               <div class="share-menu" role="menu">
-                {#if auth.canSign}
-                  <button class="share-item" role="menuitem" onclick={shareOnNostr} disabled={sharing || sharedRecently}>
-                    {sharedRecently ? '✓ Shared (within 1h)' : sharing ? '⚡ Posting…' : '⚡ Share on Nostr'}
-                  </button>
-                {/if}
-                <button class="share-item" role="menuitem" onclick={copyLink}>🔗 Copy link</button>
-                {#if canNativeShare}
-                  <button class="share-item" role="menuitem" onclick={shareNative}>📤 Share…</button>
+                {#if nostrConfirm}
+                  <div class="share-confirm">
+                    <div class="share-confirm-q">Post this club publicly to Nostr?</div>
+                    <div class="share-confirm-btns">
+                      <button class="share-item confirm-yes" role="menuitem" onclick={confirmNostrShare} disabled={sharing}>
+                        {sharing ? '⚡ Posting…' : '⚡ Post'}
+                      </button>
+                      <button class="share-item" role="menuitem" onclick={() => (nostrConfirm = false)} disabled={sharing}>Cancel</button>
+                    </div>
+                  </div>
+                {:else}
+                  <button class="share-item" role="menuitem" onclick={copyLink}>🔗 Copy link</button>
+                  {#if canNativeShare}
+                    <button class="share-item" role="menuitem" onclick={shareNative}>📤 Share…</button>
+                  {/if}
+                  {#each socials as s (s.id)}
+                    <button class="share-item" role="menuitem" onclick={() => shareSocial(s.url)}>{s.label}</button>
+                  {/each}
+                  {#if auth.canSign}
+                    <div class="share-sep"></div>
+                    <button class="share-item" role="menuitem" onclick={askNostrShare} disabled={sharedRecently}>
+                      {sharedRecently ? '✓ Shared on Nostr (within 1h)' : '⚡ Share on Nostr'}
+                    </button>
+                  {/if}
                 {/if}
                 {#if shareMsg}<div class="share-msg">{shareMsg}</div>{/if}
               </div>
@@ -724,6 +766,40 @@
     font-size: 0.72rem;
     color: var(--accent);
     padding: 0.3rem 0.6rem;
+  }
+  .share-sep {
+    height: 1px;
+    margin: 0.2rem 0.3rem;
+    background: var(--border);
+  }
+  .share-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.2rem;
+  }
+  .share-confirm-q {
+    font-size: 0.8rem;
+    color: var(--text);
+    padding: 0.3rem 0.4rem 0.1rem;
+    line-height: 1.4;
+  }
+  .share-confirm-btns {
+    display: flex;
+    gap: 0.3rem;
+  }
+  .share-confirm-btns .share-item {
+    flex: 1;
+    text-align: center;
+    border: 1px solid var(--border);
+  }
+  .share-item.confirm-yes {
+    color: var(--amber);
+    border-color: var(--amber);
+  }
+  .share-item.confirm-yes:hover:not(:disabled) {
+    background: var(--amber);
+    color: #07070a;
   }
   .desc {
     margin: 0.9rem 0 0;
