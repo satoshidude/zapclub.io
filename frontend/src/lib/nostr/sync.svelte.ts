@@ -5,7 +5,6 @@ import { stage } from './stage.svelte'
 import { queues } from './queue.svelte'
 import { posToSlot, nextPlayablePos } from './roundrobin'
 import { presence } from './presence.svelte'
-import { sessionPlayed } from './playlog.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 
@@ -96,30 +95,20 @@ export function targetPosition(): number {
 
 /**
  * Playability matrix mirroring the relay's conductor (conductor.go matrix()): a slot is playable
- * if the track is active (`off`!==true), not the currently-playing one, and — for an AWAY DJ —
- * not already played this session. A PRESENT DJ's own `active`/`off` flags are authoritative (so
- * a reactivated track shows again); the shared played-set (from the 1313 log) only guards away
- * DJs whose client couldn't mark a played track `off`. Read-only — the relay drives the actual
- * rotation; this is just the preview, kept in lockstep with the relay's rule.
+ * if the track is `active` (NOT marked `off`) and not the currently-playing one. The DJ's QUEUE is
+ * the single source of truth — a played track becomes `off` and drops out; a re-activated track
+ * plays again; reorder changes the top. No hidden played-set on either side. Read-only preview.
  */
 function playableMatrix(djs: string[]): boolean[][] {
   const cur = state.np?.videoId
-  const { played } = sessionPlayed(cur ?? null)
   return djs.map((pk) =>
-    // Mirror the relay's matrix exactly (conductor.go): a track is playable if active, not the
-    // running one, and not already played this session — for ALL DJs (the relay's played-set is
-    // authoritative; `off` is just a manual disable). The session played-set comes from the 1313
-    // play-log the relay writes.
-    (queues.get(pk)?.tracks ?? []).map(
-      (t) => t.active !== false && t.videoId !== cur && !played.has(t.videoId),
-    ),
+    (queues.get(pk)?.tracks ?? []).map((t) => t.active !== false && t.videoId !== cur),
   )
 }
 
 /** Preview of the next round-robin tracks (across all DJs), max `max`. Scans from the TOP — the
- *  first PLAYABLE track per DJ, round-robin — exactly like the relay's `advance` (each DJ's
- *  position 1 is next, so a reorder is reflected immediately). The played-set excludes already-
- *  played tracks, so this walks forward without re-picking. */
+ *  first PLAYABLE (active, not-off) track per DJ, round-robin — exactly like the relay's `advance`
+ *  (each DJ's position 1 is next, so a reorder is reflected immediately). Off tracks drop out. */
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []

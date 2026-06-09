@@ -515,25 +515,19 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishPlay(ctx, club, pb, now)
 }
 
-// matrix builds the playability matrix. A track is playable if active and not the current one.
-// The shared played-set only guards an AWAY DJ (their client is gone, can't mark tracks `off`,
-// so a top-down scan would re-pick their just-played track forever). For a PRESENT DJ the
-// queue's own `active`/`off` flags are authoritative — they mark tracks off as they play AND can
-// reactivate one to replay it — so the played-set must NOT exclude it. Mirrors the client's
-// playableExcluding (sync.svelte.ts) so server and client agree on "what's next".
+// matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
+// and not the currently-playing one. The DJ's QUEUE is the single source of truth: a played track
+// becomes `off` (client-marked) and drops out; reordering changes which active track is on top; a
+// manually re-activated track (`off`→active) plays again. The relay does NOT keep its own hidden
+// played-set — that would override the visible queue (e.g. exclude a re-activated track the DJ
+// put back at the top). Mirrors the client's playableMatrix (sync.svelte.ts) exactly.
 func (c *conductor) matrix(club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) [][]bool {
 	out := make([][]bool, len(djPks))
 	for i, pk := range djPks {
 		tracks := queues[pk]
 		row := make([]bool, len(tracks))
 		for j, t := range tracks {
-			// Relay-authoritative played-set for ALL DJs. Previously a PRESENT DJ's row trusted
-			// the client's `off` flags (`here || !played`) — but the relay plays autonomously
-			// while `off`-marking is client-side and unreliable (a backgrounded tab beacons
-			// presence yet never marks tracks `off`), so already-played-but-still-active tracks
-			// re-entered the rotation and looped forever. The relay's own played-set is the
-			// truth now; `t.active` (the `off` flag) is only a MANUAL disable by the DJ.
-			row[j] = t.active && t.videoID != pb.videoID && !pb.played[t.videoID]
+			row[j] = t.active && t.videoID != pb.videoID
 		}
 		out[i] = row
 	}

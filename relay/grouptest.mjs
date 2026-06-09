@@ -145,59 +145,71 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 9007, created_at: now(), tags: [['h', C]], content: '' })
   await host.ev({ kind: 9002, created_at: now(), tags: [['h', C], ['name', 'Conductor'], ['open'], ['public']], content: '' })
   await sleep(500)
-  // host steps on stage (30102) and posts a 2-track queue (30103). Long durations → only an
+  // The DJ's QUEUE is the single source of truth: round-robin plays the top ACTIVE (not-`off`)
+  // track; a played track is marked `off` (client does this in prod — simulated here) and drops
+  // out; a re-activated track plays again. NO hidden relay played-set. Long durations → only an
   // explicit skip advances during the test window.
+  const TT = [['VIDfirst001', 'First'], ['VIDsecond02', 'Second'], ['VIDthird0003', 'Third'], ['VIDfourth004', 'Fourth']]
+  const postQueue = (off) =>
+    host.ev({
+      kind: 30103,
+      created_at: now(),
+      tags: [['h', C], ['d', C], ...TT.map(([id, t]) => (off.includes(id) ? ['track', `yt:${id}`, t, '300', 'off'] : ['track', `yt:${id}`, t, '300']))],
+      content: '',
+    })
+  const npNow = async () => (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  const trackOf = (np) => np && np.tags.find((t) => t[0] === 'track')?.[1]
+  const posOf = (np) => (np && np.tags.find((t) => t[0] === 'pos')?.[1]) || '0'
+  const skip = async (np) => { await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posOf(np)]], content: '' }); await sleep(4000) }
+
   await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
-  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300'], ['track', 'yt:VIDthird0003', 'Third', '300'], ['track', 'yt:VIDfourth004', 'Fourth', '300']], content: '' })
+  await postQueue([]) // all active
   await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
+  let np = await npNow()
   const npRows = (await host.query({ kinds: [30100], '#h': [C] })).filter((e) => e.pubkey === RPK)
-  const npA = npRows[0]
-  assert(!!npA, 'conductor: the RELAY published now_playing')
-  // ReplaceEvent dedup on the real path: heartbeats republish 30100, must stay exactly 1 row.
+  assert(!!np, 'conductor: the RELAY published now_playing')
   assert(npRows.length === 1, `conductor: now_playing dedup — exactly 1 relay row (got ${npRows.length})`)
-  assert(!!npA && npA.tags.find((t) => t[0] === 'dj')?.[1] === host.pub, 'conductor: now_playing dj = the stage DJ')
-  const firstTrack = npA && npA.tags.find((t) => t[0] === 'track')?.[1]
-  const pos0 = (npA && npA.tags.find((t) => t[0] === 'pos')?.[1]) || '0'
-  // a skip-request for the running track → the relay advances to the next track.
-  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', pos0]], content: '' })
-  await sleep(4000)
-  const npB = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  const trackB = npB && npB.tags.find((t) => t[0] === 'track')?.[1]
-  const posB = (npB && npB.tags.find((t) => t[0] === 'pos')?.[1]) || '1'
-  assert(!!npB && trackB !== firstTrack, 'conductor: advanced to the next track on a skip-request (30107)')
-  // Regression: a SECOND skip must advance FORWARD to the third track — not bounce back to the
-  // first. The DJ is "present" but never marks tracks `off`, so a from-top scan would re-pick
-  // track 0 and oscillate; forward round-robin progression must reach track 2.
-  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posB]], content: '' })
-  await sleep(4000)
-  const npC = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  const trackC = npC && npC.tags.find((t) => t[0] === 'track')?.[1]
-  const posC = (npC && npC.tags.find((t) => t[0] === 'pos')?.[1]) || '2'
-  assert(!!npC && trackC !== firstTrack && trackC !== trackB, 'conductor: a second skip advances forward (no oscillation back to track 1)')
+  assert(!!np && np.tags.find((t) => t[0] === 'dj')?.[1] === host.pub, 'conductor: now_playing dj = the stage DJ')
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: plays the top track of the queue (position 1)')
+
+  // Played track marked `off` → skip advances to the next ACTIVE track (off track drops out).
+  await postQueue(['VIDfirst001'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDsecond02', 'conductor: skip → next ACTIVE track (the off track is skipped)')
+
+  // Queue order is the truth: mark Second off too → top active is now Third.
+  await postQueue(['VIDfirst001', 'VIDsecond02'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDthird0003', 'conductor: top active track is next (queue is the source of truth)')
+
+  // RE-ACTIVATION: put First back to active (off→on) + mark Third off → a skip plays First AGAIN.
+  // This is the key rule: a re-activated track at the top replays; the visible queue always wins.
+  await postQueue(['VIDsecond02', 'VIDthird0003'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a re-activated track replays (visible queue wins, no hidden played-set)')
+
   // role validation: a plain MEMBER (not owner/mod, not the playing DJ) cannot skip.
-  await mem.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // mem joins C
+  await mem.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
   await sleep(800)
-  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posC]], content: '' })
+  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posOf(np)]], content: '' })
   await sleep(4000)
-  const npD = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  assert(!!npD && npD.tags.find((t) => t[0] === 'track')?.[1] === trackC, 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
-  // broken-track quorum: 2 distinct members report the running track unplayable → relay skips it.
-  await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }) // stranger joins C
+  np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
+
+  // broken-track quorum: 2 members report the running track (First) unplayable → relay skips it.
+  // Active tracks now: First (current), Fourth. Second/Third off → next active is Fourth.
+  await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
   await sleep(800)
-  const curVid = (trackC || '').replace('yt:', '')
-  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
-  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
+  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
+  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
   await sleep(4000)
-  const npE = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  const trackD = npE && npE.tags.find((t) => t[0] === 'track')?.[1]
-  const posD = (npE && npE.tags.find((t) => t[0] === 'pos')?.[1]) || '3'
-  assert(!!npE && trackD !== trackC, 'conductor: broken-track quorum (2 members) skips the unplayable track')
-  // Deplete, NO auto-loop: skipping the LAST track must not restart the queue from track 1. Every
-  // track plays once (relay-authoritative played-set), then the stream stops to the lobby.
-  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posD]], content: '' })
-  await sleep(4000)
-  const npF = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  assert(!!npF && npF.tags.find((t) => t[0] === 'track')?.[1] !== firstTrack, 'conductor: a fully-played queue depletes to the lobby (no auto-loop back to track 1)')
+  np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: broken-track quorum (2 members) skips to the next active track')
+
+  // All tracks off → the stream stops to the lobby (nothing active to play; no auto-loop).
+  await postQueue(['VIDfirst001', 'VIDsecond02', 'VIDthird0003', 'VIDfourth004'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: all tracks off → stops to the lobby (no active track, no loop)')
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
