@@ -497,12 +497,10 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		next = firstPlayablePos(len(djPks), c.matrix(club, djPks, queues, pb, now))
 	}
 	if next == -1 {
-		pb.loop++
-		pb.played = map[string]bool{}
-		next = firstPlayablePos(len(djPks), c.matrix(club, djPks, queues, pb, now))
-	}
-	if next == -1 {
-		c.stop(pb) // nothing active anywhere → lobby
+		// Every DJ's queue is fully played (or disabled) → stop to the lobby. NO auto-loop: a set
+		// plays through exactly once, then the lobby placeholder runs until a DJ adds tracks (or
+		// the next DJ has a non-empty, not-yet-played queue). Replaying a track = the DJ re-adds it.
+		c.stop(pb)
 		return
 	}
 	di, ti := posToSlot(next, len(djPks))
@@ -532,11 +530,16 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 func (c *conductor) matrix(club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) [][]bool {
 	out := make([][]bool, len(djPks))
 	for i, pk := range djPks {
-		here := c.online(club, pk, now)
 		tracks := queues[pk]
 		row := make([]bool, len(tracks))
 		for j, t := range tracks {
-			row[j] = t.active && t.videoID != pb.videoID && (here || !pb.played[t.videoID])
+			// Relay-authoritative played-set for ALL DJs. Previously a PRESENT DJ's row trusted
+			// the client's `off` flags (`here || !played`) — but the relay plays autonomously
+			// while `off`-marking is client-side and unreliable (a backgrounded tab beacons
+			// presence yet never marks tracks `off`), so already-played-but-still-active tracks
+			// re-entered the rotation and looped forever. The relay's own played-set is the
+			// truth now; `t.active` (the `off` flag) is only a MANUAL disable by the DJ.
+			row[j] = t.active && t.videoID != pb.videoID && !pb.played[t.videoID]
 		}
 		out[i] = row
 	}

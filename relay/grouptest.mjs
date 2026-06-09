@@ -148,7 +148,7 @@ if (process.env.RELAY_PK) {
   // host steps on stage (30102) and posts a 2-track queue (30103). Long durations → only an
   // explicit skip advances during the test window.
   await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
-  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300'], ['track', 'yt:VIDthird0003', 'Third', '300']], content: '' })
+  await host.ev({ kind: 30103, created_at: now(), tags: [['h', C], ['d', C], ['track', 'yt:VIDfirst001', 'First', '300'], ['track', 'yt:VIDsecond02', 'Second', '300'], ['track', 'yt:VIDthird0003', 'Third', '300'], ['track', 'yt:VIDfourth004', 'Fourth', '300']], content: '' })
   await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
   const npRows = (await host.query({ kinds: [30100], '#h': [C] })).filter((e) => e.pubkey === RPK)
   const npA = npRows[0]
@@ -189,7 +189,15 @@ if (process.env.RELAY_PK) {
   await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: curVid })
   await sleep(4000)
   const npE = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
-  assert(!!npE && npE.tags.find((t) => t[0] === 'track')?.[1] !== trackB, 'conductor: broken-track quorum (2 members) skips the unplayable track')
+  const trackD = npE && npE.tags.find((t) => t[0] === 'track')?.[1]
+  const posD = (npE && npE.tags.find((t) => t[0] === 'pos')?.[1]) || '3'
+  assert(!!npE && trackD !== trackC, 'conductor: broken-track quorum (2 members) skips the unplayable track')
+  // Deplete, NO auto-loop: skipping the LAST track must not restart the queue from track 1. Every
+  // track plays once (relay-authoritative played-set), then the stream stops to the lobby.
+  await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posD]], content: '' })
+  await sleep(4000)
+  const npF = (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  assert(!!npF && npF.tags.find((t) => t[0] === 'track')?.[1] !== firstTrack, 'conductor: a fully-played queue depletes to the lobby (no auto-loop back to track 1)')
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
