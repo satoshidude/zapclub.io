@@ -42,7 +42,7 @@
   import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
-  import Chat from './club/Chat.svelte'
+  import Dancefloor from './club/Dancefloor.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -248,12 +248,6 @@
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     }
-  }
-
-  function roleLabel(m: ClubMember): string {
-    if (m.pubkey === owner) return 'owner'
-    if (m.roles.includes('moderator')) return 'mod'
-    return ''
   }
 
   // Share this club: copy the link, share via the OS sheet, or post it publicly to Nostr.
@@ -520,49 +514,21 @@
     </Stage>
   </section>
 
-  <!-- Chat + members — only for members who have joined the club. -->
+  <!-- Dancefloor: the club's members ARE the crowd — online members dance, offline are dimmed.
+       Chat lives here too, kept subtle. Members-only (the relay rejects non-member writes). -->
   {#if isMember}
-  <div class="panel">
-      <Chat
-        {groupId}
-        canChat={isMember}
-        {canModerate}
-        onauthor={(pubkey) => goUser(npubEncode(pubkey))}
-        ondelete={(id) => void deleteEvent(groupId, id)}
-      />
-
-      <section class="members card">
-        <details class="members-acc" open>
-          <summary>
-            <span class="sum-label">Members</span>
-            <span class="mcount">{members.length}</span>
-            <span class="chevron" aria-hidden="true">▾</span>
-          </summary>
-          {#if members.length === 0}
-            <p class="dim">No members yet.</p>
-          {:else}
-            <ul class="member-list">
-              {#each members as m (m.pubkey)}
-                {@const profile = useProfile(m.pubkey)}
-                <li>
-                  <img class="avatar" class:online={presence.isOnline(m.pubkey)} src={avatarUrl(m.pubkey, profile)} alt="" width="30" height="30" title={presence.isOnline(m.pubkey) ? 'online now' : ''} />
-                  <a class="mname" href={`/user/${npubEncode(m.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(m.pubkey)) }}>{displayName(m.pubkey, profile)}</a>
-                  {#if roleLabel(m)}<span class="role">{roleLabel(m)}</span>{/if}
-                  {#if canModerate && m.pubkey !== owner && m.pubkey !== auth.pubkey}
-                    <span class="mod-actions">
-                      {#if isOwner && !m.roles.includes('moderator')}
-                        <button class="mini" onclick={() => promote(m.pubkey)} title="Make moderator">+mod</button>
-                      {/if}
-                      <button class="mini danger" onclick={() => kick(m.pubkey)} title="Remove from club">kick</button>
-                    </span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </details>
-      </section>
-    </div>
+    <Dancefloor
+      {groupId}
+      {members}
+      canChat={isMember}
+      {canModerate}
+      {isOwner}
+      {owner}
+      currentDj={sync.live?.dj ?? ''}
+      onkick={kick}
+      onpromote={promote}
+      ondelete={(id) => void deleteEvent(groupId, id)}
+    />
   {/if}
 
 </div>
@@ -762,112 +728,9 @@
     color: var(--text-dim);
     line-height: 1.6;
   }
-  .members.card {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1rem;
-  }
-  .members-acc {
-    margin: 0;
-  }
-  .members-acc summary {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    list-style: none;
-    font-size: 0.9rem;
-    font-weight: 600;
-    user-select: none;
-  }
-  .members-acc summary::-webkit-details-marker {
-    display: none;
-  }
-  .mcount {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.05rem 0.5rem;
-  }
-  .chevron {
-    margin-left: auto;
-    color: var(--text-dim);
-    transition: transform 0.18s ease;
-  }
-  .members-acc[open] .chevron {
-    transform: rotate(180deg);
-  }
-  .member-list {
-    list-style: none;
-    margin: 0.8rem 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .member-list li {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-  }
-  .avatar {
-    width: 30px;
-    height: 30px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-  }
-  .avatar.online {
-    border-color: var(--accent-2);
-    box-shadow: 0 0 0 2px var(--accent-2), 0 0 7px rgba(177, 77, 255, 0.5);
-  }
-  .mname {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: inherit;
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .mname:hover {
-    text-decoration: underline;
-  }
-  .role {
-    font-size: 0.68rem;
-    color: var(--accent);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.1rem 0.45rem;
-  }
-  .mod-actions {
-    margin-left: auto;
-    display: flex;
-    gap: 0.35rem;
-  }
-  .mini {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 7px;
-    padding: 0.2rem 0.5rem;
-    font-size: 0.72rem;
-  }
-  .mini:hover {
-    border-color: var(--accent-2);
-    color: var(--text);
-  }
-  .mini.danger:hover {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
   .err {
     color: var(--danger);
     font-size: 0.85rem;
-  }
-  .dim {
-    color: var(--text-dim);
   }
   /* Player + now-playing + coming-up, always under the hero. */
   .stream {
@@ -875,12 +738,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
-  }
-  .panel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    margin-top: 1rem;
   }
   .join-hint {
     background: var(--bg-elev);
