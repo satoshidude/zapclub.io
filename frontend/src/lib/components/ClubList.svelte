@@ -100,25 +100,29 @@
     {#if !auth.canSign}
       <button class="btn btn-primary hero-cta" onclick={launchLogin}>⚡ Sign in to play</button>
     {/if}
-
-    {#if topDjs.length}
-      <div class="board-teaser">
-        <button class="board-title" onclick={goLeaderboard}>🏆 Top zapped DJs <span class="board-more">Leaderboard →</span></button>
-        <div class="board-rows">
-          {#each topDjs as e (e.pubkey)}
-            {@const p = useProfile(e.pubkey)}
-            {@const npub = npubEncode(e.pubkey)}
-            <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
-              <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
-              <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="24" height="24" />
-              <span class="b-name">{displayName(e.pubkey, p)}</span>
-              <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
-            </button>
-          {/each}
-        </div>
-      </div>
-    {/if}
   </header>
+
+  {#if topDjs.length}
+    <section class="top-djs">
+      <div class="head">
+        <h2>🏆 Top zapped DJs</h2>
+        <button class="btn btn-ghost btn-sm" onclick={goLeaderboard}>Leaderboard →</button>
+      </div>
+      <div class="board-rows">
+        {#each topDjs as e (e.pubkey)}
+          {@const p = useProfile(e.pubkey)}
+          {@const npub = npubEncode(e.pubkey)}
+          <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
+            <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
+            <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
+            <span class="b-name">{displayName(e.pubkey, p)}</span>
+            <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
+            <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <div class="head">
     <h2>Clubs</h2>
@@ -246,55 +250,32 @@
     font-size: 0.95rem;
     padding: 0.65rem 1.25rem;
   }
-  /* Hero leaderboard teaser — top zapped DJs. */
-  .board-teaser {
-    margin-top: 1.4rem;
-    max-width: 420px;
-    margin-left: auto;
-    margin-right: auto;
-    text-align: left;
-  }
-  .board-title {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    width: 100%;
-    gap: 0.5rem;
-    background: none;
-    border: none;
-    padding: 0 0.2rem 0.5rem;
-    color: var(--text);
-    font-weight: 800;
-    font-size: 0.92rem;
-    cursor: pointer;
-  }
-  .board-more {
-    font-size: 0.74rem;
-    font-weight: 700;
-    color: var(--accent-2);
-  }
-  .board-title:hover .board-more {
-    color: var(--amber);
+  /* Top zapped DJs — its own block on the home page. */
+  .top-djs {
+    margin-bottom: 1.6rem;
   }
   .board-rows {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.5rem;
   }
   .board-row {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.7rem;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: 999px;
-    padding: 0.35rem 0.7rem 0.35rem 0.5rem;
+    padding: 0.45rem 0.9rem 0.45rem 0.6rem;
     cursor: pointer;
     color: var(--text);
-    transition: border-color 0.15s ease;
+    transition: border-color 0.15s ease, transform 0.08s ease;
   }
   .board-row:hover {
     border-color: var(--accent-2);
+  }
+  .board-row:active {
+    transform: translateY(1px);
   }
   .board-row.gold {
     border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
@@ -302,17 +283,17 @@
   }
   .b-rank {
     flex: 0 0 auto;
-    min-width: 1.6rem;
+    min-width: 1.8rem;
     text-align: center;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-weight: 800;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
   .b-av {
     flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
@@ -323,15 +304,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: 600;
-    font-size: 0.85rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+  }
+  .b-from {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    font-size: 0.74rem;
   }
   .b-sats {
     flex: 0 0 auto;
     color: var(--amber);
     font-weight: 800;
-    font-size: 0.82rem;
+    font-size: 0.88rem;
     font-variant-numeric: tabular-nums;
+    min-width: 4.5rem;
+    text-align: right;
+  }
+  @media (max-width: 460px) {
+    .b-from {
+      display: none;
+    }
   }
   .head {
     display: flex;
