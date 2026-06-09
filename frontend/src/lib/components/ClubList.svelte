@@ -79,7 +79,7 @@
 
 <div class="wrap">
   <header class="hero">
-    <p class="eyebrow">Collaborative · Decentralized · Yours</p>
+    <p class="eyebrow">Collaborative · Decentralized · Rewarding</p>
     <h1 class="hero-title">Drop in. Take the stage.<br />Own the night.</h1>
     <p class="hero-sub">
       zapclub is one turntable, shared. Cue your tracks, take the deck, pass it on — the room
