@@ -82,17 +82,15 @@
     <p class="eyebrow">Collaborative · Decentralized · Yours</p>
     <h1 class="hero-title">Drop in. Take the stage.<br />Own the night.</h1>
     <p class="hero-sub">
-      zapclub is a shared turntable. Step on stage with up to five DJs back-to-back, queue
-      your tracks, and the whole room hears the same beat — perfectly in sync. Sign in with
-      Nostr: no account, no tracking. Tip the DJ in real sats, not likes. No label, no
-      middleman — just the music and the crowd. A club that's yours.
+      zapclub is one turntable, shared. Cue your tracks, take the deck, pass it on — the room
+      rides every transition with you. Drop in with a key, not an email. Tip the DJ in sats,
+      not likes. Just you, the records and the crowd.
     </p>
     <div class="chips">
-      <span class="chip">🎧 In-sync playback</span>
-      <span class="chip">🎚️ 5 DJs back-to-back</span>
+      <span class="chip">🎛️ Pass the deck</span>
       <span class="chip">⚡ Zap the DJ</span>
-      <span class="chip">🟣 Nostr login</span>
-      <span class="chip">🚫 No tracking</span>
+      <span class="chip">🔑 Key in, no signup</span>
+      <span class="chip">👥 Crowd-owned</span>
     </div>
     {#if auth.canSign}
       <button class="btn btn-primary hero-cta" onclick={() => (showCreate = true)}>🎛️ Start a club</button>
