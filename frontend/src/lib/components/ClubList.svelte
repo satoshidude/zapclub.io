@@ -6,7 +6,6 @@
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
-  import { launchLogin } from '../nostr/nostrLogin'
   import { fetchLeaderboard, type LeaderboardEntry } from '../nostr/leaderboard'
   import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
@@ -97,9 +96,6 @@
       <span class="chip">🔑 Key in, no signup</span>
       <span class="chip">👥 Crowd-owned</span>
     </div>
-    {#if !auth.canSign}
-      <button class="btn btn-primary hero-cta" onclick={launchLogin}>⚡ Sign in to play</button>
-    {/if}
   </header>
 
   {#if topDjs.length}
@@ -245,10 +241,6 @@
     border: 1px solid var(--border);
     color: var(--text);
     white-space: nowrap;
-  }
-  .hero-cta {
-    font-size: 0.95rem;
-    padding: 0.65rem 1.25rem;
   }
   /* Top zapped DJs — its own block on the home page. */
   .top-djs {
