@@ -553,11 +553,16 @@ func (c *conductor) skipRequested(ctx context.Context, club string, pb *condClub
 }
 
 func (c *conductor) stop(pb *condClub) {
-	// Stop beating → clients see now_playing go stale and fall back to the lobby track. (Matches
-	// the old client behaviour; deletion of the lingering replaceable isn't needed.)
+	// Stop beating → clients see now_playing go stale and fall back to the lobby track. (Deletion
+	// of the lingering replaceable isn't needed.)
+	//
+	// KEEP pb.videoID/dj — do NOT clear them. The next tick re-runs advance() (bootstrap), and the
+	// matrix excludes pb.videoID. If we cleared it, the just-played final track would no longer be
+	// excluded; when the DJ's client hasn't marked it `off` yet (e.g. they closed the tab as it
+	// ended), the bootstrap would re-pick it and the LAST SONG WOULD LOOP. Retaining it holds that
+	// one track back until a different/new active track plays (which changes pb.videoID) — so a set
+	// plays through once, then the lobby runs. No auto-loop.
 	pb.playing = false
-	pb.videoID = ""
-	pb.dj = ""
 }
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───

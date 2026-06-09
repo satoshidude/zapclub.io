@@ -213,6 +213,31 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
+// 4c-bis. Anti-loop regression: a single ACTIVE track that the client NEVER marks `off` must play
+//     once then stop to the lobby — not loop. (stop() used to clear the last videoID, so the next
+//     bootstrap re-picked the just-played track → the last song looped.) A short duration makes the
+//     relay auto-advance on its own clock; we never mark it off, then assert `pos` didn't climb.
+if (process.env.RELAY_PK) {
+  const RPK = process.env.RELAY_PK
+  const L = 'zc' + Math.random().toString(16).slice(2, 16)
+  console.log('\n-- conductor anti-loop --')
+  await host.ev({ kind: 9007, created_at: now(), tags: [['h', L]], content: '' })
+  await host.ev({ kind: 9002, created_at: now(), tags: [['h', L], ['name', 'Loop'], ['open'], ['public']], content: '' })
+  await sleep(500)
+  await host.ev({ kind: 30102, created_at: now(), tags: [['h', L], ['d', L], ['since', String(now())]], content: '' })
+  // One ACTIVE track, 1s duration; never marked `off`.
+  await host.ev({ kind: 30103, created_at: now(), tags: [['h', L], ['d', L], ['track', 'yt:LOOPtrack01', 'Only', '1']], content: '' })
+  const npL = async () => (await host.query({ kinds: [30100], '#h': [L] })).find((e) => e.pubkey === RPK)
+  const posN = (np) => Number((np && np.tags.find((t) => t[0] === 'pos')?.[1]) || '0')
+  await sleep(4000) // relay plays the track (tick 2.5s)
+  const first = await npL()
+  assert(!!first && first.tags.find((t) => t[0] === 'track')?.[1] === 'yt:LOOPtrack01', 'anti-loop: the single track started')
+  const pos1 = posN(first)
+  await sleep(9000) // 1s track ends; several ticks pass — buggy code would re-pick and loop
+  assert(posN(await npL()) === pos1, `anti-loop: last track did NOT loop (pos stayed ${pos1}, got ${posN(await npL())})`)
+  await host.ev({ kind: 9008, created_at: now(), tags: [['h', L]], content: '' }) // cleanup
+}
+
 // 4d. Zap leaderboard: a member's kind-20101 zap broadcast is aggregated by the relay and
 //     surfaced at the public GET /leaderboard endpoint (relay/leaderboard.go). Deduped by
 //     bolt11, self-zaps ignored, distinct senders counted. Needs the HTTP base (ADMIN_URL).
