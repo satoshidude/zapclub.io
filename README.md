@@ -51,45 +51,119 @@ a listener zaps sats straight to the DJ whose track is playing.
 - **Chat & members** per club; **avatars** from the npub (Robohash for people,
   DiceBear "rings" for clubs without a custom image).
 - **Zaps (NIP-57)** — a pulsing ⚡ on the live DJ; pay with the Alby extension
-  (WebLN), Alby Go on mobile (`lightning:` deep link), or any wallet via QR/copy.
+  (WebLN), Alby Go on mobile (`alby:` deep link), or any wallet via QR/copy.
   Shows the DJ's total received sats.
 - **Moderation** — skip, kick from stage, ban (relay-enforced), appoint mods.
 
 ## How it works
 
 Clubs are **[NIP-29](https://nips.nostr.com/29) relay-based groups**. The relay
-(the only central component) enforces membership, roles and moderation, and
-signs the group metadata events. Everything else is plain Nostr.
+(the only central component) enforces membership, roles and moderation, signs the
+group metadata events, and **drives playback as the conductor** (see below).
+Everything else is plain Nostr — identities, profiles, playlists and zap receipts
+live on the open network, not in any zapclub database.
 
-**Event model** (all club content carries an `h` = group-id tag):
+### Event model
+
+All club content carries an `h` = group-id tag. Metadata events are read by `#d`,
+content events by `#h` — and the two **must not be mixed in one subscription**
+(relay29 rejects that). Times: Nostr `created_at` is in **seconds**, JS time in
+**ms** — everything is kept in ms internally and converted at the relay boundary.
 
 | Kind | What |
 |---|---|
 | `9007` / `9002` | create group / edit metadata (`name`, `about`, `picture`, `open`, `public`) |
-| `9021` / `9022` | join / leave · `9000` / `9001` add-member-role / kick |
+| `9021` / `9022` | join / leave · `9000` / `9001` set-role / kick (relay-enforced) |
 | `39000–39002` | relay-signed metadata · admins · members (read by `#d`) |
-| `30102` | **stage** — "I'm a DJ here" heartbeat (carries `since` → conductor order) |
-| `30103` | **DJ queue** — one per DJ/club, round-robin source |
-| `30100` | **now_playing** — the conductor's track (`pos`, `started_at`, `sent_at`, `p`=DJ) |
-| `30104` | **playlist library** — user-global, on public relays |
-| `9` / `20100` | chat · ephemeral presence |
+| `30102` | **stage** — "I'm a DJ here" heartbeat; `since` (stage-join time) drives DJ order |
+| `30103` | **DJ queue** — one parameterized-replaceable event per DJ/club, the round-robin source |
+| `30100` | **now_playing** — *relay-authored*: `track`, `pos`, `started_at`, `sent_at`, `duration`, `p` = the DJ being played (zap target) |
+| `1313` | **play-log** — *relay-authored* round-robin progress record (cold-start resume) |
+| `30107` | **skip-request** — owner/mod asks the conductor to skip (role-validated relay-side) |
+| `20102` | **broken-track** — ephemeral "I can't play this" report (quorum → auto-skip) |
+| `30104` / `30101` | playlist library (user-global) · club config (paid-entry gate) |
+| `9` / `20100` / `20101` | chat · ephemeral presence · client-side zap broadcast |
 | `9734` / `9735` | NIP-57 zap request / receipt (on public relays) |
 
-**Conductor & sync.** Exactly one client writes `now_playing` — the *conductor*
-(oldest active stage DJ, self-healing; the owner-on-stage is always master). It
-republishes on track change and as an ~8 s heartbeat with a fresh `sent_at`;
-clients calibrate `offset = sent_at − now()` and compute the local position as
-`now() + offset − started_at`. (Nostr `created_at` is in **seconds**, JS time in
-**ms** — kept in ms internally.)
+### The relay is the conductor
 
-**Round-robin.** A single integer `pos` in `now_playing`: `djIndex = pos % n`,
-`trackIndex = floor(pos / n)`. A playable matrix skips played/absent tracks;
-`advance()` finds the next playable slot. Scales O(1); the 5 is just a UI limit.
+A club needs a single, **always-on time authority** so everyone hears the same
+moment. Browsers are the opposite of always-on (backgrounded tabs, locked phones,
+flaky DJ connections), so zapclub makes the **relay itself** the conductor: it is
+the *only* writer of `now_playing` (`30100`) and the play-log (`1313`). The relay
+runs a scheduler that, per club with at least one staged DJ and a non-empty queue,
+interleaves the DJs' queues round-robin, advances on track end, and republishes
+`now_playing`. **Clients are pure consumers** — they read `now_playing`, drift-
+correct, and play. They never write it.
 
-**Security.** Only members can write content events (relay29 membership), NIP-42
-AUTH on the relay, which listens on `127.0.0.1` behind Caddy (TLS + security
-headers). Per-pubkey rate limits on chat/reactions; background sweeps keep badger
-small.
+This works because relay29 already lets the relay's own key write to any group
+without membership (`event.PubKey == s.publicKey`); the conductor signs with
+`RELAY_SECRET_KEY` and writes straight to the store, bypassing the reject chain.
+Moving the single writer to the always-on relay **deletes an entire class of
+problems** the old client-conductor had — leader election, failover, rescue,
+sticky-conductor handoff, and the round-robin divergence bugs they caused.
+
+### Synced playback (drift correction)
+
+The conductor republishes `now_playing` on every track change and as a **~15 s
+heartbeat** carrying a fresh `sent_at`. Each client calibrates a clock offset
+`offset = sent_at − now()` from every heartbeat and computes its local position as
+`pos_ms = now() + offset − started_at`. The YouTube player is nudged back into
+line only when it drifts past a threshold (set-and-forget, not every tick), so
+playback stays smooth. Late arrivals are in sync within one heartbeat; when no DJ
+is active or the queue is empty, the stream stops and a **lobby placeholder** plays.
+
+### Round-robin
+
+A single integer `pos` on `now_playing` indexes the whole club set across `n`
+staged DJs: `djIndex = pos % n`, `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0,
+… dj0.t1, …`. A "playable" matrix masks out already-played tracks, tracks marked
+`off`, and DJs who aren't present (no recent `20100` presence beat); `advance()`
+walks to the next playable slot. It's O(1) and the 5-DJ cap is purely a UI limit.
+DJ order is deterministic across all clients because it's sorted by the persisted
+`since` from each `30102`; a stage slot stays **sticky for ~1 h** after the last
+heartbeat so a reload or brief drop doesn't bump a DJ. (When the owner is on stage
+they are pinned as the played DJ regardless of `since`.)
+
+### Moderation
+
+- **Skip** — the conductor skips its own current track directly. An owner/mod who
+  isn't the conductor posts a `30107` skip-request; the relay **validates the
+  sender's role** before acting (a plain member's request is ignored).
+- **Broken track** — if a quorum of **2** distinct members report the running
+  track unplayable (`20102`), the relay skips it automatically.
+- **Ban** — relay-enforced: a `9001` kick removes membership and the admin API
+  purges the offender's events; a relay-side ban list rejects re-joins (an open
+  club would otherwise let a kicked member walk straight back in via `9021`).
+- **Appoint moderator / remove from stage** — owner-gated via NIP-29 roles.
+
+### Audio & zaps
+
+Audio is **embed-sync**: every client loads the *same* YouTube video and only the
+*position* is synchronized — no hosting, no re-encoding, no licensing deal (the
+embed plays under YouTube's own terms). The IFrame is cross-origin, so the page
+can't read its audio samples (hence no real waveform/beat analysis).
+
+**Zaps** are [NIP-57](https://nips.nostr.com/57): the live DJ is the `p` tag on
+`now_playing`, their LNURL is resolved from their Nostr profile (falling back to a
+house address so the score still credits them), and you pay via the Alby extension
+(WebLN), Alby Go on mobile (`alby:` deep link), or any wallet by QR/copy. Because
+the wallet's receipt relays don't always publish the `9735` back to us, the client
+also broadcasts a `20101` into the club so zaps animate live; the DJ's score is
+tallied from verified receipts.
+
+### Security & hardening
+
+- **Members-only writes** — content events are accepted only from a member of the
+  group in their `h` tag (relay29 membership); non-members are rejected.
+- **Conductor events are relay-only** — `30100`/`1313` are rejected from any
+  non-relay author, so clients can't forge or pollute playback state.
+- **NIP-42 AUTH** challenge on connect; the relay listens only on `127.0.0.1`
+  behind Caddy (TLS, HSTS, `X-Frame-Options: DENY`, `nosniff`).
+- **Rate limits** — per-pubkey limits on chat/reactions, per-IP limits on the
+  `/yt-search` endpoint (yt-dlp is expensive); NIP-13 proof-of-work on chat.
+- **Bounded memory** — 5-minute background sweeps trim the search cache, limiter
+  buckets and play-log so badger stays small.
 
 ## Tech stack
 
