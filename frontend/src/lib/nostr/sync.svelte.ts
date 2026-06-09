@@ -116,15 +116,16 @@ function playableMatrix(djs: string[]): boolean[][] {
   )
 }
 
-/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans FORWARD from the
- *  relay's current `pos` (matching the relay's `advance` — it goes forward, not from the top),
- *  excluding the running track. Falls back to the top only when nothing is playing yet. */
+/** Preview of the next round-robin tracks (across all DJs), max `max`. Scans from the TOP — the
+ *  first PLAYABLE track per DJ, round-robin — exactly like the relay's `advance` (each DJ's
+ *  position 1 is next, so a reorder is reflected immediately). The played-set excludes already-
+ *  played tracks, so this walks forward without re-picking. */
 export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
   const djs = stage.djs.map((d) => d.pubkey)
   if (djs.length === 0) return []
   const playable = playableMatrix(djs)
   const out: { dj: string; videoId: string; title: string }[] = []
-  let pos = state.np?.pos ?? -1
+  let pos = -1
   for (let i = 0; i < max; i++) {
     const next = nextPlayablePos(pos, djs.length, playable)
     if (next === -1) break

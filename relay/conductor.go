@@ -484,18 +484,12 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	if pb.videoID != "" {
 		pb.played[pb.videoID] = true
 	}
-	// Scan FORWARD from the current pos (round-robin order) — NOT from the top. A from-top scan
-	// re-picks the first active track, so when a *present* DJ's client hasn't marked the
-	// just-played tracks `off` yet (e.g. a backgrounded tab that still beacons presence but isn't
-	// running the play→off logic — the relay drives playback autonomously now), it bounces between
-	// two active tracks forever. Forward progression can't oscillate. Fresh start (not yet
-	// playing) → from the top; on exhaustion → bump the loop epoch, clear played, restart from top.
-	var next int
-	if pb.playing {
-		next = nextPlayablePos(pb.pos, len(djPks), c.matrix(club, djPks, queues, pb, now))
-	} else {
-		next = firstPlayablePos(len(djPks), c.matrix(club, djPks, queues, pb, now))
-	}
+	// Always scan from the TOP of each DJ's queue (round-robin over each DJ's first PLAYABLE
+	// track): the next track is position 1 of the playlist, so a DJ's drag-and-drop reorder takes
+	// effect immediately on the next advance. The played-set (excluded for ALL DJs in matrix())
+	// makes this safe — already-played tracks drop out, so "first playable" walks forward and can
+	// never oscillate (the old oscillation came from NOT excluding a present DJ's played tracks).
+	next := firstPlayablePos(len(djPks), c.matrix(club, djPks, queues, pb, now))
 	if next == -1 {
 		// Every DJ's queue is fully played (or disabled) → stop to the lobby. NO auto-loop: a set
 		// plays through exactly once, then the lobby placeholder runs until a DJ adds tracks (or
