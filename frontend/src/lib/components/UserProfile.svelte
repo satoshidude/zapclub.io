@@ -47,14 +47,16 @@
 
   let othersPlaylists = $state<Playlist[]>([])
   let loading = $state(true)
-  let hosting = $state<Club[]>([])
+  let memberOf = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
+  let topClubId = $state<string | null>(null)
+  let rolesById = $state<Record<string, string[]>>({})
   let received = $state<ReceivedZaps | null>(null)
   let zapRank = $state<ZapRank | null>(null)
   let likedTracks = $state<UserLike[]>([])
 
   // Clubs the user is currently on stage in (relay-derived djingIn; on the own profile also
-  // the locally-persisted stage marker) → green "on stage" border in BOTH sections, like home.
+  // the locally-persisted stage marker) → green "on stage" border in the clubs list, like home.
   const onStageIds = $derived(
     new Set<string>([
       ...djingIn.map((c) => c.id),
@@ -85,12 +87,16 @@
     } else {
       loading = false
     }
-    // Clubs this user hosts / is currently DJing in.
-    hosting = []
+    // Clubs this user is a member of (current/last-DJ'd pinned on top), public for everyone.
+    memberOf = []
     djingIn = []
+    topClubId = null
+    rolesById = {}
     void fetchUserClubActivity(pk).then((a) => {
-      hosting = a.hosting
+      memberOf = a.memberOf
       djingIn = a.djingIn
+      topClubId = a.topClubId
+      rolesById = a.rolesById
     })
     // Public: global zap placement + headline totals (sats, how many people — not who).
     zapRank = null
@@ -388,35 +394,40 @@
     </section>
   {/if}
 
-  {#snippet clubRow(c: Club, live: boolean)}
+  {#snippet roleTag(c: Club)}
+    {#if c.owner === pubkey}
+      <span class="ctag role host">👑 Host</span>
+    {:else if (rolesById[c.id] ?? []).includes('moderator')}
+      <span class="ctag role">🛡️ Mod</span>
+    {:else if onStageIds.has(c.id)}
+      <span class="ctag role">🎛️ DJ</span>
+    {/if}
+  {/snippet}
+
+  {#snippet clubRow(c: Club, live: boolean, lastStage: boolean)}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="club-row" class:live role="button" tabindex="0" onclick={() => goClub(c.id)}>
-      {#if live}<span class="live-badge">● on stage</span>{/if}
+      {#if live}<span class="live-badge">● on stage</span>
+      {:else if lastStage}<span class="live-badge last">last on stage</span>{/if}
       <div class="club-pic"><img src={c.picture || clubAvatar(c.owner || c.id)} alt="" /></div>
       <div class="club-meta">
         <div class="club-name">{c.name}</div>
         {#if c.about}<div class="club-about">{c.about}</div>{/if}
         <div class="club-tags">
+          {@render roleTag(c)}
           <span class="ctag">👥 {c.memberCount ?? 0} member{(c.memberCount ?? 0) === 1 ? '' : 's'}</span>
         </div>
       </div>
     </div>
   {/snippet}
 
-  {#if djingIn.length}
+  {#if memberOf.length}
     <section class="clubs">
-      <h2>On stage now <span class="live-dot" aria-hidden="true"></span></h2>
+      <h2>Member of <span class="count">{memberOf.length}</span></h2>
       <div class="club-list">
-        {#each djingIn as c (c.id)}{@render clubRow(c, true)}{/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if hosting.length}
-    <section class="clubs">
-      <h2>Hosting <span class="count">{hosting.length}</span></h2>
-      <div class="club-list">
-        {#each hosting as c (c.id)}{@render clubRow(c, onStageIds.has(c.id))}{/each}
+        {#each memberOf as c (c.id)}
+          {@render clubRow(c, onStageIds.has(c.id), c.id === topClubId && !onStageIds.has(c.id))}
+        {/each}
       </div>
     </section>
   {/if}
@@ -958,6 +969,19 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
+  .live-badge.last {
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+  .ctag.role {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+    font-weight: 700;
+  }
+  .ctag.role.host {
+    color: var(--amber);
+    border-color: var(--amber);
+  }
   .club-pic {
     width: 52px;
     height: 52px;
@@ -1001,14 +1025,6 @@
     border-radius: 999px;
     padding: 0.1rem 0.5rem;
     white-space: nowrap;
-  }
-  .live-dot {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 999px;
-    background: var(--accent);
-    animation: club-pulse 1.6s ease-in-out infinite;
   }
   .pls {
     margin-top: 1.4rem;

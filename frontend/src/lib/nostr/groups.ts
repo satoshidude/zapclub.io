@@ -426,36 +426,91 @@ export async function fetchMyClubs(pubkey: string): Promise<MyClub[]> {
 // heartbeat — matches the stage's own sticky STALE_MS.
 const STAGE_STALE_MS = 3_600_000
 
+export interface UserClubActivity {
+  /** Every club the user is a member of (incl. ones they host), as full cards, ordered:
+   *  current/last-DJ'd first, then live, then hosted, then by member count. */
+  memberOf: Club[]
+  /** Clubs the user is live on stage in right now (fresh, non-"off" stage event). */
+  djingIn: Club[]
+  /** Clubs the user owns (hosts). */
+  hosting: Club[]
+  /** The club to pin at the very top: where they're DJing now, else where they last DJ'd
+   *  (newest 30102 by this author) — provided they're still a member. Null if neither. */
+  topClubId: string | null
+  /** club id → the user's NIP-29 roles on it (from 39002), e.g. ['dj'] / ['moderator']. */
+  rolesById: Record<string, string[]>
+}
+
 /**
- * A user's club activity for their profile: clubs they own (host) and the club they're
- * currently DJing in (a fresh, non-"off" stage event). Both resolved to full Club cards.
+ * A user's club activity for their profile: every club they're a MEMBER of (public or private),
+ * with the club they're currently DJing in — or last DJ'd in — pinned to the top. Also surfaces
+ * which they host and their per-club roles, so the profile can badge each row.
  */
-export async function fetchUserClubActivity(
-  pubkey: string,
-): Promise<{ hosting: Club[]; djingIn: Club[] }> {
-  const [clubs, stageEvents] = await Promise.all([
+export async function fetchUserClubActivity(pubkey: string): Promise<UserClubActivity> {
+  const [clubs, memberEvents] = await Promise.all([
     listClubs(),
-    pool.querySync(RELAYS, { kinds: [KIND_STAGE], authors: [pubkey] }, { maxWait: 4000 }),
+    pool.querySync(RELAYS, { kinds: [KIND_MEMBERS], '#p': [pubkey] }, { maxWait: 4000 }),
   ])
   const byId = new Map(clubs.map((c) => [c.id, c]))
-  const hosting = clubs.filter((c) => c.owner === pubkey)
 
-  // Newest stage event per club; live if not stepped "off" and within the sticky window.
+  // Membership (39002 carrying this pubkey) → ids + roles. The owner is implicitly a member.
+  const rolesById: Record<string, string[]> = {}
+  const memberIds = new Set<string>()
+  for (const ev of memberEvents) {
+    const id = tagValue(ev, 'd')
+    if (!id) continue
+    memberIds.add(id)
+    const mine = ev.tags.find((t) => t[0] === 'p' && t[1] === pubkey)
+    rolesById[id] = mine ? mine.slice(2) : []
+  }
+  const hosting = clubs.filter((c) => c.owner === pubkey)
+  for (const c of hosting) memberIds.add(c.id)
+
+  // Stage events (30102) are GROUP-SCOPED on the relay — a query by `authors` alone returns
+  // nothing (relay29 only serves content reads filtered by the group `#h`). So query the user's
+  // own club h-tags, then keep their own events. (A DJ is always a member, so memberIds covers it.)
+  const ids = [...memberIds]
+  const stageEvents = ids.length
+    ? (await pool.querySync(RELAYS, { kinds: [KIND_STAGE], '#h': ids }, { maxWait: 4000 })).filter(
+        (ev) => ev.pubkey === pubkey,
+      )
+    : []
+
+  // Newest stage event per club (live if fresh + not "off") + the single newest overall (the
+  // club they currently / most recently DJ'd in, regardless of off/stale).
   const newestByGroup = new Map<string, Event>()
+  let lastStage: Event | null = null
   for (const ev of stageEvents) {
     const h = tagValue(ev, 'h')
     if (!h) continue
     const ex = newestByGroup.get(h)
     if (!ex || ev.created_at > ex.created_at) newestByGroup.set(h, ev)
+    if (!lastStage || ev.created_at > lastStage.created_at) lastStage = ev
   }
   const nowMs = Date.now()
+  const liveIds = new Set<string>()
   const djingIn: Club[] = []
   for (const [h, ev] of newestByGroup) {
     if (ev.content === 'off' || nowMs - ev.created_at * 1000 >= STAGE_STALE_MS) continue
     const c = byId.get(h)
-    if (c) djingIn.push(c)
+    if (c) {
+      djingIn.push(c)
+      liveIds.add(h)
+    }
   }
-  return { hosting, djingIn }
+
+  const lastH = lastStage ? tagValue(lastStage, 'h') : null
+  const topClubId = lastH && byId.has(lastH) && memberIds.has(lastH) ? lastH : null
+
+  const ownerIds = new Set(hosting.map((c) => c.id))
+  const rank = (c: Club): number =>
+    c.id === topClubId ? 0 : liveIds.has(c.id) ? 1 : ownerIds.has(c.id) ? 2 : 3
+  const memberOf = [...memberIds]
+    .map((id) => byId.get(id))
+    .filter((c): c is Club => !!c)
+    .sort((a, b) => rank(a) - rank(b) || (b.memberCount ?? 0) - (a.memberCount ?? 0))
+
+  return { memberOf, djingIn, hosting, topClubId, rolesById }
 }
 
 /**
