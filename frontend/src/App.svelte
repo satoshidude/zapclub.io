@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome } from './lib/router.svelte'
+  import { router, goHome, goAbout } from './lib/router.svelte'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import LoginButton from './lib/components/LoginButton.svelte'
   import LoginDialog from './lib/components/LoginDialog.svelte'
@@ -10,6 +10,7 @@
   import UserProfile from './lib/components/UserProfile.svelte'
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
+  import About from './lib/components/About.svelte'
   import MiniPlayer from './lib/components/MiniPlayer.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
@@ -73,6 +74,8 @@
     <AdminDashboard />
   {:else if router.route.name === 'howto'}
     <HowTo />
+  {:else if router.route.name === 'about'}
+    <About />
   {:else}
     <ClubList />
   {/if}
@@ -83,7 +86,7 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <span class="foot-note">Powered by Nostr &amp; Lightning · no tracking</span>
+  <span class="foot-note"><button class="foot-link" onclick={goAbout}>How it works</button> · Powered by Nostr &amp; Lightning · no tracking</span>
   <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 
@@ -183,6 +186,17 @@
   }
   .block:hover {
     color: var(--accent);
+    text-decoration: underline;
+  }
+  .foot-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  .foot-link:hover {
     text-decoration: underline;
   }
   /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
