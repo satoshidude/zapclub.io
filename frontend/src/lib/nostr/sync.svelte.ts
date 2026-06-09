@@ -137,7 +137,10 @@ export function upcomingTracks(max = 5): { dj: string; videoId: string; title: s
 
 /** Whether the local user may skip — an owner/moderator (the relay validates the role too). */
 export function canSkip(canModerate = false): boolean {
-  return !!auth.pubkey && !!sync.live && canModerate
+  if (!auth.pubkey || !sync.live) return false
+  // The currently-playing DJ may skip their own track; an owner/moderator may always skip.
+  // (The relay validates the same authors on the 30107 skip-request.)
+  return canModerate || sync.live.dj === auth.pubkey
 }
 
 /**

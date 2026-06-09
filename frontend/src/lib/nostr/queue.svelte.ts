@@ -187,6 +187,19 @@ export function setTrackTitle(groupId: string, videoId: string, title: string): 
   return publishMyQueue(groupId, tracks.map((x, i) => (i === idx ? { ...x, title: t } : x)))
 }
 
+/**
+ * Backfills MY track's duration (learned from the YouTube player when it plays) when it's still
+ * 0/unknown, and republishes — so the length shows in the Live Set / saved playlists and the
+ * relay's now_playing carries it. Only fills a missing duration; never overwrites a known one.
+ */
+export function enrichMyTrackDuration(groupId: string, videoId: string, duration: number): Promise<void> {
+  if (duration <= 0) return Promise.resolve()
+  const tracks = myTracks()
+  const idx = tracks.findIndex((t) => t.videoId === videoId)
+  if (idx < 0 || tracks[idx].duration > 0) return Promise.resolve()
+  return publishMyQueue(groupId, tracks.map((t, i) => (i === idx ? { ...t, duration } : t)))
+}
+
 /** Sets/clears a track's custom cover image (by videoId) in MY queue + republishes (on change). */
 export function setTrackImage(groupId: string, videoId: string, image: string | undefined): Promise<void> {
   const tracks = myTracks()

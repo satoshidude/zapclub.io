@@ -4,7 +4,7 @@
   import { goUser } from '../../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
-  import { enrichMyTrackTitle, queues } from '../../nostr/queue.svelte'
+  import { enrichMyTrackTitle, enrichMyTrackDuration, queues } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
   import Player from './Player.svelte'
@@ -163,6 +163,8 @@
         if (a && np.dj === auth.pubkey && np.title && !/ [–—-] /.test(np.title)) {
           void enrichMyTrackTitle(clubId, np.videoId, `${a} - ${np.title}`)
         }
+      }} onduration={(secs) => {
+        if (np && np.dj === auth.pubkey) void enrichMyTrackDuration(clubId, np.videoId, secs)
       }} />
       {#if coverImage}<img class="cover-img" src={coverImage} alt="" />{/if}
       <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>

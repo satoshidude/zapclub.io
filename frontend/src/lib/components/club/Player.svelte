@@ -17,8 +17,9 @@
     /** Live embed metadata (channel + title) once a real track plays — no extraction, no bot
      *  gate. Lets the card show the artist (from a "Artist - Topic" channel) for bare titles. */
     onmeta?: (author: string, title: string) => void
+    onduration?: (seconds: number) => void
   }
-  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta }: Props = $props()
+  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta, onduration }: Props = $props()
 
   let lobbyFailed = false
 
@@ -54,6 +55,8 @@
         if (!idleMode && player) {
           const d = player.getVideoData()
           if (d && (d.author || d.title)) onmeta?.(d.author ?? '', d.title ?? '')
+          const dur = Math.round(player.getDuration())
+          if (dur > 0) onduration?.(dur)
         }
       }
       if (s !== 0) return // 0 = ended

@@ -9,8 +9,6 @@
     loadMyPlaylists,
     reorderTrack,
     removeFromPlaylist,
-    moveTrackBetween,
-    copyTrackTo,
     createPlaylist,
     addTrackToPlaylist,
     addTracksToPlaylist,
@@ -165,15 +163,6 @@
   // ▶ preview / edit-details modal (library context).
   let preview = $state<{ track: QueueTrack; playlistId: string; canEdit: boolean } | null>(null)
 
-  function onMoveCopy(plId: string, track: QueueTrack, sel: HTMLSelectElement) {
-    const v = sel.value
-    sel.value = ''
-    if (!v) return
-    const [action, toId] = v.split(':')
-    if (action === 'move') void moveTrackBetween(plId, toId, track.videoId)
-    else if (action === 'copy')
-      void copyTrackTo(toId, { videoId: track.videoId, title: track.title, duration: track.duration })
-  }
 
   // ── Create / fill playlists + push to the live stage set ─────────────────
   // The club the user is currently a DJ in (if any) — target for "add to set".
@@ -451,21 +440,12 @@
                       <span class="t-title">{t.title}</span>
                       <span class="dim dur">{fmt(t.duration)}</span>
                       {#if isMe}
-                        {#if list.length > 1}
-                          <select class="mc" title="Move or copy to another playlist" onchange={(e) => onMoveCopy(pl.id, t, e.currentTarget)}>
-                            <option value="">⋯</option>
-                            {#each list.filter((p) => p.id !== pl.id) as other (other.id)}
-                              <option value="move:{other.id}">→ Move to {other.name}</option>
-                              <option value="copy:{other.id}">⎘ Copy to {other.name}</option>
-                            {/each}
-                          </select>
-                        {/if}
                         <button class="t-rm" title="Remove" onclick={() => removeFromPlaylist(pl.id, t.videoId)}>✕</button>
                       {/if}
                     </li>
                   {/each}
                 </ol>
-                {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · ⋯ to move/copy to another playlist · ▶ to preview</p>{/if}
+                {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · ▶ to preview</p>{/if}
               {/if}
 
               {#if isMe}
@@ -1038,16 +1018,6 @@
   .tracks .play:hover {
     border-color: var(--accent);
     filter: brightness(1.15);
-  }
-  .mc {
-    flex: 0 0 auto;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 6px;
-    font-size: 0.72rem;
-    padding: 0.1rem 0.2rem;
-    max-width: 5.5rem;
   }
   .t-rm {
     flex: 0 0 auto;

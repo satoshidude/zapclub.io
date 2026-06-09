@@ -236,6 +236,8 @@
   .video {
     position: relative;
     width: 100%;
+    max-width: 300px;
+    margin: 0 auto;
     aspect-ratio: 16 / 9;
     border-radius: var(--radius-sm);
     overflow: hidden;
