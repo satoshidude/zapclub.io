@@ -46,10 +46,6 @@
   // A DJ is actually playing → the floor dances; otherwise it just idles (no one's on).
   const playing = $derived(!!currentDj)
 
-  // Shared, clock-synced pulse: all clients align the floor's beat to the wall clock, so the
-  // crowd appears to move on the same beat without any (impossible, cross-origin) audio analysis.
-  const beatDelay = -(Date.now() % 500)
-
   // Deterministic per-pubkey dance — stable across renders (no Math.random), so the crowd looks
   // varied but doesn't reshuffle. Encodes variant, duration, phase offset, amplitude and a small
   // scatter offset as CSS vars.
@@ -60,8 +56,8 @@
   }
   function danceVars(pk: string): string {
     const h = hash(pk)
-    const dur = (0.7 + ((h >>> 0) % 40) / 100).toFixed(2) // 0.70–1.09s
-    const delay = (-(((h >>> 5) % 110) / 100)).toFixed(2) // 0 to -1.09s (phase)
+    const dur = (0.7 + ((h >>> 0) % 60) / 100).toFixed(2) // 0.70–1.29s (varied tempo)
+    const delay = (-(((h >>> 5) % 130) / 100)).toFixed(2) // 0 to -1.29s (phase offset → no lockstep)
     const amp = (0.85 + ((h >>> 11) % 30) / 100).toFixed(2) // 0.85–1.14
     const dx = (((h >>> 17) % 9) - 4).toFixed(0) // -4..4 px scatter
     const dy = (((h >>> 21) % 7) - 3).toFixed(0) // -3..3 px scatter
@@ -97,7 +93,7 @@
 
   <!-- The dancing crowd (online members) — loose flat cluster. -->
   {#if shownOnline.length > 0}
-    <div class="crowd" style={`--beat-delay:${beatDelay}ms`}>
+    <div class="crowd">
       {#each shownOnline as m (m.pubkey)}
         {@const profile = useProfile(m.pubkey)}
         <button
@@ -108,7 +104,7 @@
           onclick={() => (selected = selected === m.pubkey ? null : m.pubkey)}
         >
           <span class="bob v{variantOf(m.pubkey)}">
-            <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="44" height="44" loading="lazy" />
+            <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="58" height="58" loading="lazy" />
           </span>
           <span class="nm">{displayName(m.pubkey, profile)}</span>
         </button>
@@ -204,8 +200,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    width: 52px;
+    gap: 3px;
+    width: 66px;
     transform: translate(var(--dx, 0), var(--dy, 0));
   }
   .bob {
@@ -227,7 +223,7 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent), 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .nm {
-    max-width: 52px;
+    max-width: 66px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -263,9 +259,14 @@
     filter: grayscale(0.6);
   }
 
-  /* The dance: 4 deterministic variants, only while a DJ is playing. */
+  /* The dance: 4 deterministic variants, only while a DJ is playing. Longhand so the per-pubkey
+     duration/delay reliably apply (→ varied phases, no lockstep). */
   .floor.playing .bob {
-    animation: var(--anim, dance0) var(--dur, 0.9s) var(--delay, 0s) infinite ease-in-out;
+    animation-name: var(--anim, dance0);
+    animation-duration: var(--dur, 0.9s);
+    animation-delay: var(--delay, 0s);
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
   }
   .floor.playing .v0 { --anim: dance0; }
   .floor.playing .v1 { --anim: dance1; }
@@ -289,15 +290,6 @@
     25% { transform: translateX(0) translateY(-3px); }
     50% { transform: translateX(calc(4px * var(--amp, 1))); }
     75% { transform: translateX(0) translateY(-3px); }
-  }
-
-  /* Shared, clock-synced beat: a gentle whole-floor pulse so the crowd reads as "on the beat". */
-  .floor.playing .crowd {
-    animation: floorpulse 0.5s var(--beat-delay, 0ms) infinite ease-in-out;
-  }
-  @keyframes floorpulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.012); }
   }
 
   .card-pop {
@@ -387,8 +379,7 @@
   .chev { transition: transform 0.15s; }
 
   @media (prefers-reduced-motion: reduce) {
-    .floor.playing .bob,
-    .floor.playing .crowd {
+    .floor.playing .bob {
       animation: none !important;
     }
   }
