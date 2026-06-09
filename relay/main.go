@@ -291,8 +291,13 @@ func main() {
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
 	go cond.run()
 
+	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).
+	board := newZapBoard(env("RELAY_LEADERBOARD", "./leaderboard.json"))
+	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
+
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
+	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
@@ -328,6 +333,7 @@ func main() {
 			// Advance/trim the listener buckets even when idle, then persist (5-min tick
 			// matches the 5-min bucket → at most one bucket lost on an unclean crash).
 			listeners.tick(time.Now().UnixMilli(), true)
+			board.save()
 			// Drop play-log records older than 24h (client reads only a ≤6h window).
 			pruneOldPlays(db, time.Now().Add(-24*time.Hour).Unix())
 		}
@@ -340,6 +346,7 @@ func main() {
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 		<-sig
 		listeners.save()
+		board.save()
 		os.Exit(0)
 	}()
 

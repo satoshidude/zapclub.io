@@ -213,6 +213,30 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
+// 4d. Zap leaderboard: a member's kind-20101 zap broadcast is aggregated by the relay and
+//     surfaced at the public GET /leaderboard endpoint (relay/leaderboard.go). Deduped by
+//     bolt11, self-zaps ignored, distinct senders counted. Needs the HTTP base (ADMIN_URL).
+if (process.env.ADMIN_URL) {
+  const LB = process.env.ADMIN_URL
+  console.log('\n-- zap leaderboard --')
+  // mem zaps host 210 sats; a duplicate (same bolt11) must NOT double-count.
+  const zb = await mem.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
+  assert(zb[0] === true, 'leaderboard: member zap broadcast (20101) accepted: ' + ok(zb))
+  await mem.ev({ kind: 20101, created_at: now() + 1, tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
+  await sleep(900)
+  const r = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(r.ranked === true && r.sats === 210, `leaderboard: host ranked with 210 sats (bolt11 dedup) — got ${JSON.stringify(r)}`)
+  assert(r.zappers === 1, `leaderboard: 1 distinct zapper — got ${r.zappers}`)
+  // a self-zap (sender == recipient) must be ignored.
+  await host.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '9999'], ['bolt11', 'self_e2e']], content: '' })
+  await sleep(700)
+  const r2 = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(r2.sats === 210, `leaderboard: self-zap ignored (still 210) — got ${r2.sats}`)
+  // someone with no received zaps is unranked.
+  const r3 = await fetch(LB + '/leaderboard?pubkey=' + stranger.pub).then((x) => x.json())
+  assert(r3.ranked === false, 'leaderboard: a user with no received zaps is unranked')
+}
+
 // 5. Superadmin HTTP API (NIP-98): ban + purge + replay + unban + delete-club.
 //    Only runs when ADMIN_SK (whose pubkey the relay was booted with as RELAY_SUPERADMIN)
 //    and ADMIN_URL are set — see e2e.sh, which wires it all up.

@@ -24,7 +24,9 @@
   import { publishMyProfile } from '../nostr/profileEdit'
   import { logout } from '../nostr/nostrLogin'
   import { fetchReceivedZaps, type ReceivedZaps } from '../nostr/zaps.svelte'
+  import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
+  import { isSuperadmin } from '../nostr/admin'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
@@ -38,6 +40,9 @@
     }
   })
   const isMe = $derived(!!auth.pubkey && auth.pubkey === pubkey)
+  // Liked tracks + playlists are PRIVATE: only the owner (logged in as themselves) or the
+  // superadmin may see them. Everyone else sees just the public profile + the zap ranking.
+  const canSeePrivate = $derived(isMe || isSuperadmin())
   const profile = $derived(pubkey ? useProfile(pubkey) : null)
 
   let othersPlaylists = $state<Playlist[]>([])
@@ -45,6 +50,7 @@
   let hosting = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
   let received = $state<ReceivedZaps | null>(null)
+  let zapRank = $state<ZapRank | null>(null)
   let likedTracks = $state<UserLike[]>([])
 
   // Clubs the user is currently on stage in (relay-derived djingIn; on the own profile also
@@ -63,15 +69,21 @@
       return
     }
     loading = true
-    // Tracks this user liked (🔥), newest first.
+    // Liked tracks + playlists are private (owner or superadmin only). Don't even fetch them
+    // for a stranger — they can't be shown and it saves the relay queries.
     likedTracks = []
-    void fetchUserLikes(pk).then((l) => (likedTracks = l))
-    if (isMe) {
-      void loadMyPlaylists().finally(() => (loading = false))
+    othersPlaylists = []
+    if (canSeePrivate) {
+      void fetchUserLikes(pk).then((l) => (likedTracks = l))
+      if (isMe) {
+        void loadMyPlaylists().finally(() => (loading = false))
+      } else {
+        fetchPlaylists(pk)
+          .then((p) => (othersPlaylists = p))
+          .finally(() => (loading = false))
+      }
     } else {
-      fetchPlaylists(pk)
-        .then((p) => (othersPlaylists = p))
-        .finally(() => (loading = false))
+      loading = false
     }
     // Clubs this user hosts / is currently DJing in.
     hosting = []
@@ -80,9 +92,12 @@
       hosting = a.hosting
       djingIn = a.djingIn
     })
-    // Zaps received (all-time), grouped by sender.
+    // Public: global zap placement + headline totals (sats, how many people — not who).
+    zapRank = null
+    void fetchZapRank(pk).then((r) => (zapRank = r))
+    // The detailed "who zapped you" breakdown (verified 9735) is OWNER-ONLY.
     received = null
-    void fetchReceivedZaps(pk).then((r) => (received = r))
+    if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
   })
 
   // ── Profile editor (own profile only) ──────────────────────────────────
@@ -300,19 +315,30 @@
     </div>
   {/if}
 
-  {#if received && received.total > 0}
+  <!-- Public zap ranking: total sats received, how many people zapped (NOT who), and the
+       user's global placement. Shown to everyone. -->
+  {#if zapRank && zapRank.sats > 0}
+    <section class="card ziprank">
+      <div class="zr-place">
+        <span class="zr-hash">#</span><span class="zr-num">{zapRank.rank.toLocaleString()}</span>
+        <span class="zr-of">of {zapRank.total.toLocaleString()} {zapRank.total === 1 ? 'DJ' : 'DJs'}</span>
+      </div>
+      <div class="zr-stat">
+        <span class="zr-amt">⚡ {zapRank.sats.toLocaleString()}</span>
+        <span class="zr-unit">sats received</span>
+        <span class="zr-from">from {zapRank.zappers.toLocaleString()} {zapRank.zappers === 1 ? 'person' : 'people'}</span>
+      </div>
+    </section>
+  {/if}
+
+  <!-- Who zapped you (verified 9735, incl. names) — OWNER-ONLY by request. -->
+  {#if isMe && received && received.bySender.length > 0}
     <section class="card zaps-recv">
-      <h2>⚡ Received <span class="recv-total">{received.total.toLocaleString()} sats</span>
-        <span class="count">from {received.bySender.length} {received.bySender.length === 1 ? 'person' : 'people'}</span>
-      </h2>
+      <h2>⚡ Who zapped you <span class="count">private</span></h2>
       {#if !profile?.lud16}
         <p class="recv-note">
           🙏 No lightning address yet, so these sats went to <strong>zapclub</strong> — thank you!
-          {#if isMe}
-            <button class="recv-link" onclick={openEditor}>Add a receiving address</button> so future zaps reach you directly.
-          {:else}
-            Please add a receiving address (lud16) to your profile so future zaps reach you directly.
-          {/if}
+          <button class="recv-link" onclick={openEditor}>Add a receiving address</button> so future zaps reach you directly.
         </p>
       {/if}
       <ul class="senders">
@@ -338,7 +364,7 @@
     </section>
   {/if}
 
-  {#if likedTracks.length > 0}
+  {#if canSeePrivate && likedTracks.length > 0}
     <section class="card liked">
       <h2>🔥 {isMe ? 'Tracks you liked' : 'Liked tracks'} <span class="count">{likedTracks.length}</span></h2>
       <ol class="liked-list">
@@ -395,6 +421,8 @@
     </section>
   {/if}
 
+  <!-- Playlists are PRIVATE: only the owner or the superadmin sees them. -->
+  {#if canSeePrivate}
   <section class="pls">
     <div class="pls-head">
       <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
@@ -410,7 +438,7 @@
       <p class="dim">Loading playlists…</p>
     {:else if list.length === 0}
       <p class="dim">
-        {isMe ? 'No saved playlists yet — save a set from a club’s DJ Station.' : 'No public playlists.'}
+        {isMe ? 'No saved playlists yet — save a set from a club’s DJ Station.' : 'No playlists.'}
       </p>
     {:else}
       <ul class="pl-list">
@@ -494,6 +522,7 @@
       </ul>
     {/if}
   </section>
+  {/if}
 </div>
 
 {#if preview}
@@ -677,6 +706,62 @@
     font-size: 0.82rem;
     margin: 0;
   }
+  /* Public zap ranking — the prominent headline stat. */
+  .ziprank {
+    margin-top: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    flex-wrap: wrap;
+    background: linear-gradient(135deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+    border-color: var(--amber);
+  }
+  .zr-place {
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    padding-right: 1.1rem;
+    border-right: 1px solid var(--border);
+  }
+  .zr-hash {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--text-dim);
+  }
+  .zr-num {
+    font-size: 2.6rem;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--text);
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .zr-of {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .zr-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+  }
+  .zr-amt {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--amber);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .zr-unit {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .zr-from {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-top: 0.1rem;
+  }
   .zaps-recv {
     margin-top: 1rem;
   }
@@ -687,9 +772,6 @@
     align-items: baseline;
     gap: 0.5rem;
     flex-wrap: wrap;
-  }
-  .recv-total {
-    color: var(--amber);
   }
   .senders {
     list-style: none;
