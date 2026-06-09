@@ -176,6 +176,15 @@ export async function enrichQueueTitles(groupId: string): Promise<void> {
   if (changed) await publishMyQueue(groupId, next)
 }
 
+/** Edits a track's title (by videoId) in MY queue + republishes (only on a real change). */
+export function setTrackTitle(groupId: string, videoId: string, title: string): Promise<void> {
+  const t = title.trim()
+  const tracks = myTracks()
+  const idx = tracks.findIndex((x) => x.videoId === videoId)
+  if (idx < 0 || !t || tracks[idx].title === t) return Promise.resolve()
+  return publishMyQueue(groupId, tracks.map((x, i) => (i === idx ? { ...x, title: t } : x)))
+}
+
 /** Sets a track's active state (by videoId) + publishes (only on change). */
 export function setTrackActive(groupId: string, videoId: string, active: boolean): Promise<void> {
   const tracks = myTracks()

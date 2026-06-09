@@ -20,6 +20,7 @@
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../player/youtube'
   import { fetchUserClubActivity } from '../nostr/groups'
   import { goClub, goUser, goHowto } from '../router.svelte'
+  import TrackPreview from './TrackPreview.svelte'
   import { clubAvatar } from '../avatar'
   import { npubEncode } from 'nostr-tools/nip19'
   import { publishMyProfile } from '../nostr/profileEdit'
@@ -133,19 +134,37 @@
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
-  // Drag-and-drop: reorder within a playlist, or move a track to another playlist.
+  // Pointer-based reorder WITHIN a playlist — works with touch AND mouse (HTML5 drag fires no
+  // touch events). Cross-playlist move/copy is the ⋯ select below (already touch-friendly).
   let drag = $state<{ plId: string; index: number } | null>(null)
-  function onTrackDrop(plId: string, toIndex: number) {
-    if (!drag) return
-    if (drag.plId === plId) {
-      void reorderTrack(plId, drag.index, toIndex)
-    } else {
-      const from = list.find((p) => p.id === drag!.plId)
-      const track = from?.tracks[drag.index]
-      if (track) void moveTrackBetween(drag.plId, plId, track.videoId)
-    }
-    drag = null
+  let dropIndex = $state<number | null>(null)
+  function dragStart(e: PointerEvent, plId: string, index: number) {
+    drag = { plId, index }
+    dropIndex = index
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    window.addEventListener('pointermove', dragMove)
+    window.addEventListener('pointerup', dragEnd)
   }
+  function dragMove(e: PointerEvent) {
+    if (!drag) return
+    const li = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('li[data-i]') as HTMLElement | null
+    const ol = li?.closest('ol[data-pl]') as HTMLElement | null
+    if (li?.dataset.i != null && ol?.dataset.pl === drag.plId) {
+      const i = Number(li.dataset.i)
+      if (!Number.isNaN(i)) dropIndex = i
+    }
+  }
+  function dragEnd() {
+    window.removeEventListener('pointermove', dragMove)
+    window.removeEventListener('pointerup', dragEnd)
+    if (drag && dropIndex !== null && drag.index !== dropIndex) void reorderTrack(drag.plId, drag.index, dropIndex)
+    drag = null
+    dropIndex = null
+  }
+
+  // ▶ preview / edit-details modal (library context).
+  let preview = $state<{ track: QueueTrack; playlistId: string; canEdit: boolean } | null>(null)
+
   function onMoveCopy(plId: string, track: QueueTrack, sel: HTMLSelectElement) {
     const v = sel.value
     sel.value = ''
@@ -417,18 +436,18 @@
                 {/if}
               </summary>
               {#if pl.tracks.length > 0}
-                <ol class="tracks">
+                <ol class="tracks" data-pl={pl.id}>
                   {#each pl.tracks as t, ti (t.videoId)}
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
                     <li
+                      data-i={ti}
                       class:dragging={drag?.plId === pl.id && drag?.index === ti}
-                      draggable={isMe}
-                      ondragstart={() => isMe && (drag = { plId: pl.id, index: ti })}
-                      ondragover={(e) => isMe && e.preventDefault()}
-                      ondrop={() => isMe && onTrackDrop(pl.id, ti)}
-                      ondragend={() => (drag = null)}
+                      class:drop={dropIndex === ti && drag?.plId === pl.id && drag?.index !== ti}
                     >
-                      {#if isMe}<span class="grip" aria-hidden="true">⠿</span>{/if}
+                      {#if isMe}
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <span class="grip" aria-hidden="true" onpointerdown={(e) => dragStart(e, pl.id, ti)}>⠿</span>
+                      {/if}
+                      <button class="play" onclick={() => (preview = { track: t, playlistId: pl.id, canEdit: isMe })} title="Preview / edit details">▶</button>
                       <span class="t-title">{t.title}</span>
                       <span class="dim dur">{fmt(t.duration)}</span>
                       {#if isMe}
@@ -446,7 +465,7 @@
                     </li>
                   {/each}
                 </ol>
-                {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · drop onto another playlist’s tracks to move</p>{/if}
+                {#if isMe}<p class="dnd-hint">Drag ⠿ to reorder · ⋯ to move/copy to another playlist · ▶ to preview</p>{/if}
               {/if}
 
               {#if isMe}
@@ -492,6 +511,16 @@
     {/if}
   </section>
 </div>
+
+{#if preview}
+  <TrackPreview
+    track={preview.track}
+    context="library"
+    playlistId={preview.playlistId}
+    canEdit={preview.canEdit}
+    onClose={() => (preview = null)}
+  />
+{/if}
 
 <style>
   .wrap {
@@ -973,17 +1002,42 @@
     gap: 0.6rem;
     font-size: 0.85rem;
   }
-  .tracks li[draggable='true'] {
-    cursor: grab;
-  }
   .tracks li.dragging {
-    opacity: 0.45;
+    opacity: 0.4;
+  }
+  .tracks li.drop {
+    box-shadow: inset 0 2px 0 var(--accent);
   }
   .grip {
     flex: 0 0 auto;
     color: var(--text-dim);
     cursor: grab;
     user-select: none;
+    touch-action: none; /* the grip owns touch drags — don't scroll the page */
+    padding: 0.2rem 0.1rem;
+  }
+  .grip:active {
+    cursor: grabbing;
+  }
+  .tracks .play {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .tracks .play:hover {
+    border-color: var(--accent);
+    filter: brightness(1.15);
   }
   .mc {
     flex: 0 0 auto;

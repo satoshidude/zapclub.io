@@ -100,6 +100,16 @@ export async function reorderTrack(playlistId: string, from: number, to: number)
   await updatePlaylist({ ...pl, tracks })
 }
 
+/** Edits a track's title within a playlist (only on a real change). */
+export async function setPlaylistTrackTitle(playlistId: string, videoId: string, title: string): Promise<void> {
+  const t = title.trim()
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl || !t) return
+  const idx = pl.tracks.findIndex((x) => x.videoId === videoId)
+  if (idx < 0 || pl.tracks[idx].title === t) return
+  await updatePlaylist({ ...pl, tracks: pl.tracks.map((x, i) => (i === idx ? { ...x, title: t } : x)) })
+}
+
 export async function removeFromPlaylist(playlistId: string, videoId: string): Promise<void> {
   const pl = state.mine.find((p) => p.id === playlistId)
   if (!pl) return

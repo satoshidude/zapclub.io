@@ -6,6 +6,7 @@
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
   import type { QueueTrack, Playlist } from '../../nostr/types'
+  import TrackPreview from '../TrackPreview.svelte'
 
   let { groupId, canModerate = false }: { groupId: string; canModerate?: boolean } = $props()
 
@@ -56,12 +57,35 @@
     showLib = false
   }
 
-  // Drag-and-drop reordering of my set.
+  // Pointer-based reordering of my set — works with touch AND mouse (HTML5 drag-and-drop fires
+  // no events on touch). Grab the grip, drag over a row, release. The ▲▼ arrows stay as a
+  // keyboard/no-drag fallback.
   let dragIndex = $state<number | null>(null)
-  function onDrop(i: number) {
-    if (dragIndex !== null && dragIndex !== i) void moveTrack(groupId, dragIndex, i)
-    dragIndex = null
+  let dropIndex = $state<number | null>(null)
+  function dragStart(e: PointerEvent, i: number) {
+    dragIndex = i
+    dropIndex = i
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    window.addEventListener('pointermove', dragMove)
+    window.addEventListener('pointerup', dragEnd)
   }
+  function dragMove(e: PointerEvent) {
+    const li = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('li[data-i]') as HTMLElement | null
+    if (li?.dataset.i != null) {
+      const i = Number(li.dataset.i)
+      if (!Number.isNaN(i)) dropIndex = i
+    }
+  }
+  function dragEnd() {
+    window.removeEventListener('pointermove', dragMove)
+    window.removeEventListener('pointerup', dragEnd)
+    if (dragIndex !== null && dropIndex !== null && dragIndex !== dropIndex) void moveTrack(groupId, dragIndex, dropIndex)
+    dragIndex = null
+    dropIndex = null
+  }
+
+  // ▶ preview / details modal.
+  let preview = $state<{ track: QueueTrack; context: 'queue' | 'search' } | null>(null)
 
   let query = $state('')
   let results = $state<SearchHit[]>([])
@@ -175,17 +199,15 @@
   {#if tracks.length > 0}
     <ul class="tracks">
       {#each tracks as track, i (track.videoId + i)}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <li
+          data-i={i}
           class:played={track.active === false}
           class:dragging={dragIndex === i}
-          draggable="true"
-          ondragstart={() => (dragIndex = i)}
-          ondragover={(e) => e.preventDefault()}
-          ondrop={() => onDrop(i)}
-          ondragend={() => (dragIndex = null)}
+          class:drop={dropIndex === i && dragIndex !== null && dragIndex !== i}
         >
-          <span class="grip" aria-hidden="true">⠿</span>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span class="grip" aria-hidden="true" onpointerdown={(e) => dragStart(e, i)}>⠿</span>
+          <button class="play" onclick={() => (preview = { track, context: 'queue' })} title="Preview / edit details">▶</button>
           <span class="t-idx">{i + 1}</span>
           <span class="t-title">{track.title}</span>
           <span class="dur">{fmt(track.duration)}</span>
@@ -233,6 +255,7 @@
     <ul class="results">
       {#each results as hit (hit.videoId)}
         <li>
+          <button class="play" onclick={() => (preview = { track: { videoId: hit.videoId, title: hit.title, duration: hit.duration }, context: 'search' })} title="Preview">▶</button>
           <img class="thumb" src={`https://i.ytimg.com/vi/${hit.videoId}/default.jpg`} alt="" width="48" height="36" loading="lazy" />
           <span class="r-title">{hit.title}</span>
           <span class="dur">{fmt(hit.duration)}</span>
@@ -242,6 +265,19 @@
     </ul>
   {/if}
 </div>
+
+{#if preview}
+  <TrackPreview
+    track={preview.track}
+    context={preview.context}
+    {groupId}
+    canEdit={preview.context === 'queue' && !!me}
+    onAdd={preview.context === 'search'
+      ? (t) => { void addTrack(groupId, t); results = results.filter((r) => r.videoId !== t.videoId) }
+      : undefined}
+    onClose={() => (preview = null)}
+  />
+{/if}
 
 <style>
   .queue {
@@ -331,17 +367,42 @@
     gap: 0.6rem;
     font-size: 0.85rem;
   }
-  .tracks li {
-    cursor: grab;
-  }
   .tracks li.dragging {
-    opacity: 0.45;
+    opacity: 0.4;
+  }
+  .tracks li.drop {
+    box-shadow: inset 0 2px 0 var(--accent);
   }
   .grip {
     flex: 0 0 auto;
     color: var(--text-dim);
     cursor: grab;
     user-select: none;
+    touch-action: none; /* let the grip own touch drags — don't scroll the page */
+    padding: 0.2rem 0.1rem;
+  }
+  .grip:active {
+    cursor: grabbing;
+  }
+  .play {
+    flex: 0 0 auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .play:hover {
+    border-color: var(--accent);
+    filter: brightness(1.15);
   }
   .reorder {
     display: inline-flex;
