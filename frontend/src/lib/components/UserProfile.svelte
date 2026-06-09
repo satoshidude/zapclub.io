@@ -17,7 +17,7 @@
   import { persistedStageGroup } from '../nostr/stage.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../player/youtube'
   import { fetchUserClubActivity } from '../nostr/groups'
-  import { goClub, goUser, goHowto } from '../router.svelte'
+  import { goClub, goUser, goHowto, goLeaderboard } from '../router.svelte'
   import TrackPreview from './TrackPreview.svelte'
   import { clubAvatar } from '../avatar'
   import { npubEncode } from 'nostr-tools/nip19'
@@ -98,12 +98,13 @@
       topClubId = a.topClubId
       rolesById = a.rolesById
     })
-    // Public: global zap placement + headline totals (sats, how many people — not who).
-    zapRank = null
-    void fetchZapRank(pk).then((r) => (zapRank = r))
-    // The detailed "who zapped you" breakdown (verified 9735) is OWNER-ONLY.
+    // Public zap stats: total sats + how many people (from verified 9735 — has full history), plus
+    // the global placement from the relay leaderboard when it has data. Both shown to everyone; the
+    // detailed "who zapped you" list (sender identities) stays owner-only further down.
     received = null
-    if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
+    zapRank = null
+    void fetchReceivedZaps(pk).then((r) => (received = r))
+    void fetchZapRank(pk).then((r) => (zapRank = r))
   })
 
   // ── Profile editor (own profile only) ──────────────────────────────────
@@ -321,18 +322,21 @@
     </div>
   {/if}
 
-  <!-- Public zap ranking: total sats received, how many people zapped (NOT who), and the
-       user's global placement. Shown to everyone. -->
-  {#if zapRank && zapRank.sats > 0}
+  <!-- Public zap stats: total sats received + how many people zapped (NOT who), with the global
+       leaderboard placement when it's available. Shown to everyone. The sats/people come from the
+       verified 9735 receipts (full history); the #rank comes from the relay leaderboard. -->
+  {#if received && received.total > 0}
     <section class="card ziprank">
-      <div class="zr-place">
-        <span class="zr-hash">#</span><span class="zr-num">{zapRank.rank.toLocaleString()}</span>
-        <span class="zr-of">of {zapRank.total.toLocaleString()} {zapRank.total === 1 ? 'DJ' : 'DJs'}</span>
-      </div>
+      {#if zapRank}
+        <a class="zr-place" href="/leaderboard" onclick={(e) => { e.preventDefault(); goLeaderboard() }} title="View the zap leaderboard">
+          <span class="zr-hash">#</span><span class="zr-num">{zapRank.rank.toLocaleString()}</span>
+          <span class="zr-of">of {zapRank.total.toLocaleString()} {zapRank.total === 1 ? 'DJ' : 'DJs'}</span>
+        </a>
+      {/if}
       <div class="zr-stat">
-        <span class="zr-amt">⚡ {zapRank.sats.toLocaleString()}</span>
+        <span class="zr-amt">⚡ {received.total.toLocaleString()}</span>
         <span class="zr-unit">sats received</span>
-        <span class="zr-from">from {zapRank.zappers.toLocaleString()} {zapRank.zappers === 1 ? 'person' : 'people'}</span>
+        <span class="zr-from">from {received.bySender.length.toLocaleString()} {received.bySender.length === 1 ? 'person' : 'people'}</span>
       </div>
     </section>
   {/if}
@@ -733,6 +737,12 @@
     gap: 0.3rem;
     padding-right: 1.1rem;
     border-right: 1px solid var(--border);
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .zr-place:hover .zr-num {
+    color: var(--amber);
   }
   .zr-hash {
     font-size: 1.4rem;
