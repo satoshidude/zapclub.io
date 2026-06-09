@@ -313,6 +313,42 @@ export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
   return { total, count, bySender }
 }
 
+export interface RecipientTotals {
+  sats: number
+  zaps: number
+  zappers: number // distinct senders (anonymous zaps collapse into one)
+}
+
+/**
+ * Aggregates received zaps (9735) for a SET of recipients in ONE query → per-recipient totals.
+ * Powers the global zap leaderboard (built client-side from the verified receipts, since that's
+ * where the historical zap data lives). Chunks the `#p` filter so a big DJ set doesn't blow the
+ * relay's per-filter cap. Anonymous zaps collapse into a single distinct "sender".
+ */
+export async function aggregateReceived(pubkeys: string[]): Promise<Map<string, RecipientTotals>> {
+  const acc = new Map<string, { sats: number; zaps: number; senders: Set<string> }>()
+  const dedup = new Set<string>()
+  for (let i = 0; i < pubkeys.length; i += 200) {
+    const chunk = pubkeys.slice(i, i + 200)
+    if (chunk.length === 0) continue
+    const evs = await pool.querySync(ZAP_RELAYS, { kinds: [KIND_ZAP_RECEIPT], '#p': chunk }, { maxWait: 6000 })
+    for (const ev of evs) {
+      if (dedup.has(ev.id)) continue
+      dedup.add(ev.id)
+      const d = parseReceiptDetail(ev)
+      if (!d) continue
+      const cur = acc.get(d.recipient) ?? { sats: 0, zaps: 0, senders: new Set<string>() }
+      cur.sats += d.sats
+      cur.zaps++
+      cur.senders.add(d.anon ? ANON_BUCKET : d.sender)
+      acc.set(d.recipient, cur)
+    }
+  }
+  const out = new Map<string, RecipientTotals>()
+  for (const [pk, v] of acc) out.set(pk, { sats: v.sats, zaps: v.zaps, zappers: v.senders.size })
+  return out
+}
+
 const seen = new Set<string>()
 // bolt11 invoices already counted — so an optimistic local credit and the later 9735
 // receipt for the SAME zap don't double-count (and vice versa).

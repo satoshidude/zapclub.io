@@ -380,6 +380,20 @@ export async function listClubs(): Promise<Club[]> {
     .sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
 }
 
+/** Every distinct pubkey that is a member or admin/owner of ANY club — the candidate set of DJs
+ *  for the zap leaderboard (anyone who could have received zaps on stage). */
+export async function fetchClubPeople(): Promise<string[]> {
+  const [members, admins] = await Promise.all([
+    pool.querySync(RELAYS, { kinds: [KIND_MEMBERS] }, { maxWait: 4000 }),
+    pool.querySync(RELAYS, { kinds: [KIND_ADMINS] }, { maxWait: 4000 }),
+  ])
+  const set = new Set<string>()
+  for (const ev of [...members, ...admins]) {
+    for (const t of ev.tags) if (t[0] === 'p' && t[1]) set.add(t[1])
+  }
+  return [...set]
+}
+
 export interface MyClub {
   id: string
   name: string

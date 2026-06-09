@@ -1,16 +1,19 @@
 <script lang="ts">
   import { listClubs, createClub, joinClub, type MyClub } from '../nostr/groups'
   import { fetchMyClubs } from '../nostr/groups'
-  import { goClub } from '../router.svelte'
+  import { goClub, goUser, goLeaderboard } from '../router.svelte'
+  import { npubEncode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
+  import { fetchLeaderboard, type LeaderboardEntry } from '../nostr/leaderboard'
   import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
 
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
+  let topDjs = $state<LeaderboardEntry[]>([])
   let loading = $state(true)
   let error = $state('')
 
@@ -42,6 +45,8 @@
     } finally {
       loading = false
     }
+    // Top-zapped DJs for the hero teaser (best-effort, non-blocking).
+    void fetchLeaderboard().then((r) => (topDjs = r.top.slice(0, 5)))
   }
 
   async function create() {
@@ -94,6 +99,24 @@
     </div>
     {#if !auth.canSign}
       <button class="btn btn-primary hero-cta" onclick={launchLogin}>⚡ Sign in to play</button>
+    {/if}
+
+    {#if topDjs.length}
+      <div class="board-teaser">
+        <button class="board-title" onclick={goLeaderboard}>🏆 Top zapped DJs <span class="board-more">Leaderboard →</span></button>
+        <div class="board-rows">
+          {#each topDjs as e (e.pubkey)}
+            {@const p = useProfile(e.pubkey)}
+            {@const npub = npubEncode(e.pubkey)}
+            <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
+              <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
+              <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="24" height="24" />
+              <span class="b-name">{displayName(e.pubkey, p)}</span>
+              <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
     {/if}
   </header>
 
@@ -222,6 +245,93 @@
   .hero-cta {
     font-size: 0.95rem;
     padding: 0.65rem 1.25rem;
+  }
+  /* Hero leaderboard teaser — top zapped DJs. */
+  .board-teaser {
+    margin-top: 1.4rem;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+  }
+  .board-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    width: 100%;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    padding: 0 0.2rem 0.5rem;
+    color: var(--text);
+    font-weight: 800;
+    font-size: 0.92rem;
+    cursor: pointer;
+  }
+  .board-more {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--accent-2);
+  }
+  .board-title:hover .board-more {
+    color: var(--amber);
+  }
+  .board-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .board-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.35rem 0.7rem 0.35rem 0.5rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.15s ease;
+  }
+  .board-row:hover {
+    border-color: var(--accent-2);
+  }
+  .board-row.gold {
+    border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+    background: radial-gradient(120% 160% at 0% 0%, rgba(245, 166, 35, 0.12) 0%, transparent 60%), var(--bg-elev);
+  }
+  .b-rank {
+    flex: 0 0 auto;
+    min-width: 1.6rem;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .b-av {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+  }
+  .b-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .b-sats {
+    flex: 0 0 auto;
+    color: var(--amber);
+    font-weight: 800;
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
   }
   .head {
     display: flex;

@@ -23,7 +23,8 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { publishMyProfile } from '../nostr/profileEdit'
   import { logout } from '../nostr/nostrLogin'
-  import { fetchReceivedZaps, type ReceivedZaps } from '../nostr/zaps.svelte'
+  import { fetchReceivedZaps, requestZapInvoice, type ReceivedZaps } from '../nostr/zaps.svelte'
+  import { showPay } from '../nostr/payModal.svelte'
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
@@ -98,13 +99,13 @@
       topClubId = a.topClubId
       rolesById = a.rolesById
     })
-    // Public zap stats: total sats + how many people (from verified 9735 — has full history), plus
-    // the global placement from the relay leaderboard when it has data. Both shown to everyone; the
-    // detailed "who zapped you" list (sender identities) stays owner-only further down.
+    // Public zap standing: sats received, how many people, and the global placement — all from the
+    // 9735-based leaderboard (shown to everyone). The detailed "who zapped you" list (sender
+    // identities) stays owner-only further down.
     received = null
     zapRank = null
-    void fetchReceivedZaps(pk).then((r) => (received = r))
     void fetchZapRank(pk).then((r) => (zapRank = r))
+    if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
   })
 
   // ── Profile editor (own profile only) ──────────────────────────────────
@@ -253,6 +254,25 @@
     isPlaylist = false
   }
 
+  // Zap this user directly from their public profile (NIP-57 to their lud16). The recipient pubkey
+  // goes into the zap request, so the 9735 receipt is attributable → counts on the leaderboard.
+  let zapping = $state(false)
+  let zapErr = $state('')
+  async function zapUser(sats: number) {
+    if (zapping || !pubkey || !profile?.lud16) return
+    zapping = true
+    zapErr = ''
+    try {
+      const { invoice, verify } = await requestZapInvoice(pubkey, profile.lud16 as string, sats, 'Zap on zapclub')
+      showPay(invoice, sats, `Zap ${displayName(pubkey, profile)}`, { verify })
+    } catch (e) {
+      zapErr = String((e as Error)?.message ?? 'Zap failed')
+      setTimeout(() => (zapErr = ''), 4000)
+    } finally {
+      zapping = false
+    }
+  }
+
   // Remove a like (own profile only): optimistic drop + NIP-09 delete of the reaction(s).
   function removeLike(l: UserLike) {
     likedTracks = likedTracks.filter((x) => x.videoId !== l.videoId)
@@ -283,6 +303,16 @@
       {#if profile?.about}<p class="pabout">{profile.about}</p>{/if}
       {#if profile?.lud16}
         <p class="plud">⚡ {profile.lud16}</p>
+        {#if !isMe}
+          <div class="zap-row">
+            <span class="zap-label">⚡ Zap</span>
+            {#each [100, 1000, 5000] as amt (amt)}
+              <button class="zap-amt" onclick={() => zapUser(amt)} disabled={zapping}>{amt >= 1000 ? `${amt / 1000}k` : amt}</button>
+            {/each}
+            <span class="zap-sats">sats</span>
+          </div>
+          {#if zapErr}<p class="zap-err">⚠ {zapErr}</p>{/if}
+        {/if}
       {:else if isMe}
         <p class="plud missing">⚡ No lightning address yet — add one to receive sats.</p>
       {/if}
@@ -322,23 +352,27 @@
     </div>
   {/if}
 
-  <!-- Public zap stats: total sats received + how many people zapped (NOT who), with the global
-       leaderboard placement when it's available. Shown to everyone. The sats/people come from the
-       verified 9735 receipts (full history); the #rank comes from the relay leaderboard. -->
-  {#if received && received.total > 0}
-    <section class="card ziprank">
-      {#if zapRank}
-        <a class="zr-place" href="/leaderboard" onclick={(e) => { e.preventDefault(); goLeaderboard() }} title="View the zap leaderboard">
-          <span class="zr-hash">#</span><span class="zr-num">{zapRank.rank.toLocaleString()}</span>
-          <span class="zr-of">of {zapRank.total.toLocaleString()} {zapRank.total === 1 ? 'DJ' : 'DJs'}</span>
-        </a>
-      {/if}
-      <div class="zr-stat">
-        <span class="zr-amt">⚡ {received.total.toLocaleString()}</span>
-        <span class="zr-unit">sats received</span>
-        <span class="zr-from">from {received.bySender.length.toLocaleString()} {received.bySender.length === 1 ? 'person' : 'people'}</span>
-      </div>
-    </section>
+  <!-- Public zap standing: global placement + sats received + how many people (NOT who). The whole
+       card links to the leaderboard. Shown to everyone, from the 9735-based ranking. -->
+  {#if zapRank}
+    {@const medal = zapRank.rank === 1 ? '🥇' : zapRank.rank === 2 ? '🥈' : zapRank.rank === 3 ? '🥉' : '🏆'}
+    <a
+      class="card ziprank"
+      class:top3={zapRank.rank <= 3}
+      href="/leaderboard"
+      onclick={(e) => { e.preventDefault(); goLeaderboard() }}
+      title="View the zap leaderboard"
+    >
+      <span class="zr-badge"><span class="zr-medal">{medal}</span><span class="zr-rank">#{zapRank.rank.toLocaleString()}</span></span>
+      <span class="zr-main">
+        <span class="zr-amt">⚡ {zapRank.sats.toLocaleString()} <span class="zr-unit">sats</span></span>
+        <span class="zr-sub">
+          received from {zapRank.zappers.toLocaleString()} {zapRank.zappers === 1 ? 'person' : 'people'}
+          · rank {zapRank.rank.toLocaleString()} of {zapRank.total.toLocaleString()}
+        </span>
+      </span>
+      <span class="zr-cta">Leaderboard →</span>
+    </a>
   {/if}
 
   <!-- Who zapped you (verified 9735, incl. names) — OWNER-ONLY by request. -->
@@ -644,6 +678,46 @@
     font-weight: 400;
     font-style: italic;
   }
+  .zap-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .zap-label {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: var(--amber);
+  }
+  .zap-amt {
+    background: var(--bg-elev-2);
+    border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
+    color: var(--amber);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .zap-amt:hover:not(:disabled) {
+    background: var(--amber);
+    color: #07070a;
+  }
+  .zap-amt:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .zap-sats {
+    font-size: 0.74rem;
+    color: var(--text-dim);
+  }
+  .zap-err {
+    margin: 0.3rem 0 0;
+    font-size: 0.76rem;
+    color: var(--danger);
+  }
   .edit-btn {
     flex: 0 0 auto;
     align-self: flex-start;
@@ -721,67 +795,96 @@
     font-size: 0.82rem;
     margin: 0;
   }
-  /* Public zap ranking — the prominent headline stat. */
+  /* Public zap standing — clickable card linking to the leaderboard. */
   .ziprank {
     margin-top: 1rem;
     display: flex;
     align-items: center;
-    gap: 1.1rem;
-    flex-wrap: wrap;
-    background: linear-gradient(135deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+    gap: 1rem;
+    text-decoration: none;
+    color: var(--text);
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(245, 166, 35, 0.12) 0%, transparent 55%),
+      linear-gradient(135deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+    border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+    transition: border-color 0.15s ease, transform 0.08s ease;
+  }
+  .ziprank:hover {
     border-color: var(--amber);
   }
-  .zr-place {
-    display: flex;
-    align-items: baseline;
-    gap: 0.3rem;
-    padding-right: 1.1rem;
-    border-right: 1px solid var(--border);
-    text-decoration: none;
-    color: inherit;
-    cursor: pointer;
+  .ziprank:active {
+    transform: translateY(1px);
   }
-  .zr-place:hover .zr-num {
-    color: var(--amber);
-  }
-  .zr-hash {
-    font-size: 1.4rem;
-    font-weight: 800;
-    color: var(--text-dim);
-  }
-  .zr-num {
-    font-size: 2.6rem;
-    font-weight: 900;
-    line-height: 1;
-    color: var(--text);
-    letter-spacing: -0.03em;
-    font-variant-numeric: tabular-nums;
-  }
-  .zr-of {
-    font-size: 0.78rem;
-    color: var(--text-dim);
-  }
-  .zr-stat {
+  .zr-badge {
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 0.05rem;
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+  .ziprank.top3 .zr-badge {
+    border-color: var(--amber);
+    box-shadow: 0 0 14px rgba(245, 166, 35, 0.35);
+  }
+  .zr-medal {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+  .zr-rank {
+    font-size: 0.92rem;
+    font-weight: 900;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .zr-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
   }
   .zr-amt {
-    font-size: 1.6rem;
-    font-weight: 800;
+    font-size: 1.7rem;
+    font-weight: 900;
     color: var(--amber);
-    line-height: 1.1;
+    line-height: 1;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
   .zr-unit {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-    font-weight: 600;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--amber);
+    opacity: 0.7;
   }
-  .zr-from {
+  .zr-sub {
     font-size: 0.78rem;
     color: var(--text-dim);
-    margin-top: 0.1rem;
+  }
+  .zr-cta {
+    flex: 0 0 auto;
+    align-self: center;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--accent-2);
+    white-space: nowrap;
+  }
+  .ziprank:hover .zr-cta {
+    color: var(--amber);
+  }
+  @media (max-width: 460px) {
+    .zr-cta {
+      display: none;
+    }
   }
   .zaps-recv {
     margin-top: 1rem;
