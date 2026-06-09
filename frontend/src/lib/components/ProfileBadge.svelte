@@ -36,8 +36,11 @@
     border: 1px solid var(--border);
   }
   .name {
-    font-size: 0.88rem;
-    font-weight: 600;
+    /* Same look as the logo wordmark (App.svelte .brand .word). */
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
     max-width: 12ch;
     overflow: hidden;
     text-overflow: ellipsis;

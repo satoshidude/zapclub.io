@@ -22,6 +22,7 @@
   import { clubAvatar } from '../avatar'
   import { npubEncode } from 'nostr-tools/nip19'
   import { publishMyProfile } from '../nostr/profileEdit'
+  import { logout } from '../nostr/nostrLogin'
   import { fetchReceivedZaps, type ReceivedZaps } from '../nostr/zaps.svelte'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
@@ -265,7 +266,10 @@
       {/if}
     </div>
     {#if isMe}
-      <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
+      <div class="me-actions">
+        <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
+        <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
+      </div>
     {/if}
   </header>
 
@@ -610,6 +614,25 @@
   .edit-btn:hover {
     border-color: var(--accent-2);
     color: var(--text);
+  }
+  .me-actions {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    display: flex;
+    gap: 0.4rem;
+  }
+  .logout-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .logout-btn:hover {
+    border-color: var(--danger);
+    color: var(--danger);
   }
   .editor {
     display: flex;

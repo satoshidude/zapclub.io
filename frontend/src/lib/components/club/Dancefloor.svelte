@@ -58,10 +58,11 @@
     const h = hash(pk)
     const dur = (0.7 + ((h >>> 0) % 60) / 100).toFixed(2) // 0.70–1.29s (varied tempo)
     const delay = (-(((h >>> 5) % 130) / 100)).toFixed(2) // 0 to -1.29s (phase offset → no lockstep)
-    const amp = (0.85 + ((h >>> 11) % 30) / 100).toFixed(2) // 0.85–1.14
     const dx = (((h >>> 17) % 9) - 4).toFixed(0) // -4..4 px scatter
     const dy = (((h >>> 21) % 7) - 3).toFixed(0) // -3..3 px scatter
-    return `--dur:${dur}s;--delay:${delay}s;--amp:${amp};--dx:${dx}px;--dy:${dy}px`
+    // Only time/offset vars here — NO CSS var inside the keyframe transforms or animation-name
+    // (iOS Safari resolves those unreliably → no animation). Amplitude is baked into the keyframes.
+    return `--dur:${dur}s;--delay:${delay}s;--dx:${dx}px;--dy:${dy}px`
   }
   const variantOf = (pk: string) => hash(pk) % 4
 
@@ -259,37 +260,38 @@
     filter: grayscale(0.6);
   }
 
-  /* The dance: 4 deterministic variants, only while a DJ is playing. Longhand so the per-pubkey
-     duration/delay reliably apply (→ varied phases, no lockstep). */
+  /* The dance: 4 deterministic variants, only while a DJ is playing. Per-pubkey duration/delay
+     (vars, iOS-safe) give varied phases → no lockstep. animation-name comes from the concrete
+     variant class (NOT a CSS var) so iOS Safari resolves the keyframes. All variants bounce up
+     and down (the crowd moving to the beat); sway/two-step add a little side motion. */
   .floor.playing .bob {
-    animation-name: var(--anim, dance0);
     animation-duration: var(--dur, 0.9s);
     animation-delay: var(--delay, 0s);
     animation-iteration-count: infinite;
     animation-timing-function: ease-in-out;
   }
-  .floor.playing .v0 { --anim: dance0; }
-  .floor.playing .v1 { --anim: dance1; }
-  .floor.playing .v2 { --anim: dance2; }
-  .floor.playing .v3 { --anim: dance3; }
+  .floor.playing .v0 { animation-name: dance0; }
+  .floor.playing .v1 { animation-name: dance1; }
+  .floor.playing .v2 { animation-name: dance2; }
+  .floor.playing .v3 { animation-name: dance3; }
 
   @keyframes dance0 { /* bounce */
     0%, 100% { transform: translateY(0) scaleY(1); }
-    50% { transform: translateY(calc(-8px * var(--amp, 1))) scaleY(1.04); }
+    50% { transform: translateY(-10px) scaleY(1.05); }
   }
-  @keyframes dance1 { /* sway */
-    0%, 100% { transform: rotate(calc(-6deg * var(--amp, 1))) translateX(-1px); }
-    50% { transform: rotate(calc(6deg * var(--amp, 1))) translateX(1px); }
+  @keyframes dance1 { /* sway + bob */
+    0%, 100% { transform: translateY(-1px) rotate(-7deg); }
+    50% { transform: translateY(-5px) rotate(7deg); }
   }
   @keyframes dance2 { /* headbob */
     0%, 100% { transform: translateY(0) rotate(-2deg); }
-    50% { transform: translateY(calc(-4px * var(--amp, 1))) rotate(2deg); }
+    50% { transform: translateY(-7px) rotate(2deg); }
   }
-  @keyframes dance3 { /* two-step */
-    0%, 100% { transform: translateX(calc(-4px * var(--amp, 1))); }
-    25% { transform: translateX(0) translateY(-3px); }
-    50% { transform: translateX(calc(4px * var(--amp, 1))); }
-    75% { transform: translateX(0) translateY(-3px); }
+  @keyframes dance3 { /* two-step bounce */
+    0%, 100% { transform: translateX(-4px) translateY(0); }
+    25% { transform: translateX(0) translateY(-8px); }
+    50% { transform: translateX(4px) translateY(0); }
+    75% { transform: translateX(0) translateY(-8px); }
   }
 
   .card-pop {

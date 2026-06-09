@@ -1,27 +1,17 @@
 <script lang="ts">
-  import { npubEncode } from 'nostr-tools/nip19'
-  import { auth } from '../nostr/auth.svelte'
-  import { router, goHome, goUser, goAdmin, goHowto } from '../router.svelte'
-  import { launchLogin } from '../nostr/nostrLogin'
-  import { useProfile, avatarUrl } from '../nostr/profiles.svelte'
+  import { router, goHome, goAdmin, goHowto } from '../router.svelte'
   import { isSuperadmin } from '../nostr/admin'
 
   // Mounted twice: once in the header (desktop tabs) and once at top level
   // (mobile fixed bottom bar). `mobile` selects which one this instance is —
   // it must live outside the backdrop-filtered header, else position:fixed is
-  // trapped by the header's containing block.
+  // trapped by the header's containing block. Profile/sign-in live in the
+  // top-right account badge (click → profile; logout is on the profile page).
   let { mobile = false }: { mobile?: boolean } = $props()
 
   const onHome = $derived(router.route.name === 'home')
-  const onProfile = $derived(router.route.name === 'user')
   const onAdmin = $derived(router.route.name === 'admin')
   const onHowto = $derived(router.route.name === 'howto')
-  const myProfile = $derived(auth.pubkey ? useProfile(auth.pubkey) : null)
-
-  function openProfile() {
-    if (auth.pubkey) goUser(npubEncode(auth.pubkey))
-    else launchLogin()
-  }
 </script>
 
 <nav class="nav" class:mobile aria-label="Primary">
@@ -33,16 +23,6 @@
   <button class="tab" class:active={onHowto} onclick={goHowto}>
     <span class="ico" aria-hidden="true">❔</span>
     <span class="lbl">How-to</span>
-  </button>
-
-  <button class="tab" class:active={onProfile} onclick={openProfile}>
-    {#if auth.pubkey}
-      <img class="av" src={avatarUrl(auth.pubkey, myProfile)} alt="" />
-      <span class="lbl">Profile</span>
-    {:else}
-      <span class="ico" aria-hidden="true">⤷</span>
-      <span class="lbl">Sign in</span>
-    {/if}
   </button>
 
   {#if isSuperadmin()}
@@ -90,16 +70,6 @@
     font-size: 1rem;
     line-height: 1;
   }
-  .av {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 1px solid var(--border);
-  }
-  .tab.active .av {
-    border-color: var(--accent);
-  }
   .lbl {
     line-height: 1;
   }
@@ -141,10 +111,6 @@
     }
     .nav.mobile .ico {
       font-size: 1.2rem;
-    }
-    .nav.mobile .av {
-      width: 22px;
-      height: 22px;
     }
   }
 </style>
