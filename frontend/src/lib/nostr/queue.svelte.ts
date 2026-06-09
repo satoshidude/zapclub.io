@@ -35,8 +35,9 @@ function parseTracks(ev: Event): QueueTrack[] {
       videoId: t[1].slice(3),
       title: t[2] ?? t[1],
       duration: Number(t[3]) || 0,
-      // 5th element 'off' = already played/disabled (else active).
+      // 5th element 'off' = already played/disabled (else active). 6th = custom cover URL.
       active: t[4] !== 'off',
+      image: t[5] || undefined,
     }))
     // Only valid YouTube ids — never feed a foreign queue event blindly into player URLs.
     .filter((tr) => isValidVideoId(tr.videoId))
@@ -126,11 +127,12 @@ async function publishMyQueue(groupId: string, tracks: QueueTrack[]): Promise<vo
     tags: [
       ['h', groupId],
       ['d', groupId],
-      ...tracks.map((t) =>
-        t.active === false
-          ? ['track', `yt:${t.videoId}`, t.title, String(t.duration), 'off']
-          : ['track', `yt:${t.videoId}`, t.title, String(t.duration)],
-      ),
+      ...tracks.map((t) => {
+        const base = ['track', `yt:${t.videoId}`, t.title, String(t.duration)]
+        // 6th element = custom cover; needs the 5th (off|'') as a placeholder to keep position.
+        if (t.image) return [...base, t.active === false ? 'off' : '', t.image]
+        return t.active === false ? [...base, 'off'] : base
+      }),
     ],
     content: '',
   })
@@ -183,6 +185,14 @@ export function setTrackTitle(groupId: string, videoId: string, title: string): 
   const idx = tracks.findIndex((x) => x.videoId === videoId)
   if (idx < 0 || !t || tracks[idx].title === t) return Promise.resolve()
   return publishMyQueue(groupId, tracks.map((x, i) => (i === idx ? { ...x, title: t } : x)))
+}
+
+/** Sets/clears a track's custom cover image (by videoId) in MY queue + republishes (on change). */
+export function setTrackImage(groupId: string, videoId: string, image: string | undefined): Promise<void> {
+  const tracks = myTracks()
+  const idx = tracks.findIndex((x) => x.videoId === videoId)
+  if (idx < 0 || (tracks[idx].image ?? '') === (image ?? '')) return Promise.resolve()
+  return publishMyQueue(groupId, tracks.map((x, i) => (i === idx ? { ...x, image } : x)))
 }
 
 /** Sets a track's active state (by videoId) + publishes (only on change). */

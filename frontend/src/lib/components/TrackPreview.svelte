@@ -6,8 +6,10 @@
     createPlaylist,
     loadMyPlaylists,
     setPlaylistTrackTitle,
+    setPlaylistTrackImage,
   } from '../nostr/playlists.svelte'
-  import { setTrackTitle } from '../nostr/queue.svelte'
+  import { setTrackTitle, setTrackImage } from '../nostr/queue.svelte'
+  import { uploadToBlossom } from '../nostr/blossom'
   import { auth } from '../nostr/auth.svelte'
   import type { QueueTrack } from '../nostr/types'
 
@@ -66,6 +68,34 @@
     })
     addedTo = name
     setTimeout(() => (addedTo = null), 1600)
+  }
+
+  // Custom 16:9 cover image (Blossom upload). Only for persisted tracks (queue/library).
+  let image = $state(untrack(() => track.image))
+  let uploading = $state(false)
+  let uploadErr = $state('')
+  async function persistImage(url: string | undefined) {
+    if (context === 'queue' && groupId) await setTrackImage(groupId, track.videoId, url)
+    else if (context === 'library' && playlistId) await setPlaylistTrackImage(playlistId, track.videoId, url)
+  }
+  async function onPickImage(e: Event) {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0]
+    if (!file) return
+    uploading = true
+    uploadErr = ''
+    try {
+      const url = await uploadToBlossom(file)
+      image = url
+      await persistImage(url)
+    } catch (err) {
+      uploadErr = String((err as Error)?.message ?? err)
+    } finally {
+      uploading = false
+    }
+  }
+  async function removeImage() {
+    image = undefined
+    await persistImage(undefined)
   }
 
   let newName = $state('')
@@ -143,6 +173,21 @@
           <input bind:value={newName} maxlength="60" placeholder="New playlist…" autocomplete="off" />
           <button class="btn btn-ghost btn-sm" onclick={createAndAdd} disabled={creating || !newName.trim()}>Create</button>
         </div>
+      </div>
+    {/if}
+
+    {#if editable}
+      <div class="img-sec">
+        <span class="lbl">Custom cover (16:9 — shown on the now-playing card)</span>
+        {#if image}<div class="cover"><img src={image} alt="track cover" /></div>{/if}
+        <div class="row">
+          <label class="file">
+            {uploading ? 'Uploading…' : image ? '🖼 Replace image' : '🖼 Upload image'}
+            <input type="file" accept="image/*" onchange={onPickImage} disabled={uploading} />
+          </label>
+          {#if image}<button class="btn btn-ghost btn-sm" onclick={removeImage} disabled={uploading}>Remove</button>{/if}
+        </div>
+        {#if uploadErr}<p class="err">⚠ {uploadErr}</p>{/if}
       </div>
     {/if}
   </div>
@@ -267,5 +312,46 @@
   }
   .big {
     width: 100%;
+  }
+  .img-sec {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.7rem;
+  }
+  .cover {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .file {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.7rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+    text-align: center;
+  }
+  .file:hover {
+    border-color: var(--accent-2);
+  }
+  .file input {
+    display: none;
+  }
+  .err {
+    color: var(--danger);
+    font-size: 0.78rem;
+    margin: 0;
   }
 </style>

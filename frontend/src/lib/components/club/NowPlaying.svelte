@@ -4,7 +4,7 @@
   import { goUser } from '../../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
-  import { enrichMyTrackTitle } from '../../nostr/queue.svelte'
+  import { enrichMyTrackTitle, queues } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import ZapButton from './ZapButton.svelte'
   import Player from './Player.svelte'
@@ -60,6 +60,13 @@
   })
 
   const np = $derived(sync.live)
+  // Custom cover for the live track — looked up from the DJ's queue (the client already holds all
+  // DJ queues for the round-robin preview), so no relay/now_playing change is needed. Shown over
+  // the video for everyone in the club.
+  const coverImage = $derived.by(() => {
+    if (!np?.dj || !np?.videoId) return undefined
+    return queues.get(np.dj)?.tracks.find((t) => t.videoId === np.videoId)?.image
+  })
 
   // Channel name reported live by the YouTube embed (getVideoData) — no extraction, no bot gate.
   // Keyed to the videoId it belongs to, so it persists across now_playing heartbeats (same track,
@@ -157,6 +164,7 @@
           void enrichMyTrackTitle(clubId, np.videoId, `${a} - ${np.title}`)
         }
       }} />
+      {#if coverImage}<img class="cover-img" src={coverImage} alt="" />{/if}
       <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
         {zoomed ? '⤡' : '⤢'}
       </button>
@@ -223,6 +231,18 @@
     flex: 0 0 40%;
     max-width: 190px;
     align-self: flex-start;
+  }
+  /* Custom cover shown over the video (the YouTube embed keeps playing the audio underneath).
+     pointer-events:none → taps still reach the player (tap-for-sound); below the zoom button. */
+  .cover-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    z-index: 1;
   }
   /* Zoomed: video on top, full content-width; meta below. */
   .np.zoomed .np-main {

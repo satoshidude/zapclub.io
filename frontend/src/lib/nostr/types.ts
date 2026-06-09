@@ -81,6 +81,8 @@ export interface QueueTrack {
   duration: number
   /** false = already played/disabled → out of rotation (greyed). undefined/true = active. */
   active?: boolean
+  /** Optional custom 16:9 cover image (Blossom URL), shown over/instead of the video. */
+  image?: string
 }
 
 /** A DJ's queue (kind:30103, replaceable per DJ/club). */

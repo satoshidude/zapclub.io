@@ -54,7 +54,7 @@ function parsePlaylist(ev: Event): Playlist {
   const tag = (n: string) => ev.tags.find((t) => t[0] === n)?.[1]
   const tracks: QueueTrack[] = ev.tags
     .filter((t) => t[0] === 'track' && t[1]?.startsWith('yt:'))
-    .map((t) => ({ videoId: t[1].slice(3), title: t[2] ?? t[1], duration: Number(t[3]) || 0 }))
+    .map((t) => ({ videoId: t[1].slice(3), title: t[2] ?? t[1], duration: Number(t[3]) || 0, image: t[5] || undefined }))
     .filter((t) => isValidVideoId(t.videoId))
   return { id: tag('d') ?? '', name: tag('title') || 'Playlist', tracks, updatedAt: ev.created_at }
 }
@@ -74,7 +74,11 @@ async function publishPlaylist(pl: Playlist): Promise<void> {
     tags: [
       ['d', pl.id],
       ['title', pl.name],
-      ...pl.tracks.map((t) => ['track', `yt:${t.videoId}`, t.title, String(t.duration)]),
+      ...pl.tracks.map((t) =>
+        t.image
+          ? ['track', `yt:${t.videoId}`, t.title, String(t.duration), '', t.image]
+          : ['track', `yt:${t.videoId}`, t.title, String(t.duration)],
+      ),
     ],
     content: '',
   })
@@ -108,6 +112,15 @@ export async function setPlaylistTrackTitle(playlistId: string, videoId: string,
   const idx = pl.tracks.findIndex((x) => x.videoId === videoId)
   if (idx < 0 || pl.tracks[idx].title === t) return
   await updatePlaylist({ ...pl, tracks: pl.tracks.map((x, i) => (i === idx ? { ...x, title: t } : x)) })
+}
+
+/** Sets/clears a track's custom cover image within a playlist (only on a real change). */
+export async function setPlaylistTrackImage(playlistId: string, videoId: string, image: string | undefined): Promise<void> {
+  const pl = state.mine.find((p) => p.id === playlistId)
+  if (!pl) return
+  const idx = pl.tracks.findIndex((x) => x.videoId === videoId)
+  if (idx < 0 || (pl.tracks[idx].image ?? '') === (image ?? '')) return
+  await updatePlaylist({ ...pl, tracks: pl.tracks.map((x, i) => (i === idx ? { ...x, image } : x)) })
 }
 
 export async function removeFromPlaylist(playlistId: string, videoId: string): Promise<void> {
