@@ -349,8 +349,8 @@
     {#if isMe}
       <div class="me-actions">
         <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
-        <button class="prem-btn" onclick={() => (showPremModal = true)} title="zapclub Premium">
-          {#if ownPremium.active}⚡ Premium active{:else}⚡ Get Premium{/if}
+        <button class="prem-btn" class:prem-active={ownPremium.active} onclick={() => (showPremModal = true)} title="zapclub Premium">
+          {#if ownPremium.active}★ Premium{:else}⚡ Get Premium{/if}
         </button>
         <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
       </div>
@@ -829,6 +829,14 @@
     padding: 0.3rem 0.7rem;
     font-size: 0.78rem;
     cursor: pointer;
+  }
+  .prem-btn.prem-active {
+    border-color: #22c55e;
+    color: #22c55e;
+    background: color-mix(in srgb, #22c55e 10%, var(--bg-elev-2));
+  }
+  .prem-btn.prem-active:hover {
+    background: color-mix(in srgb, #22c55e 18%, var(--bg-elev-2));
   }
   .prem-btn:hover {
     background: color-mix(in srgb, var(--amber, #f59e0b) 12%, transparent);
