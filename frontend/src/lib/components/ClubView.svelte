@@ -67,10 +67,6 @@
   let inviteNpub = $state('')
   let inviteError = $state('')
   let showPremModal = $state(false)
-  // Bumped when the user gains membership so the subscription effect re-runs and the
-  // now-authed content subscription starts flowing.
-  let membershipKey = $state(0)
-  let _lastMember = false
 
   // Owner = the 'owner'-role admin, NOT admins[0] (tag order isn't owner-first).
   const owner = $derived(ownerPk)
@@ -101,8 +97,6 @@
   }
 
   $effect(() => {
-    // (re)subscribe whenever groupId changes, or when the user gains membership (private clubs).
-    void membershipKey
     const id = groupId
     club = null
     members = []
@@ -203,13 +197,6 @@
   // when the user navigates to other (non-club) pages — until they enter another club.
   $effect(() => {
     registerActiveClub(groupId, club?.name ?? '')
-  })
-
-  // Membership-gain detector: when the user transitions non-member → member (owner approved),
-  // bump membershipKey so the content subscription re-runs with a fresh authed REQ.
-  $effect(() => {
-    if (isMember && !_lastMember) membershipKey++
-    _lastMember = isMember
   })
 
   // Restore join-request state from localStorage on load (so "Request sent" persists across
