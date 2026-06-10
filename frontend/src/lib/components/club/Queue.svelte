@@ -2,6 +2,8 @@
   import { queues, addTrack, addTracks, removeTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, enrichQueueTitles } from '../../nostr/queue.svelte'
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
+  import { ownPremium } from '../../nostr/premium.svelte'
+  import PremiumModal from '../PremiumModal.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
@@ -33,6 +35,7 @@
   let saving = $state(false)
   let saveName = $state('')
   let showLib = $state(false)
+  let showPremModal = $state(false)
 
   async function doSave() {
     if (!saveName.trim() || tracks.length === 0) return
@@ -136,18 +139,21 @@
     </div>
   </div>
 
-  <!-- Save / load playlists -->
+  <!-- Save / load playlists. Free: 1 playlist. Premium: unlimited. -->
   <div class="lib">
     {#if saving}
       <input class="lib-name" bind:value={saveName} placeholder="Playlist name…" maxlength="60" autocomplete="off" />
       <button class="btn btn-primary btn-sm" onclick={doSave} disabled={!saveName.trim() || tracks.length === 0}>Save</button>
       <button class="mini" onclick={() => { saving = false; saveName = '' }} title="Cancel">✕</button>
     {:else}
-      {#if tracks.length > 0}
+      {#if tracks.length > 0 && (ownPremium.active || playlists.mine.length < 1)}
         <button class="mini wide" onclick={() => (saving = true)}>💾 Save as playlist</button>
       {/if}
       {#if playlists.mine.length > 0}
         <button class="mini wide" onclick={() => (showLib = !showLib)}>📚 My playlists ({playlists.mine.length})</button>
+      {/if}
+      {#if !ownPremium.active && playlists.mine.length >= 1 && tracks.length > 0}
+        <button class="mini wide prem-upsell" onclick={() => (showPremModal = true)} title="Upgrade for unlimited playlists">⚡ More playlists — Premium</button>
       {/if}
     {/if}
   </div>
@@ -164,6 +170,8 @@
       {/each}
     </ul>
   {/if}
+
+  {#if showPremModal}<PremiumModal onClose={() => (showPremModal = false)} />{/if}
 
   {#if tracks.length > 0}
     <ul class="tracks">
@@ -430,6 +438,13 @@
   }
   .mini.wide {
     padding: 0.35rem 0.65rem;
+  }
+  .prem-upsell {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .prem-upsell:hover {
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
   }
   .lib {
     display: flex;

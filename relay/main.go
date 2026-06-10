@@ -241,9 +241,9 @@ func main() {
 	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
 
-	// Club creation cap: free accounts may create at most 3 clubs. Superadmin is exempt.
+	// Club creation cap: free=1, premium=3. Existing clubs are grandfathered.
+	// prem is wired in below once the premiumStore is initialized.
 	cap := newClubCap(db, os.Getenv("SUPERADMIN"))
-	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
 	// Private-club gate: setting ['closed'] or ['private'] on a 9002/9007 requires Premium.
 	// Wired here so prem is available; prem is assigned below after newPremiumStore.
@@ -302,10 +302,20 @@ func main() {
 	pg := newPremiumGate(prem, env("LNBITS_URL", ""), os.Getenv("LNBITS_INVOICE_KEY"))
 	entryPrem = prem // gate paid-entry behind premium check
 	condPrem = prem  // per-club DJ slot cap (free=2 / premium=5)
+	cap.prem = prem  // club creation cap (free=1 / premium=3)
+	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
 	// Wire private-gate now that prem is available (declared above near cap).
 	privGate = newPrivateGate(prem, os.Getenv("SUPERADMIN"))
 	relay.RejectEvent = append(relay.RejectEvent, privGate.reject)
+
+	// Stage cap: free clubs may have at most 2 DJs on stage, premium clubs up to 5.
+	stageG := &stageGate{db: db, prem: prem, superadmin: os.Getenv("SUPERADMIN")}
+	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
+
+	// Playlist library (kind 30104): free accounts may save 1 playlist, premium unlimited.
+	playlistG := newPlaylistGate(db, prem, os.Getenv("SUPERADMIN"))
+	relay.RejectEvent = append(relay.RejectEvent, playlistG.reject)
 
 	cond := newConductor(db, relay, state, sk)
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).

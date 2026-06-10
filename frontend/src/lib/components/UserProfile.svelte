@@ -482,10 +482,14 @@
     <div class="pls-head">
       <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
       {#if isMe}
-        <form class="new-pl" onsubmit={(e) => { e.preventDefault(); void doCreate() }}>
-          <input class="in" bind:value={newName} placeholder="New playlist name…" maxlength="60" />
-          <button class="btn btn-primary btn-sm" disabled={!newName.trim() || creating}>＋ New</button>
-        </form>
+        {#if ownPremium.active || list.length < 1}
+          <form class="new-pl" onsubmit={(e) => { e.preventDefault(); void doCreate() }}>
+            <input class="in" bind:value={newName} placeholder="New playlist name…" maxlength="60" />
+            <button class="btn btn-primary btn-sm" disabled={!newName.trim() || creating}>＋ New</button>
+          </form>
+        {:else}
+          <button class="prem-btn" onclick={() => (showPremModal = true)} title="Upgrade for unlimited playlists">⚡ More playlists — Premium</button>
+        {/if}
       {/if}
     </div>
 

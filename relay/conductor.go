@@ -701,3 +701,88 @@ func atoiDefault(s string, def int) int {
 	}
 	return def
 }
+
+// ── stageGate: enforce per-club DJ slot cap on kind-30102 events ─────────────
+
+type stageGate struct {
+	db         *badger.BadgerBackend
+	prem       *premiumStore
+	superadmin string
+}
+
+// reject blocks a stage-join (kind 30102, content != "off") if the club is
+// already at its DJ cap (2 for free owners, 5 for premium owners).
+// Heartbeats from DJs already on stage are always allowed through.
+func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
+	if evt.Kind != kindStage {
+		return false, ""
+	}
+	if evt.Content == "off" {
+		return false, "" // leaving stage is always allowed
+	}
+	club := tagVal(evt, "h")
+	if club == "" {
+		return false, ""
+	}
+	if g.superadmin != "" && evt.PubKey == g.superadmin {
+		return false, ""
+	}
+
+	// Count active DJs on stage (excluding the sender — heartbeat is allowed).
+	ch, err := g.db.QueryEvents(ctx, nostr.Filter{
+		Kinds: []int{kindStage},
+		Tags:  nostr.TagMap{"h": []string{club}},
+	})
+	if err != nil {
+		return false, ""
+	}
+	staleThreshold := time.Now().UnixMilli() - condStageStaleMS
+	active := 0
+	alreadyOnStage := false
+	for ev := range ch {
+		if ev.PubKey == evt.PubKey {
+			alreadyOnStage = true
+			continue
+		}
+		if ev.Content == "off" {
+			continue
+		}
+		if int64(ev.CreatedAt)*1000 >= staleThreshold {
+			active++
+		}
+	}
+	if alreadyOnStage {
+		return false, "" // heartbeat from existing DJ
+	}
+
+	cap := condMaxDJsFree
+	if g.prem != nil {
+		if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" && g.prem.valid(ctx, owner) {
+			cap = condMaxDJs
+		}
+	}
+	if active >= cap {
+		return true, "restricted: stage is full"
+	}
+	return false, ""
+}
+
+func clubOwnerFromDB(ctx context.Context, db *badger.BadgerBackend, club string) string {
+	ch, err := db.QueryEvents(ctx, nostr.Filter{
+		Kinds: []int{kindCreateGroup},
+		Tags:  nostr.TagMap{"h": []string{club}},
+	})
+	if err != nil {
+		return ""
+	}
+	var newest *nostr.Event
+	for ev := range ch {
+		if newest == nil || ev.CreatedAt > newest.CreatedAt {
+			newest = ev
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.PubKey
+}
