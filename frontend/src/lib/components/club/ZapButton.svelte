@@ -27,10 +27,6 @@
   // The score is fed by ClubView's single per-club zap subscription (stage DJs + owner) —
   // this component only reads zaps.score(dj), it does not open its own subscription.
 
-  function fmtSats(n: number): string {
-    return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n)
-  }
-
   let open = $state(false)
   let comment = $state('')
   let custom = $state('')
@@ -64,7 +60,6 @@
     {:else}
       <span class="lbl">zap</span>
     {/if}
-    {#if total > 0}<span class="score">{fmtSats(total)} sats</span>{/if}
   </button>
 
   {#if open}
@@ -91,101 +86,45 @@
 {/if}
 
 <style>
-  /* The club's primary tip action — a big golden pill with a glow pulse and a shine sweep. */
+  /* Quiet amber-outline pill — present but not shouting. No animation, no score. */
   .zap-mini {
-    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.35rem;
     flex: 0 0 auto;
-    border: 1px solid rgba(255, 220, 120, 0.6);
+    border: 1px solid rgba(255, 178, 64, 0.45);
     border-radius: 999px;
-    padding: 0.5rem 1.1rem;
-    min-height: 44px;
-    font-size: 0.95rem;
-    font-weight: 800;
-    color: #1a1205;
+    padding: 0.32rem 0.85rem;
+    min-height: 36px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--amber);
     cursor: pointer;
-    background: linear-gradient(110deg, #ffb347, var(--amber) 45%, #ffd24a);
-    box-shadow: 0 2px 12px rgba(255, 154, 31, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.45);
-    overflow: hidden;
-    animation: zap-pulse 1.8s ease-in-out infinite;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-  }
-  /* Periodic shine sweeping across the pill. */
-  .zap-mini::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -60%;
-    width: 38%;
-    background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-    transform: skewX(-20deg);
-    animation: zap-shine 3.4s ease-in-out infinite;
-    pointer-events: none;
+    background: rgba(255, 154, 31, 0.08);
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
   .zap-mini:hover:not(:disabled) {
-    transform: translateY(-1px) scale(1.03);
-    box-shadow: 0 4px 18px rgba(255, 154, 31, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45);
-    filter: brightness(1.05);
+    background: rgba(255, 154, 31, 0.18);
+    border-color: var(--amber);
   }
   .zap-mini:active:not(:disabled) {
-    transform: scale(0.97);
+    background: rgba(255, 154, 31, 0.26);
   }
   .zap-mini:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    animation: none;
-  }
-  .zap-mini:disabled::after {
-    animation: none;
-  }
-  @keyframes zap-pulse {
-    0%,
-    100% {
-      box-shadow: 0 0 0 0 rgba(255, 154, 31, 0.5), 0 0 8px rgba(255, 154, 31, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.45);
-    }
-    50% {
-      box-shadow: 0 0 0 7px rgba(255, 154, 31, 0), 0 0 20px rgba(255, 154, 31, 0.75),
-        inset 0 1px 0 rgba(255, 255, 255, 0.45);
-    }
-  }
-  @keyframes zap-shine {
-    0%,
-    55% {
-      left: -60%;
-    }
-    85%,
-    100% {
-      left: 130%;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .zap-mini,
-    .zap-mini::after {
-      animation: none;
-    }
-    /* Static glow so the button still reads as the primary action without motion. */
-    .zap-mini {
-      box-shadow: 0 0 14px rgba(255, 154, 31, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45);
-    }
   }
   .bolt {
-    font-size: 1.15rem;
+    font-size: 0.95rem;
     line-height: 1;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
   }
   .lbl {
-    font-size: 0.88rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 0.82rem;
+    font-weight: 700;
   }
   .zap-av {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 999px;
     object-fit: cover;
     background: rgba(0, 0, 0, 0.18);
@@ -195,14 +134,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .score {
-    font-size: 0.85rem;
-    font-weight: 700;
-    border-left: 1px solid rgba(0, 0, 0, 0.25);
-    padding-left: 0.45rem;
-    margin-left: 0.1rem;
-    font-variant-numeric: tabular-nums;
   }
   .backdrop {
     position: fixed;
