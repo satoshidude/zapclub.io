@@ -28,6 +28,8 @@
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
+  import { ownPremium } from '../nostr/premium.svelte'
+  import PremiumModal from './PremiumModal.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
@@ -110,6 +112,7 @@
 
   // ── Profile editor (own profile only) ──────────────────────────────────
   let editing = $state(false)
+  let showPremModal = $state(false)
   let eName = $state('')
   let eAbout = $state('')
   let ePic = $state('')
@@ -320,6 +323,9 @@
     {#if isMe}
       <div class="me-actions">
         <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
+        <button class="prem-btn" onclick={() => (showPremModal = true)} title="zapclub Premium">
+          {#if ownPremium.active}⚡ Premium active{:else}⚡ Get Premium{/if}
+        </button>
         <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
       </div>
     {/if}
@@ -584,6 +590,10 @@
   />
 {/if}
 
+{#if showPremModal}
+  <PremiumModal onClose={() => (showPremModal = false)} />
+{/if}
+
 <style>
   .wrap {
     max-width: 680px;
@@ -751,6 +761,18 @@
   .logout-btn:hover {
     border-color: var(--danger);
     color: var(--danger);
+  }
+  .prem-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--amber, #f59e0b);
+    color: var(--amber, #f59e0b);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .prem-btn:hover {
+    background: color-mix(in srgb, var(--amber, #f59e0b) 12%, transparent);
   }
   .editor {
     display: flex;

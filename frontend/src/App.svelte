@@ -20,9 +20,17 @@
   import { showPay } from './lib/nostr/payModal.svelte'
   import { registerActiveClub, persistedActiveClub } from './lib/nostr/miniplay.svelte'
   import { fetchClub } from './lib/nostr/groups'
+  import { watchOwnPremium } from './lib/nostr/premium.svelte'
+  import { auth } from './lib/nostr/auth.svelte'
 
   startConnectionWatch()
   startAccountWatch()
+
+  // Keep the logged-in user's premium status live. Start on login, stop on logout.
+  $effect(() => {
+    if (!auth.pubkey) return
+    return watchOwnPremium()
+  })
 
   // Extension switched to a different account than we're logged in as → re-login as it.
   function reloginExtension() {
