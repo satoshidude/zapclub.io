@@ -55,3 +55,15 @@ relay.zapclub.io {
 		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
 	}
 }
+
+live.zapclub.io {
+	# LiveKit SFU — WebSocket signaling + WHIP ingress (OBS).
+	# Media (WebRTC) goes directly via UDP 50000-60000, bypassing Caddy.
+	reverse_proxy 127.0.0.1:7880
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Access-Control-Allow-Origin "*"
+	}
+}

@@ -38,7 +38,7 @@ export interface LivekitClient {
 }
 
 /** Fetch a LiveKit token from the relay token endpoint (NIP-98 authenticated). */
-async function fetchToken(groupId: string): Promise<{ url: string; token: string }> {
+export async function fetchToken(groupId: string): Promise<{ url: string; token: string }> {
   const url = `${RELAY_HTTP}/.well-known/nip29/livekit/${groupId}`
   const { signEvent } = await import('../nostr/nostrLogin')
   const { auth } = await import('../nostr/auth.svelte')
