@@ -28,15 +28,18 @@
   let showPremModal = $state(false)
 
   const myIds = $derived(new Set(myClubs.map((c) => c.id)))
+  let showAllClubs = $state(false)
 
   // The club the user is currently DJing in → pin to the top + highlight.
   const onStageClub = persistedStageGroup()
-  const displayClubs = $derived.by(() => {
-    if (!onStageClub) return clubs
-    const top = clubs.filter((c) => c.id === onStageClub)
-    const rest = clubs.filter((c) => c.id !== onStageClub)
+  const sortedClubs = $derived.by(() => {
+    const byMembers = [...clubs].sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
+    if (!onStageClub) return byMembers
+    const top = byMembers.filter((c) => c.id === onStageClub)
+    const rest = byMembers.filter((c) => c.id !== onStageClub)
     return [...top, ...rest]
   })
+  const displayClubs = $derived(showAllClubs ? sortedClubs : sortedClubs.slice(0, 3))
 
   async function load() {
     loading = true
@@ -183,6 +186,11 @@
         </div>
       {/each}
     </div>
+    {#if clubs.length > 3}
+      <button class="all-clubs-link" onclick={() => (showAllClubs = !showAllClubs)}>
+        {showAllClubs ? '↑ Show less' : `All clubs (${clubs.length}) →`}
+      </button>
+    {/if}
   {/if}
 
   {#if showPremModal}
@@ -191,23 +199,42 @@
 
   {#if topDjs.length}
     <section class="top-djs">
-      <div class="head">
-        <h2>🏆 Top zapped DJs</h2>
-        <button class="btn btn-ghost btn-sm" onclick={goLeaderboard}>Leaderboard →</button>
-      </div>
-      <div class="board-rows">
-        {#each topDjs as e (e.pubkey)}
-          {@const p = useProfile(e.pubkey)}
-          {@const npub = npubEncode(e.pubkey)}
-          <button class="board-row" class:gold={e.rank === 1} onclick={() => goUser(npub)} title={`#${e.rank} · ${e.sats.toLocaleString()} sats`}>
-            <span class="b-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
-            <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-            <span class="b-name">{displayName(e.pubkey, p)}</span>
-            <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
-            <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
-          </button>
-        {/each}
-      </div>
+      <h2>🏆 Top DJs</h2>
+      <!-- Podium: #2 left · #1 center · #3 right -->
+      {#if topDjs.length >= 3}
+        <div class="podium">
+          {#each [topDjs[1], topDjs[0], topDjs[2]] as e, pi (e.pubkey)}
+            {@const p = useProfile(e.pubkey)}
+            {@const npub = npubEncode(e.pubkey)}
+            {@const isFirst = e.rank === 1}
+            {@const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}
+            <button class="pod-slot" class:pod-first={isFirst} onclick={() => goUser(npub)}>
+              <span class="pod-medal">{medal}</span>
+              <img class="pod-av" src={avatarUrl(e.pubkey, p)} alt=""
+                width={isFirst ? 52 : 40} height={isFirst ? 52 : 40} />
+              <span class="pod-name">{displayName(e.pubkey, p)}</span>
+              <span class="pod-sats">⚡ {e.sats.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <!-- Ranks #4 and #5 as compact rows -->
+      {#if topDjs.length > 3}
+        <div class="board-rows">
+          {#each topDjs.slice(3) as e (e.pubkey)}
+            {@const p = useProfile(e.pubkey)}
+            {@const npub = npubEncode(e.pubkey)}
+            <button class="board-row" onclick={() => goUser(npub)}>
+              <span class="b-rank">#{e.rank}</span>
+              <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
+              <span class="b-name">{displayName(e.pubkey, p)}</span>
+              <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
+              <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <button class="all-clubs-link leaderboard-link" onclick={goLeaderboard}>Full leaderboard →</button>
     </section>
   {/if}
 </div>
@@ -268,10 +295,92 @@
     color: var(--text);
     white-space: nowrap;
   }
+  .all-clubs-link {
+    display: block;
+    width: 100%;
+    margin-top: 0.7rem;
+    padding: 0.45rem 0;
+    background: none;
+    border: none;
+    color: var(--accent-2);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    letter-spacing: 0.01em;
+  }
+  .all-clubs-link:hover { text-decoration: underline; }
+  .leaderboard-link {
+    margin-top: 1rem;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
   /* Top zapped DJs — its own block, below the clubs list. */
   .top-djs {
     margin-top: 2rem;
   }
+  .top-djs h2 {
+    margin: 0 0 1rem;
+    font-size: 1.3rem;
+  }
+  /* Podium: #2 left, #1 center (tallest), #3 right */
+  .podium {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+    align-items: end;
+  }
+  .pod-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.8rem 0.5rem 0.7rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.15s ease, transform 0.08s ease;
+    text-align: center;
+  }
+  .pod-slot:hover { border-color: var(--accent-2); }
+  .pod-slot:active { transform: translateY(1px); }
+  .pod-slot.pod-first {
+    border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+    background: radial-gradient(120% 140% at 50% 0%, rgba(245,166,35,0.13) 0%, transparent 65%), var(--bg-elev);
+    padding-top: 1.1rem;
+    padding-bottom: 0.9rem;
+  }
+  .pod-medal {
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+  .pod-first .pod-medal { font-size: 1.5rem; }
+  .pod-av {
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+    border: 2px solid var(--border);
+  }
+  .pod-first .pod-av { border-color: var(--amber); }
+  .pod-name {
+    font-weight: 700;
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .pod-first .pod-name { font-size: 0.95rem; }
+  .pod-sats {
+    color: var(--amber);
+    font-weight: 800;
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .pod-first .pod-sats { font-size: 0.88rem; }
   .board-rows {
     display: flex;
     flex-direction: column;
@@ -289,24 +398,15 @@
     color: var(--text);
     transition: border-color 0.15s ease, transform 0.08s ease;
   }
-  .board-row:hover {
-    border-color: var(--accent-2);
-  }
-  .board-row:active {
-    transform: translateY(1px);
-  }
-  .board-row.gold {
-    border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
-    background: radial-gradient(120% 160% at 0% 0%, rgba(245, 166, 35, 0.12) 0%, transparent 60%), var(--bg-elev);
-  }
+  .board-row:hover { border-color: var(--accent-2); }
+  .board-row:active { transform: translateY(1px); }
   .b-rank {
     flex: 0 0 auto;
     min-width: 1.8rem;
     text-align: center;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 800;
     color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
   }
   .b-av {
     flex: 0 0 auto;
@@ -323,7 +423,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
   }
   .b-from {
     flex: 0 0 auto;
@@ -334,15 +434,13 @@
     flex: 0 0 auto;
     color: var(--amber);
     font-weight: 800;
-    font-size: 0.88rem;
+    font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
     min-width: 4.5rem;
     text-align: right;
   }
   @media (max-width: 460px) {
-    .b-from {
-      display: none;
-    }
+    .b-from { display: none; }
   }
   .head {
     display: flex;
