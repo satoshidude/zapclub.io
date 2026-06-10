@@ -91,52 +91,101 @@
 {/if}
 
 <style>
-  /* Small inline zap chip — sits next to the DJ name. */
+  /* The club's primary tip action — a big golden pill with a glow pulse and a shine sweep. */
   .zap-mini {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: 0.45rem;
     flex: 0 0 auto;
-    border: none;
+    border: 1px solid rgba(255, 220, 120, 0.6);
     border-radius: 999px;
-    padding: 0.12rem 0.45rem;
-    font-size: 0.78rem;
+    padding: 0.5rem 1.1rem;
+    min-height: 44px;
+    font-size: 0.95rem;
     font-weight: 800;
     color: #1a1205;
     cursor: pointer;
-    background: linear-gradient(95deg, var(--amber), #ffd24a);
-    animation: zap-pulse 1.6s ease-in-out infinite;
+    background: linear-gradient(110deg, #ffb347, var(--amber) 45%, #ffd24a);
+    box-shadow: 0 2px 12px rgba(255, 154, 31, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    overflow: hidden;
+    animation: zap-pulse 1.8s ease-in-out infinite;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  }
+  /* Periodic shine sweeping across the pill. */
+  .zap-mini::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -60%;
+    width: 38%;
+    background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+    transform: skewX(-20deg);
+    animation: zap-shine 3.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .zap-mini:hover:not(:disabled) {
+    transform: translateY(-1px) scale(1.03);
+    box-shadow: 0 4px 18px rgba(255, 154, 31, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    filter: brightness(1.05);
+  }
+  .zap-mini:active:not(:disabled) {
+    transform: scale(0.97);
   }
   .zap-mini:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     animation: none;
   }
+  .zap-mini:disabled::after {
+    animation: none;
+  }
   @keyframes zap-pulse {
     0%,
     100% {
-      box-shadow: 0 0 0 0 rgba(255, 154, 31, 0.5), 0 0 6px rgba(255, 154, 31, 0.4);
+      box-shadow: 0 0 0 0 rgba(255, 154, 31, 0.5), 0 0 8px rgba(255, 154, 31, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.45);
     }
     50% {
-      box-shadow: 0 0 0 5px rgba(255, 154, 31, 0), 0 0 14px rgba(255, 154, 31, 0.7);
+      box-shadow: 0 0 0 7px rgba(255, 154, 31, 0), 0 0 20px rgba(255, 154, 31, 0.75),
+        inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    }
+  }
+  @keyframes zap-shine {
+    0%,
+    55% {
+      left: -60%;
+    }
+    85%,
+    100% {
+      left: 130%;
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .zap-mini {
+    .zap-mini,
+    .zap-mini::after {
       animation: none;
+    }
+    /* Static glow so the button still reads as the primary action without motion. */
+    .zap-mini {
+      box-shadow: 0 0 14px rgba(255, 154, 31, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45);
     }
   }
   .bolt {
-    font-size: 0.82rem;
+    font-size: 1.15rem;
     line-height: 1;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
   }
   .lbl {
-    font-size: 0.74rem;
+    font-size: 0.88rem;
     font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .zap-av {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     border-radius: 999px;
     object-fit: cover;
     background: rgba(0, 0, 0, 0.18);
@@ -148,11 +197,12 @@
     white-space: nowrap;
   }
   .score {
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     font-weight: 700;
     border-left: 1px solid rgba(0, 0, 0, 0.25);
-    padding-left: 0.3rem;
-    margin-left: 0.05rem;
+    padding-left: 0.45rem;
+    margin-left: 0.1rem;
+    font-variant-numeric: tabular-nums;
   }
   .backdrop {
     position: fixed;

@@ -358,8 +358,9 @@
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: 999px;
-    padding: 0.12rem 0.4rem;
-    font-size: 0.8rem;
+    padding: 0.45rem 0.75rem;
+    min-height: 44px;
+    font-size: 1.05rem;
     cursor: pointer;
     filter: grayscale(1);
     opacity: 0.7;
