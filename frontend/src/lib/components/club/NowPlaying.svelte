@@ -83,16 +83,17 @@
     return ''
   }
 
-  // The artist belongs IN the title ("Artist - Title"), shown the same everywhere (card, Live
-  // Set, playlists). Server-enriched titles already carry a spaced dash → shown as-is. For a
-  // bare title we prepend the artist the embed reports (getVideoData channel, e.g. "X - Topic").
+  // Stored titles stay "Artist - Title" (Live Set, playlists). For DISPLAY the card splits
+  // them: the bare track title in the title row, the artist on its own meta line below.
+  // For a bare title without a dash the artist comes from the embed's channel (getVideoData).
   const channelArtist = $derived(
     np?.videoId && ytMeta.vid === np.videoId ? artistFromChannel(ytMeta.author) : '',
   )
-  const displayTitle = $derived.by(() => {
+  const parts = $derived.by(() => {
     const full = np?.title || np?.videoId || ''
-    if (/ [–—-] /.test(full)) return full // already has an artist
-    return channelArtist ? `${channelArtist} - ${full}` : full
+    const m = full.match(/^(.+?) [–—-] (.+)$/)
+    if (m) return { artist: m[1], title: m[2] }
+    return { artist: channelArtist, title: full }
   })
 
   // Marquee: when the title is wider than its box, scroll it slowly back and forth instead of
@@ -101,7 +102,7 @@
   let scrollPx = $state(0)
   const marqueeDur = $derived(Math.max(9, Math.round(scrollPx / 14) + 6)) // slower for longer titles
   $effect(() => {
-    void displayTitle // re-measure when the title changes
+    void parts.title // re-measure when the title changes
     const el = titleEl
     if (!el) return
     const measure = () => {
@@ -137,6 +138,7 @@
 <div class="np card" class:zoomed>
   {#if np}
     <div class="np-head">
+      <ZapButton club={clubId} />
       <button
         class="like"
         class:on={liked}
@@ -171,13 +173,13 @@
           <div class="title-row">
             <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="title" bind:this={titleEl} class:scroll={scrollPx > 0} style:--scroll="{scrollPx}px" style:--marquee-dur="{marqueeDur}s">
-              <span class="title-text">{displayTitle}</span>
+              <span class="title-text">{parts.title}</span>
             </span>
           </div>
         </div>
-        <div class="dj-row">
-          <ZapButton club={clubId} />
-        </div>
+        {#if parts.artist}
+          <div class="artist">{parts.artist}</div>
+        {/if}
       {:else}
         <div class="idle">
           No DJ on stage — lobby is playing.
@@ -289,11 +291,13 @@
   .info {
     min-width: 0;
   }
-  .dj-row {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
+  .artist {
     margin-top: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .title {
     flex: 1;
