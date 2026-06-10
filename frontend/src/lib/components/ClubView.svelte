@@ -534,10 +534,10 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <!-- Stage block under the hero (no tabs): now-playing card + DJ slots + the DJ's Live Set,
-       all INSIDE the stage card (it all happens on the stage). -->
+  <!-- Stage block under the hero (no tabs): now-playing card + the DJ's Live Set. The DJ
+       slots live on the Dancefloor's stage row (the people are on the floor, up front). -->
   <section class="stream">
-    <Stage {groupId} {canModerate} {isMember}>
+    <Stage>
       <NowPlaying
         onGoStage={goOnStage}
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
@@ -559,22 +559,22 @@
     </Stage>
   </section>
 
-  <!-- Dancefloor: the club's members ARE the crowd — online members dance, offline are dimmed.
-       Chat lives here too, kept subtle. Members-only (the relay rejects non-member writes). -->
-  {#if isMember}
-    <Dancefloor
-      {groupId}
-      {members}
-      canChat={isMember}
-      {canModerate}
-      {isOwner}
-      {owner}
-      currentDj={sync.live?.dj ?? ''}
-      onkick={kick}
-      onpromote={promote}
-      ondelete={(id) => void deleteEvent(groupId, id)}
-    />
-  {/if}
+  <!-- Dancefloor: the club's members ARE the crowd — stage DJs dance up front, online members
+       dance, offline are dimmed. Chat lives here too, kept subtle. Visible to everyone (it
+       carries the stage row); writing stays members-only (the relay rejects non-member writes). -->
+  <Dancefloor
+    {groupId}
+    {members}
+    canChat={isMember}
+    {canModerate}
+    {isOwner}
+    {isMember}
+    {owner}
+    currentDj={sync.live?.dj ?? ''}
+    onkick={kick}
+    onpromote={promote}
+    ondelete={(id) => void deleteEvent(groupId, id)}
+  />
 
 </div>
 

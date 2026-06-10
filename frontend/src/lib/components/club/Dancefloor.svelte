@@ -9,7 +9,9 @@
   import { chat } from '../../nostr/chat.svelte'
   import { emotes, sendEmote } from '../../nostr/emotes.svelte'
   import { zaps } from '../../nostr/zaps.svelte'
-  import { stage } from '../../nostr/stage.svelte'
+  import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
+  import { kickFromStage } from '../../nostr/groups'
+  import { reactivateMyQueue } from '../../nostr/queue.svelte'
 
   let {
     groupId,
@@ -17,6 +19,7 @@
     canChat,
     canModerate = false,
     isOwner = false,
+    isMember = false,
     owner = '',
     currentDj = '',
     onkick,
@@ -28,6 +31,7 @@
     canChat: boolean
     canModerate?: boolean
     isOwner?: boolean
+    isMember?: boolean
     owner?: string
     currentDj?: string
     onkick?: (pubkey: string) => void
@@ -35,14 +39,53 @@
     ondelete?: (eventId: string) => void
   } = $props()
 
-  // DJs currently on stage — shown on the floor with a frame (even if their presence beat is a
-  // little stale; being on stage means they're here).
-  const stageSet = $derived(new Set(stage.djs.map((d) => d.pubkey)))
+  // DJs currently on stage — the floor's front row (even if their presence beat is a little
+  // stale; being on stage means they're here). They are NOT repeated in the crowd below.
+  const stageDjs = $derived(stage.djs)
+  const stageSet = $derived(new Set(stageDjs.map((d) => d.pubkey)))
+  const onStage = $derived(stage.isOnStage(auth.pubkey))
+  const emptySlots = $derived(Math.max(0, MAX_DJS - stageDjs.length))
+  // A free slot can be taken directly by a signed-in member who isn't on stage yet.
+  const canJoin = $derived(auth.canSign && isMember && !onStage && !stage.full)
+  let stageBusy = $state(false)
+  let stageError = $state('')
 
-  // Crowd = the club's members. ONLINE members (recent presence beat) OR stage DJs dance; the rest
-  // are part of the club but shown dimmed + still ("here vs away").
-  const online = $derived(members.filter((m) => presence.isOnline(m.pubkey) || stageSet.has(m.pubkey)))
-  const offline = $derived(members.filter((m) => !presence.isOnline(m.pubkey) && !stageSet.has(m.pubkey)))
+  async function goStage() {
+    stageBusy = true
+    stageError = ''
+    try {
+      await joinStage(groupId) // just join the rotation — the round-robin interleaves my set
+      void reactivateMyQueue(groupId) // bring my FULL set (clear stale played-flags from before)
+    } catch (e) {
+      stageError = String((e as Error)?.message ?? e)
+    } finally {
+      stageBusy = false
+    }
+  }
+  async function offStage() {
+    stageBusy = true
+    stageError = ''
+    try {
+      await leaveStage(groupId)
+    } catch (e) {
+      stageError = String((e as Error)?.message ?? e)
+    } finally {
+      stageBusy = false
+    }
+  }
+  async function unstage(pubkey: string) {
+    stageError = ''
+    try {
+      await kickFromStage(groupId, pubkey)
+    } catch (e) {
+      stageError = String((e as Error)?.message ?? e)
+    }
+  }
+
+  // Crowd = the club's members minus the stage row. ONLINE members (recent presence beat)
+  // dance; the rest are part of the club but shown dimmed + still ("here vs away").
+  const online = $derived(members.filter((m) => !stageSet.has(m.pubkey) && presence.isOnline(m.pubkey)))
+  const offline = $derived(members.filter((m) => !stageSet.has(m.pubkey) && !presence.isOnline(m.pubkey)))
 
   const CAP = 48
   const shownOnline = $derived(online.slice(0, CAP))
@@ -143,12 +186,54 @@
 <section class="floor card" class:playing class:hyped>
   <div class="head">
     <h3>Dancefloor</h3>
-    <span class="count" title="dancing now / club members">{online.length} / {members.length}</span>
+    <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
   </div>
 
-  {#if online.length === 0 && offline.length === 0}
+  {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
     <p class="dim">No one here yet — be the first on the floor.</p>
   {/if}
+
+  <!-- Stage row: the on-stage DJs dance up front, right against the crowd. Open slots are
+       joinable in place; the people live ONLY here (not repeated in the crowd below). -->
+  <div class="stagerow">
+    <span class="stage-tag" aria-hidden="true">stage {stageDjs.length}/{MAX_DJS}</span>
+    {#each stageDjs as dj (dj.pubkey)}
+      {@const profile = useProfile(dj.pubkey)}
+      <button
+        class="dancer up-front"
+        class:dj={dj.pubkey === currentDj}
+        class:zapped={zapped === dj.pubkey}
+        style={danceVars(dj.pubkey)}
+        title={displayName(dj.pubkey, profile)}
+        onclick={() => (selected = selected === dj.pubkey ? null : dj.pubkey)}
+      >
+        {#if bubbleByPubkey[dj.pubkey]}<span class="bubble">{bubbleByPubkey[dj.pubkey]}</span>{/if}
+        <span class="bob v{variantOf(dj.pubkey)}">
+          <img class="av" src={avatarUrl(dj.pubkey, profile)} alt="" width="64" height="64" loading="lazy" />
+        </span>
+        <span class="nm">{displayName(dj.pubkey, profile)}</span>
+      </button>
+    {/each}
+    {#each Array(emptySlots) as _, i (i)}
+      <button
+        class="dancer open"
+        class:joinable={canJoin}
+        onclick={goStage}
+        disabled={!canJoin || stageBusy}
+        title={canJoin ? 'Take this spot' : ''}
+      >
+        <span class="ring">+</span>
+        <span class="nm">{canJoin ? 'Join' : 'open'}</span>
+      </button>
+    {/each}
+    {#if auth.canSign && isMember && onStage}
+      <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
+        <span class="ring">↩</span>
+        <span class="nm">Leave</span>
+      </button>
+    {/if}
+  </div>
+  {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
   <!-- The dancing crowd (online members) — loose flat cluster. -->
   {#if shownOnline.length > 0}
@@ -157,8 +242,6 @@
         {@const profile = useProfile(m.pubkey)}
         <button
           class="dancer"
-          class:stage-dj={stageSet.has(m.pubkey)}
-          class:dj={m.pubkey === currentDj}
           class:zapped={zapped === m.pubkey}
           style={danceVars(m.pubkey)}
           title={displayName(m.pubkey, profile)}
@@ -214,6 +297,9 @@
         {#if presence.isOnline(sel.pubkey)}<span class="here">● here</span>{/if}
       </div>
       <button class="link" onclick={() => openProfile(sel.pubkey)}>Profile ↗</button>
+      {#if canModerate && stageSet.has(sel.pubkey) && sel.pubkey !== auth.pubkey}
+        <button class="mini" onclick={() => { void unstage(sel.pubkey); selected = null }}>off stage</button>
+      {/if}
       {#if canModerate && sel.pubkey !== owner && sel.pubkey !== auth.pubkey}
         {#if isOwner && !sel.roles.includes('moderator')}
           <button class="mini" onclick={() => { onpromote?.(sel.pubkey); selected = null }}>+mod</button>
@@ -268,6 +354,79 @@
     align-items: flex-end;
     padding: 1.6rem 0.2rem 0.6rem; /* headroom for chat bubbles */
     min-height: 70px;
+  }
+
+  /* Stage row: the front of the floor. Slightly bigger dancers, a soft platform glow, and a
+     dashed edge towards the crowd right below. */
+  .stagerow {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.9rem;
+    align-items: flex-end;
+    padding: 1.7rem 0.2rem 0.7rem; /* headroom for the tag + chat bubbles */
+    border-bottom: 1px dashed var(--border);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 7%, transparent), transparent 70%);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+  .stage-tag {
+    position: absolute;
+    top: 0.35rem;
+    left: 0.4rem;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .stagerow .dancer {
+    width: 72px;
+  }
+  .stagerow .nm {
+    max-width: 72px;
+    font-size: 0.66rem;
+  }
+  /* Open slot / leave control as a dancer-shaped column so it lines up with the row. */
+  .dancer.open .ring {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 2px dashed var(--border);
+    display: grid;
+    place-items: center;
+    font-size: 1.4rem;
+    color: var(--text-dim);
+  }
+  .dancer.open {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .dancer.open.joinable,
+  .dancer.open.leave {
+    opacity: 1;
+    cursor: pointer;
+  }
+  .dancer.open.joinable .ring {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .dancer.open.joinable:hover:not(:disabled) .ring {
+    background: rgba(74, 222, 94, 0.12);
+  }
+  .dancer.open.leave .ring {
+    border-color: var(--danger);
+    color: var(--danger);
+    font-size: 1.1rem;
+  }
+  .dancer.open.leave:hover:not(:disabled) .ring {
+    background: rgba(255, 90, 90, 0.12);
+  }
+  .dancer.open:disabled {
+    cursor: default;
+  }
+  .err {
+    color: var(--danger);
   }
 
   /* Chat bubble over a dancer's head (fades out; the message leaves bubbleByPubkey after 6s). */
@@ -367,8 +526,8 @@
   .dancer .av {
     border: 2px solid transparent;
   }
-  /* On-stage DJ: a frame. The currently-playing DJ (.dj) additionally glows. */
-  .dancer.stage-dj .av {
+  /* On-stage DJ (front row): a frame. The currently-playing DJ (.dj) additionally glows. */
+  .dancer.up-front .av {
     border-color: var(--accent-2);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 40%, transparent);
   }
