@@ -1,8 +1,5 @@
 <script lang="ts">
   import { sync, targetPosition } from '../../nostr/sync.svelte'
-  import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
-  import { goUser } from '../../router.svelte'
-  import { npubEncode } from 'nostr-tools/nip19'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { enrichMyTrackTitle, enrichMyTrackDuration, queues } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
@@ -115,8 +112,6 @@
     ro.observe(el)
     return () => ro.disconnect()
   })
-  const dj = $derived(np?.dj ?? '')
-  const profile = $derived(dj ? useProfile(dj) : null)
   const pos = $derived.by(() => {
     void nowMs // re-evaluate on tick
     return np ? targetPosition() : 0
@@ -181,10 +176,6 @@
           </div>
         </div>
         <div class="dj-row">
-          <a class="dj" href={`/user/${npubEncode(dj)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(dj)) }}>
-            <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
-            {displayName(dj, profile)}
-          </a>
           <ZapButton club={clubId} />
         </div>
       {:else}
@@ -303,27 +294,6 @@
     align-items: center;
     gap: 0.6rem;
     margin-top: 0.2rem;
-  }
-  .dj {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    text-decoration: none;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .dj:hover {
-    color: var(--accent-2);
-  }
-  .avatar {
-    flex: 0 0 auto;
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
   }
   .title {
     flex: 1;

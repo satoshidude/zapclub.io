@@ -58,7 +58,8 @@
       <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
       <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
     {:else}
-      <span class="lbl dj-name">zap {displayName(dj, djProfile)}</span>
+      <span class="lbl">zap</span>
+      <span class="lbl dj-name divided">{displayName(dj, djProfile)}</span>
     {/if}
   </button>
 
@@ -134,6 +135,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .divided {
+    border-left: 1px solid rgba(255, 178, 64, 0.45);
+    padding-left: 0.45rem;
   }
   .backdrop {
     position: fixed;
