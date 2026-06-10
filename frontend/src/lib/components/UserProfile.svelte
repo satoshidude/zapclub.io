@@ -339,7 +339,11 @@
   <header class="phead">
     <img class="pavatar" src={avatarUrl(pubkey, profile)} alt="" width="64" height="64" />
     <div class="pinfo">
-      <h1>{displayName(pubkey, profile)}</h1>
+      <h1>
+        {displayName(pubkey, profile)}
+        {#if isMe && ownPremium.active}<span class="prem-inline">★</span>
+        {:else if !isMe && viewedIsPremium}<span class="prem-inline">★</span>{/if}
+      </h1>
       <div class="pid">
         <span class="npub">{npub.slice(0, 18)}…</span>
         <a class="njump" href={`https://njump.me/${npub}`} target="_blank" rel="noopener noreferrer" title="Open this profile on njump.me for full Nostr details">on Nostr ↗</a>
@@ -678,6 +682,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.2rem;
+  }
+  .prem-inline {
+    font-size: 0.7em;
+    color: var(--amber, #f59e0b);
+    vertical-align: middle;
+    margin-left: 0.25em;
   }
   .pavatar {
     width: 64px;

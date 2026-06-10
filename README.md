@@ -44,8 +44,9 @@ a listener zaps sats straight to the DJ whose track is playing.
   One click to join a free slot; the live DJ pulses green.
 - **Round-robin** — each DJ's queue is interleaved into one club set (`dj0.t0,
   dj1.t0, … dj0.t1, …`).
-- **Synced playback** — a single **conductor** drives a drift-corrected position
-  so everyone hears the same moment; stops to a lobby track when no one's on.
+- **Synced playback** — the relay conductor drives position via `now_playing`
+  heartbeats; clients drift-correct locally so everyone hears the same moment.
+  Stops to a lobby track when no one's on.
 - **DJ Station** — search YouTube or import a playlist, reorder by drag-and-drop,
   save/load named playlists (managed on your profile too).
 - **Chat & members** per club; **avatars** from the npub (Robohash for people,
@@ -121,13 +122,14 @@ sticky-conductor handoff, and the round-robin divergence bugs they caused.
 
 ### Synced playback (drift correction)
 
-The conductor republishes `now_playing` on every track change and as a **~15 s
+The relay republishes `now_playing` on every track change and as a **~15 s
 heartbeat** carrying a fresh `sent_at`. Each client calibrates a clock offset
 `offset = sent_at − now()` from every heartbeat and computes its local position as
-`pos_ms = now() + offset − started_at`. The YouTube player is nudged back into
-line only when it drifts past a threshold (set-and-forget, not every tick), so
-playback stays smooth. Late arrivals are in sync within one heartbeat; when no DJ
-is active or the queue is empty, the stream stops and a **lobby placeholder** plays.
+`pos_ms = now() + offset − started_at`. The YouTube player **loads once at the
+drift-corrected position** when a track starts and then runs uninterrupted — no
+continuous re-seeking, no threshold polling. Late arrivals are in sync within one
+heartbeat; when no DJ is active or the queue is empty, the stream stops and a
+**lobby placeholder** plays.
 
 ### Round-robin
 
@@ -186,7 +188,7 @@ tallied from verified receipts.
 - **Frontend** — Svelte 5 (Runes) + Vite + TS. `nostr-tools` (events/signing/
   pool), `applesauce-*` (accounts/signers), `qrcode-generator`, `@dicebear/*`.
 - **Relay** — Go: `khatru` + `relay29` (pinned to `master`) + `eventstore/badger`.
-- **Audio** — YouTube IFrame API, conductor as the time authority (drift-corrected).
+- **Audio** — YouTube IFrame API; relay is the time authority (`sent_at` heartbeats), clients drift-correct locally.
 - **Lightning** — NIP-57 zaps via LNURL; WebLN / Alby Go / any wallet.
 - **Hosting** — static frontend + relay behind Caddy on one box.
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import qrcode from 'qrcode-generator'
-  import { fetchPremiumInvoice, pollPremiumPaid, saveNwcConnection, loadNwcConnection, clearNwcConnection, refreshOwnPremium } from '../nostr/premium.svelte'
+  import { fetchPremiumInvoice, pollPremiumPaid, saveNwcConnection, loadNwcConnection, clearNwcConnection, refreshOwnPremium, ownPremium } from '../nostr/premium.svelte'
   import { auth } from '../nostr/auth.svelte'
 
   let { onClose }: { onClose: () => void } = $props()
@@ -103,6 +103,18 @@
     nwcInput = ''
     nwcActive = false
   }
+
+  const expiryDate = $derived.by(() => {
+    const u = ownPremium.until
+    if (!u) return ''
+    return new Date(u * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  })
+
+  const daysLeft = $derived.by(() => {
+    const u = ownPremium.until
+    if (!u) return 0
+    return Math.ceil((u - Date.now() / 1000) / 86400)
+  })
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -113,7 +125,17 @@
 
     {#if step === 'info'}
       <h2>⚡ zapclub Premium</h2>
-      <p class="price">2,100 sats / month</p>
+
+      {#if ownPremium.active}
+        <div class="active-block">
+          <span class="active-star">★ Active</span>
+          <p class="active-until">Valid until {expiryDate}</p>
+          <p class="active-days">{daysLeft} {daysLeft === 1 ? 'day' : 'days'} remaining</p>
+        </div>
+      {:else}
+        <p class="price">2,100 sats / month</p>
+      {/if}
+
       <ul class="features">
         <li>✓ Own up to 3 clubs</li>
         <li>✓ Up to 5 DJ slots on your clubs</li>
@@ -128,7 +150,7 @@
       {#if error}<p class="err">{error}</p>{/if}
       <div class="actions">
         <button class="btn btn-primary" onclick={startPayment} disabled={loading || !auth.canSign}>
-          {loading ? '…' : 'Subscribe for 2,100 sats'}
+          {loading ? '…' : ownPremium.active ? `Extend — 2,100 sats` : 'Subscribe for 2,100 sats'}
         </button>
         {#if !auth.canSign}
           <p class="hint">Sign in to subscribe.</p>
@@ -243,6 +265,29 @@
     font-size: 0.9rem;
   }
   .features li {
+    color: var(--text-dim);
+  }
+  .active-block {
+    background: color-mix(in srgb, var(--amber, #f59e0b) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--amber, #f59e0b) 35%, transparent);
+    border-radius: calc(var(--radius) - 2px);
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .active-star {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--amber, #f59e0b);
+  }
+  .active-until {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+  .active-days {
+    margin: 0;
+    font-size: 0.82rem;
     color: var(--text-dim);
   }
   .nwc-badge {
