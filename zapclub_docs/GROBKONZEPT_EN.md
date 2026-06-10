@@ -93,18 +93,22 @@ All users can:
 
 Free club owners may:
 
-- Operate up to 3 clubs
+- Operate 1 club
+- Save 1 playlist
 - Host up to 2 active DJs per club
 
 ### Premium Membership
 
-Premium costs:
+Premium costs: **2,100 sats per month**
 
-**2,100 sats per month**
-
-Premium subscriptions are managed through Nostr and Lightning.
+Payment via Lightning (NIP-57 Zap); auto-renewal via Nostr Wallet Connect (NWC) — both are live.
 
 ### Premium Features
+
+#### More Clubs & Playlists
+
+- Up to 3 clubs
+- Unlimited playlists and playlist management
 
 #### Expanded DJ Stage
 
@@ -112,25 +116,16 @@ Premium subscriptions are managed through Nostr and Lightning.
 
 #### Paid Entry Clubs
 
-- Charge Lightning-based admission fees
+- Charge Lightning-based admission fees (relay-enforced)
 - Monetize exclusive events and communities
 
-#### Private Clubs
+#### Private Clubs *(coming soon)*
 
 - Invitation-only or approval-based membership
 
 #### Featured Placement
 
 - Increased visibility in club directories and discovery views
-
-#### Club Announcements
-
-- Send messages and event announcements directly to club members
-- Promote DJ sets, listening parties and community events
-
-#### Future Auto-Renewal
-
-- Planned support through Nostr Wallet Connect (NWC)
 
 ---
 

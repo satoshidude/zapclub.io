@@ -106,7 +106,7 @@ export async function fetchPremiumInvoice(): Promise<{ bolt11: string; hash: str
 
   // NIP-98 Authorization: sign a kind-27235 event for the POST request
   const url = `${RELAY_HTTP}/premium/invoice`
-  const { signEvent } = await import('nostr-tools/pure')
+  const { signEvent } = await import('./nostrLogin')
   const authEvent = {
     kind: 27235,
     created_at: Math.floor(Date.now() / 1000),
@@ -117,7 +117,7 @@ export async function fetchPremiumInvoice(): Promise<{ bolt11: string; hash: str
     content: '',
     pubkey: pk,
   }
-  const signed = await auth.signer!.signEvent(authEvent as Parameters<typeof signEvent>[0])
+  const signed = await signEvent(authEvent)
 
   const res = await fetch(url, {
     method: 'POST',

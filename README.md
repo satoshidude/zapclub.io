@@ -1,10 +1,10 @@
 # zapclub.io
 
 **Collaborative, decentralized social music streaming.** Step into a *club* — a
-virtual room where everyone hears the same track in sync. Up to five DJs share a
-stage and play back-to-back; listeners **zap real sats** to the DJ that's
-playing, so voting becomes economic. **Nostr login** instead of accounts — no
-label platform, no tracking, no central identity. A club that belongs to you.
+virtual room where everyone hears the same track in sync. DJs share a stage and
+play back-to-back; listeners **zap real sats** to the DJ that's playing, so
+voting becomes economic. **Nostr login** instead of accounts — no label platform,
+no tracking, no central identity. A club that belongs to you.
 
 🎧 Live at **[zapclub.io](https://zapclub.io)** · relay at `wss://relay.zapclub.io`
 
@@ -32,7 +32,7 @@ a listener zaps sats straight to the DJ whose track is playing.
 |---|---|
 | **Owner** | Creates & edits the club (name, description, image, rules). Appoints moderators; skips tracks; removes DJs from the stage; bans members; is **always the master DJ** when on stage. |
 | **Moderator** | Keeps the club tidy: skip, remove a DJ, delete a message, kick a member. |
-| **DJ** | Any member can take a free stage slot (up to 5), queue tracks, and earn zaps. |
+| **DJ** | Any member can take a stage slot (Free clubs: up to 2; Premium clubs: up to 5), queue tracks, and earn zaps. |
 | **Member** | Joins an open club, listens in sync, chats. |
 
 ## Features
@@ -40,8 +40,8 @@ a listener zaps sats straight to the DJ whose track is playing.
 - **Nostr login** — NIP-07 extension, NIP-46 bunker (QR), nsec, or a local key.
 - **Club directory** — every club is a relay query; the club you're DJing in is
   pinned to the top and pulses. No separate DB.
-- **The stage** — up to **5 DJs** back-to-back. Free slots are one click to join;
-  the live DJ pulses green.
+- **The stage** — up to **2 DJs** on Free clubs, up to **5** on Premium clubs.
+  One click to join a free slot; the live DJ pulses green.
 - **Round-robin** — each DJ's queue is interleaved into one club set (`dj0.t0,
   dj1.t0, … dj0.t1, …`).
 - **Synced playback** — a single **conductor** drives a drift-corrected position
@@ -54,6 +54,22 @@ a listener zaps sats straight to the DJ whose track is playing.
   (WebLN), Alby Go on mobile (`alby:` deep link), or any wallet via QR/copy.
   Shows the DJ's total received sats.
 - **Moderation** — skip, kick from stage, ban (relay-enforced), appoint mods.
+
+## Freemium model
+
+| | Free | Premium (2,100 sats / month) |
+|---|---|---|
+| Clubs | 1 | 3 |
+| Saved playlists | 1 | unlimited |
+| DJs on stage | 2 | 5 |
+| Join / listen / chat / zap | ✓ | ✓ |
+| Entry-fee clubs | — | ✓ |
+| Private / invite-only clubs | — | ✓ *(coming soon)* |
+| Featured in directory | — | ✓ |
+
+Limits are **relay-enforced** (Go `RejectEvent` hooks), not just client-side hints.
+Premium is paid via Lightning (NIP-57 zap to the relay's address); auto-renewal
+via NWC. Existing clubs and playlists are grandfathered if a subscription lapses.
 
 ## How it works
 

@@ -84,27 +84,30 @@ Die Kernfunktionen bleiben kostenlos nutzbar, während fortgeschrittene Clubfunk
 
 Alle Nutzer können:
 
-- Clubs erstellen
 - Clubs beitreten
 - Musik hören
 - Chatten
-- DJ werden
+- Als DJ auftreten
 - Lightning-Zahlungen senden und empfangen
 
 Kostenlose Clubbetreiber können:
 
-- Bis zu 3 eigene Clubs betreiben
+- 1 eigenen Club betreiben
+- 1 Playlist speichern und verwalten
 - Bis zu 2 aktive DJs pro Club zulassen
 
 ### Premium-Mitgliedschaft
 
-Preis:
+Preis: **2.100 Sats pro Monat**
 
-**2.100 Sats pro Monat**
-
-Die Premium-Mitgliedschaft wird vollständig über Nostr und Lightning verwaltet.
+Bezahlung über Lightning (NIP-57 Zap), automatische Verlängerung über Nostr Wallet Connect (NWC) — beides ist live.
 
 ### Premium-Funktionen
+
+#### Mehr Clubs & Playlists
+
+- Bis zu 3 eigene Clubs
+- Unbegrenzte Playlists und Playlistverwaltung
 
 #### Erweiterte DJ-Bühne
 
@@ -112,25 +115,17 @@ Die Premium-Mitgliedschaft wird vollständig über Nostr und Lightning verwaltet
 
 #### Kostenpflichtige Clubs
 
-- Eintrittsgelder über Lightning verlangen
-- Exklusive Veranstaltungen und Communitys monetarisieren
+- Eintrittsgelder über Lightning verlangen (relay-erzwungen)
+- Exklusive Veranstaltungen monetarisieren
 
-#### Private Clubs
+#### Private Clubs *(in Entwicklung)*
 
-- Geschlossene Clubs mit Freigabe durch den Betreiber
+- Geschlossene, einladungsbasierte Clubs
+- Beitrittsgenehmigung durch den Betreiber
 
 #### Hervorgehobene Clubs
 
 - Bessere Sichtbarkeit in Clublisten und Entdeckungsansichten
-
-#### Club-Ankündigungen
-
-- Nachrichten und Eventankündigungen direkt an Clubmitglieder senden
-- DJ-Sets, Listening-Partys und Veranstaltungen bewerben
-
-#### Automatische Verlängerung
-
-- Geplante Unterstützung über Nostr Wallet Connect (NWC)
 
 ---
 
