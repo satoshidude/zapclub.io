@@ -21,24 +21,28 @@
     </p>
   </section>
 
-  <section class="card">
-    <h2>Free Membership</h2>
-    <ul class="list">
-      <li>Create up to 3 clubs</li>
-      <li>Up to 2 active DJs per club</li>
-      <li>Join clubs, chat and listen</li>
-      <li>Send and receive Lightning payments</li>
-    </ul>
-  </section>
-
-  <section class="card">
-    <h2>⚡ Premium — 2,100 sats / month</h2>
-    <ul class="list">
-      <li>Up to 5 active DJs per club</li>
-      <li>Paid-entry clubs</li>
-      <li>Private / invite-only clubs</li>
-      <li>Featured placement in club listings</li>
-    </ul>
+  <section class="card tier-grid">
+    <div class="tier">
+      <h2>Free</h2>
+      <ul class="list">
+        <li>1 club</li>
+        <li>1 saved playlist</li>
+        <li>Up to 2 DJs on stage</li>
+        <li>Join any club, chat &amp; listen</li>
+        <li>Zap DJs with Lightning</li>
+      </ul>
+    </div>
+    <div class="tier tier-prem">
+      <h2>⚡ Premium <span class="price">2,100 sats / month</span></h2>
+      <ul class="list">
+        <li>Up to 3 clubs</li>
+        <li>Unlimited playlists &amp; playlist management</li>
+        <li>Up to 5 DJs on stage</li>
+        <li>Private / invite-only clubs</li>
+        <li>Entry-fee clubs (Sats gate)</li>
+        <li>Featured listing in the directory</li>
+      </ul>
+    </div>
   </section>
 
   <section class="card">
@@ -91,6 +95,24 @@
     color: var(--text);
   }
   p:last-child { margin-bottom: 0; }
+  .tier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  @media (max-width: 480px) {
+    .tier-grid { grid-template-columns: 1fr; }
+  }
+  .tier h2 { color: var(--text-dim); }
+  .tier-prem h2 { color: var(--amber); }
+  .price {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-top: 0.1rem;
+  }
   .list {
     margin: 0;
     padding-left: 1.2rem;
