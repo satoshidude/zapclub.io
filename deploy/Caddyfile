@@ -35,6 +35,13 @@ zapclub.io {
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# CSP notes: script-src needs www.youtube.com (IFrame API + widget script);
+		# frame-src both YT embed hosts; img-src https: because covers/avatars come from
+		# arbitrary user-supplied hosts (kind-0 pictures, Blossom, robohash) and data: for
+		# dicebear club avatars; connect-src https:/wss: because LNURL endpoints and
+		# NIP-46 bunker relays are arbitrary; style-src 'unsafe-inline' for Svelte
+		# style attributes (e.g. dancefloor --x/--y vars).
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; img-src 'self' data: https:; connect-src 'self' https: wss:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'"
 		-Server
 	}
 }
@@ -47,5 +54,7 @@ relay.zapclub.io {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
+		# WS/JSON endpoint only — nothing here should ever render or be framed.
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
 	}
 }
