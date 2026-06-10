@@ -149,7 +149,7 @@
 
 <div class="queue card">
   <div class="head">
-    <h3>Live Set <span class="count">{tracks.length}</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
+    <h3>My live Playlist <span class="count">{tracks.length}</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
     <div class="head-actions">
       {#if canSkip(canModerate)}
         <button class="btn btn-ghost btn-sm" onclick={() => requestSkip(groupId)} title="Skip current track">⏭ Skip</button>

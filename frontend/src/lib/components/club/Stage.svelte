@@ -4,10 +4,8 @@
   interface Props {
     /** The now-playing card — rendered inside the stage card (the track plays on the stage). */
     children?: import('svelte').Snippet
-    /** Footer content (the DJ's Live Set) — rendered inside the stage card, below. */
-    footer?: import('svelte').Snippet
   }
-  let { children, footer }: Props = $props()
+  let { children }: Props = $props()
 
   // The people (slots, join/leave, kick) live on the Dancefloor's stage row — this card is
   // the decks: what plays + the live set.
@@ -20,8 +18,6 @@
   </div>
 
   {#if children}<div class="now-wrap">{@render children()}</div>{/if}
-
-  {#if footer}<div class="set-wrap">{@render footer()}</div>{/if}
 </div>
 
 <style>
@@ -47,9 +43,6 @@
     font-size: 0.85rem;
   }
   .now-wrap {
-    margin-bottom: 0.9rem;
-  }
-  .set-wrap {
-    margin-top: 0.9rem;
+    margin-bottom: 0.3rem;
   }
 </style>

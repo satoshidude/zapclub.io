@@ -549,13 +549,6 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
       />
-      {#snippet footer()}
-        {#if isMember}
-          <Queue {groupId} {canModerate} />
-        {:else}
-          <section class="join-hint">Join the club to step on stage and queue tracks.</section>
-        {/if}
-      {/snippet}
     </Stage>
   </section>
 
@@ -575,6 +568,13 @@
     onpromote={promote}
     ondelete={(id) => void deleteEvent(groupId, id)}
   />
+
+  <!-- The user's own live playlist for this club — feeds the round-robin. -->
+  {#if isMember}
+    <Queue {groupId} {canModerate} />
+  {:else}
+    <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+  {/if}
 
 </div>
 
