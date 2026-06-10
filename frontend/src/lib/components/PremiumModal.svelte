@@ -1,6 +1,6 @@
 <script lang="ts">
   import qrcode from 'qrcode-generator'
-  import { fetchPremiumInvoice, pollPremiumPaid, saveNwcConnection, loadNwcConnection, clearNwcConnection } from '../nostr/premium.svelte'
+  import { fetchPremiumInvoice, pollPremiumPaid, saveNwcConnection, loadNwcConnection, clearNwcConnection, refreshOwnPremium } from '../nostr/premium.svelte'
   import { auth } from '../nostr/auth.svelte'
 
   let { onClose }: { onClose: () => void } = $props()
@@ -54,7 +54,10 @@
       let active = true
       const done = pollPremiumPaid(hash, () => active)
       done.then((paid) => {
-        if (paid) step = 'success'
+        if (paid) {
+          step = 'success'
+          void refreshOwnPremium()
+        }
       })
       // Cleanup on unmount / re-call
       return () => { active = false }

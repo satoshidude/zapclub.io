@@ -44,7 +44,6 @@
   import { registerActiveClub } from '../nostr/miniplay.svelte'
   import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
-  import Stage from './club/Stage.svelte'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
@@ -660,18 +659,8 @@
         {#if inviteError}<p class="invite-err">{inviteError}</p>{/if}
       </div>
     {/if}
-  </header>
-
-  {#if showPremModal}
-    <PremiumModal onClose={() => (showPremModal = false)} />
-  {/if}
-
-  {#if error}<p class="err">⚠ {error}</p>{/if}
-
-  <!-- Stage block under the hero (no tabs): now-playing card + the DJ's Live Set. The DJ
-       slots live on the Dancefloor's stage row (the people are on the floor, up front). -->
-  <section class="stream">
-    <Stage>
+    <!-- Player lives inside the hero: no separate card, just a section divider. -->
+    <div class="player-section">
       <NowPlaying
         onGoStage={goOnStage}
         stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
@@ -683,12 +672,16 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
       />
-    </Stage>
-  </section>
+    </div>
+  </header>
 
-  <!-- Dancefloor: the club's members ARE the crowd — stage DJs dance up front, online members
-       dance, offline are dimmed. Chat lives here too, kept subtle. Visible to everyone (it
-       carries the stage row); writing stays members-only (the relay rejects non-member writes). -->
+  {#if showPremModal}
+    <PremiumModal onClose={() => (showPremModal = false)} />
+  {/if}
+
+  {#if error}<p class="err">⚠ {error}</p>{/if}
+
+  <!-- The floor: DJs up front, crowd behind, chat. -->
   <Dancefloor
     {groupId}
     {members}
@@ -717,6 +710,9 @@
     max-width: 680px;
     margin: 0 auto;
     padding: 1.2rem 1rem 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
   }
   .hero {
     background: var(--bg-elev);
@@ -1064,12 +1060,11 @@
     color: var(--danger);
     font-size: 0.85rem;
   }
-  /* Player + now-playing + coming-up, always under the hero. */
-  .stream {
-    margin-top: 1.1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
+  /* Player inside the hero — divider separates it from club info. */
+  .player-section {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--border);
   }
   .join-hint {
     background: var(--bg-elev);

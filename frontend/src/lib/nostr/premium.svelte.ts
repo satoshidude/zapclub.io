@@ -16,15 +16,15 @@ export async function premiumUntil(pubkey: string): Promise<number> {
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.until
   }
-  const ev = await pool.get(
-    [CLUB_RELAY],
-    { kinds: [KIND_PREMIUM], '#d': [pubkey] },
-    { maxWait: 3000 }
-  )
   let until = 0
-  if (ev && ev.pubkey === CLUB_RELAY_PUBKEY) {
-    const t = ev.tags.find((t) => t[0] === 'premium_until')
-    if (t?.[1]) until = parseInt(t[1], 10) || 0
+  try {
+    const res = await fetch(`${RELAY_HTTP}/premium/check?pubkey=${pubkey}`)
+    if (res.ok) {
+      const data = (await res.json()) as { premium: boolean; until: number }
+      until = data.until ?? 0
+    }
+  } catch {
+    // network error — treat as not premium
   }
   cache.set(pubkey, { until, fetchedAt: Date.now() })
   return until
@@ -39,6 +39,16 @@ export async function isPremium(pubkey: string): Promise<boolean> {
 /** Clears the cache entry for pubkey — call after a grant event is received. */
 export function invalidatePremiumCache(pubkey: string): void {
   cache.delete(pubkey)
+}
+
+/** Force-refreshes ownPremium state from the HTTP endpoint (call after confirmed payment). */
+export async function refreshOwnPremium(): Promise<void> {
+  const pk = auth.pubkey
+  if (!pk) return
+  invalidatePremiumCache(pk)
+  const until = await premiumUntil(pk)
+  _ownPremiumUntil = until
+  _ownPremium = until > Math.floor(Date.now() / 1000)
 }
 
 // ── Reactive own-premium state (for the logged-in user) ─────────────────────

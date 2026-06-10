@@ -299,7 +299,7 @@ func main() {
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
 	// Premium subscription system: relay-authored kind-30108 status events + LNbits invoicing.
 	prem := newPremiumStore(db, relay, sk, relayPub)
-	pg := newPremiumGate(prem, env("LNBITS_URL", ""), os.Getenv("LNBITS_INVOICE_KEY"))
+	pg := newPremiumGate(prem, env("LNBITS_URL", ""), os.Getenv("LNBITS_INVOICE_KEY"), "./pending_invoices.json")
 	entryPrem = prem // gate paid-entry behind premium check
 	condPrem = prem  // per-club DJ slot cap (free=2 / premium=5)
 	cap.prem = prem  // club creation cap (free=1 / premium=3)
@@ -334,6 +334,7 @@ func main() {
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
 	relay.Router().HandleFunc("/premium/invoice", pg.handle)
 	relay.Router().HandleFunc("/premium/status", pg.handle)
+	relay.Router().HandleFunc("/premium/check", pg.handle)
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.

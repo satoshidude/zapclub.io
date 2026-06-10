@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -31,19 +32,59 @@ type premiumGate struct {
 	premium    *premiumStore
 	lnbitsURL  string // e.g. "https://nsnip.io"
 	invoiceKey string // LNbits InvoiceKey (read-only API key)
+	path       string // path to the pending-invoices JSON file
 	mu         sync.Mutex
 	pending    map[string]*pendingInvoice // payment_hash → invoice
 }
 
-func newPremiumGate(premium *premiumStore, lnbitsURL, invoiceKey string) *premiumGate {
+func newPremiumGate(premium *premiumStore, lnbitsURL, invoiceKey, pendingPath string) *premiumGate {
 	g := &premiumGate{
 		premium:    premium,
 		lnbitsURL:  strings.TrimRight(lnbitsURL, "/"),
 		invoiceKey: invoiceKey,
+		path:       pendingPath,
 		pending:    make(map[string]*pendingInvoice),
 	}
+	g.loadPending()
 	go g.sweep()
 	return g
+}
+
+// loadPending restores persisted pending invoices from disk (survives relay restarts).
+func (g *premiumGate) loadPending() {
+	if g.path == "" {
+		return
+	}
+	data, err := os.ReadFile(g.path)
+	if err != nil {
+		return // file doesn't exist yet, that's fine
+	}
+	var m map[string]*pendingInvoice
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("pending invoices parse (%s): %v — starting empty", g.path, err)
+		return
+	}
+	now := time.Now()
+	for hash, inv := range m {
+		if inv.ExpiresAt.After(now) {
+			g.pending[hash] = inv
+		}
+	}
+	log.Printf("pending invoices loaded: %d active from %s", len(g.pending), g.path)
+}
+
+// savePending persists the current pending map to disk. Caller must hold the lock.
+func (g *premiumGate) savePending() {
+	if g.path == "" {
+		return
+	}
+	data, _ := json.MarshalIndent(g.pending, "", "  ")
+	tmp := g.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		log.Printf("pending invoices save: %v", err)
+		return
+	}
+	_ = os.Rename(tmp, g.path)
 }
 
 // handle dispatches /premium/* HTTP requests.
@@ -59,6 +100,8 @@ func (g *premiumGate) handle(w http.ResponseWriter, r *http.Request) {
 		g.handleInvoice(w, r)
 	case "/premium/status":
 		g.handleStatus(w, r)
+	case "/premium/check":
+		g.handleCheck(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -91,12 +134,34 @@ func (g *premiumGate) handleInvoice(w http.ResponseWriter, r *http.Request) {
 		Hash:      hash,
 		ExpiresAt: time.Now().Add(30 * time.Minute),
 	}
+	g.savePending()
 	g.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"bolt11":       bolt11,
-		"payment_hash": hash,
+		"bolt11": bolt11,
+		"hash":   hash,
+	})
+}
+
+// handleCheck returns the current premium status for a pubkey (hex) without auth.
+func (g *premiumGate) handleCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pubkey := r.URL.Query().Get("pubkey")
+	if pubkey == "" {
+		http.Error(w, "missing pubkey", http.StatusBadRequest)
+		return
+	}
+	until := g.premium.until(r.Context(), pubkey)
+	now := time.Now().Unix()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(map[string]any{
+		"premium": until > now,
+		"until":   until,
 	})
 }
 
@@ -148,6 +213,7 @@ func (g *premiumGate) checkAndGrant(ctx context.Context, hash string) (bool, str
 	// Grant and remove from pending
 	g.mu.Lock()
 	delete(g.pending, hash)
+	g.savePending()
 	g.mu.Unlock()
 
 	g.premium.grant(ctx, inv.Pubkey, 1)
@@ -166,6 +232,7 @@ func (g *premiumGate) sweep() {
 				delete(g.pending, hash)
 			}
 		}
+		g.savePending()
 		g.mu.Unlock()
 	}
 }

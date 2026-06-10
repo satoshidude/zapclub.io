@@ -9,6 +9,7 @@
   import { stage } from '../../nostr/stage.svelte'
   import type { QueueTrack, Playlist } from '../../nostr/types'
   import TrackPreview from '../TrackPreview.svelte'
+  import { marquee } from '../../actions/marquee'
 
   let { groupId, canModerate = false }: { groupId: string; canModerate?: boolean } = $props()
 
@@ -162,7 +163,7 @@
       {#each playlists.mine as pl (pl.id)}
         <li class:sel={selectedPlaylist?.id === pl.id}>
           {#if selectedPlaylist?.id === pl.id}<span class="sel-dot" title="Currently loaded">●</span>{/if}
-          <span class="t-title">{pl.name}</span>
+          <span class="t-title" use:marquee><span class="mq-inner">{pl.name}</span></span>
           <span class="dur">{pl.tracks.length}</span>
           <button class="add" onclick={() => loadPl(pl)} title="Load into my set">{selectedPlaylist?.id === pl.id ? 'Loaded' : 'Load'}</button>
           <button class="rm" onclick={() => deletePlaylist(pl.id)} title="Delete playlist">✕</button>
@@ -182,7 +183,7 @@
         >
           <button class="play" onclick={() => (preview = { track, context: 'queue' })} title="Preview / edit details">▶</button>
           <span class="t-idx">{i + 1}</span>
-          <span class="t-title">{track.title}</span>
+          <span class="t-title" use:marquee><span class="mq-inner">{track.title}</span></span>
           <span class="dur">{fmt(track.duration)}</span>
           {#if track.active === false}
             <button class="reactivate" onclick={() => setTrackActive(groupId, track.videoId, true)} title="Play again — re-activate this track">↻</button>
@@ -369,8 +370,24 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .t-title .mq-inner {
+    display: inline-block;
+  }
+  /* Scroll on row hover (desktop); always on touch */
+  .tracks li:hover .t-title[data-mq] .mq-inner,
+  .lib-list li:hover .t-title[data-mq] .mq-inner {
+    animation: t-scroll 4s ease-in-out infinite;
+  }
+  @media (hover: none) {
+    .t-title[data-mq] .mq-inner {
+      animation: t-scroll 5s ease-in-out 0.5s infinite;
+    }
+  }
+  @keyframes t-scroll {
+    0%, 20%  { transform: translateX(0); }
+    80%, 100% { transform: translateX(var(--mq-shift, 0px)); }
   }
   .tracks li.played .t-title {
     color: var(--text-dim);

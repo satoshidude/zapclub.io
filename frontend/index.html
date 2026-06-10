@@ -10,7 +10,17 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#0b0a10" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      /* Reset any pinch-zoom to scale=1 on every page load — keeps the PWA tight in the display. */
+      ;(function () {
+        var vp = document.querySelector('meta[name="viewport"]')
+        if (!vp) return
+        var base = vp.content
+        vp.content = base + ', maximum-scale=1.0'
+        setTimeout(function () { vp.content = base }, 500)
+      })()
+    </script>
     <meta name="description" content="zapclub.io — Decentralized social music streaming. Open a club that belongs to you · Share your playlists and zap your crew." />
     <title>zapclub.io — Decentralized social music streaming</title>
 

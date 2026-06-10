@@ -196,7 +196,7 @@
   <!-- Stage row: the on-stage DJs dance up front, right against the crowd. Open slots are
        joinable in place; the people live ONLY here (not repeated in the crowd below). -->
   <div class="stagerow">
-    <span class="stage-tag" aria-hidden="true">stage {stageDjs.length}/{MAX_DJS}</span>
+    <span class="stage-tag" aria-hidden="true">{stageDjs.length}/{MAX_DJS} live</span>
     {#if auth.canSign && isMember && onStage}
       <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
         <span class="ring">↩</span>
@@ -217,7 +217,7 @@
         <span class="bob v{variantOf(dj.pubkey)}">
           <img class="av" src={avatarUrl(dj.pubkey, profile)} alt="" width="64" height="64" loading="lazy" />
         </span>
-        <span class="nm">{displayName(dj.pubkey, profile)}</span>
+        <span class="nm"><span class="mq-inner">{displayName(dj.pubkey, profile)}</span></span>
       </button>
     {/each}
     {#each Array(emptySlots) as _, i (i)}
@@ -251,7 +251,7 @@
           <span class="bob v{variantOf(m.pubkey)}">
             <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="58" height="58" loading="lazy" />
           </span>
-          <span class="nm">{displayName(m.pubkey, profile)}</span>
+          <span class="nm"><span class="mq-inner">{displayName(m.pubkey, profile)}</span></span>
         </button>
       {/each}
       {#if moreOnline > 0}<span class="more">+{moreOnline}</span>{/if}
@@ -292,7 +292,7 @@
     <div class="card-pop">
       <img class="av" src={avatarUrl(sel.pubkey, profile)} alt="" width="36" height="36" />
       <div class="who">
-        <span class="nm2">{displayName(sel.pubkey, profile)}</span>
+        <span class="nm2"><span class="mq-inner">{displayName(sel.pubkey, profile)}</span></span>
         {#if roleLabel(sel)}<span class="role">{roleLabel(sel)}</span>{/if}
         {#if presence.isOnline(sel.pubkey)}<span class="here">● here</span>{/if}
       </div>
@@ -385,6 +385,7 @@
   }
   .stagerow .nm {
     max-width: 72px;
+    --nm-w: 72px;
     font-size: 0.66rem;
   }
   /* Open slot / leave control as a dancer-shaped column so it lines up with the row. */
@@ -537,11 +538,28 @@
   }
   .nm {
     max-width: 66px;
+    --nm-w: 66px;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.62rem;
     color: var(--text-dim);
+  }
+  .nm .mq-inner {
+    display: inline-block;
+  }
+  /* Scroll on hover (desktop); always on touch */
+  .dancer:hover .nm .mq-inner,
+  .dancer:focus-visible .nm .mq-inner {
+    animation: nm-scroll 3s ease-in-out infinite;
+  }
+  @media (hover: none) {
+    .nm .mq-inner {
+      animation: nm-scroll 4s ease-in-out 0.8s infinite;
+    }
+  }
+  @keyframes nm-scroll {
+    0%, 25%  { transform: translateX(0); }
+    75%, 100% { transform: translateX(min(0px, calc(var(--nm-w) - 100%))); }
   }
   .more {
     align-self: center;
@@ -657,8 +675,15 @@
     font-weight: 600;
     font-size: 0.88rem;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .nm2 .mq-inner {
+    display: inline-block;
+    animation: nm2-scroll 4s ease-in-out 0.5s infinite;
+  }
+  @keyframes nm2-scroll {
+    0%, 25%  { transform: translateX(0); }
+    75%, 100% { transform: translateX(min(0px, calc(160px - 100%))); }
   }
   .role {
     font-size: 0.68rem;

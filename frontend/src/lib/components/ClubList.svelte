@@ -113,40 +113,7 @@
 
   <div class="head">
     <h2>Clubs</h2>
-    {#if auth.canSign}
-      <button class="btn btn-primary btn-sm" onclick={() => (showCreate = !showCreate)}>
-        {showCreate ? 'Cancel' : '+ New club'}
-      </button>
-    {/if}
   </div>
-
-  {#if showCreate}
-    <div class="create card">
-      <div class="field">
-        <label for="club-name">Club name</label>
-        <input id="club-name" bind:value={name} placeholder="e.g. Midnight Synthwave" maxlength="60" />
-      </div>
-      <div class="field">
-        <label for="club-about">About (optional)</label>
-        <textarea id="club-about" bind:value={about} rows="2" placeholder="What's this club about?" maxlength="280"></textarea>
-      </div>
-      <div class="field-row">
-        {#if ownPremium.active}
-          <label class="toggle-label">
-            <input type="checkbox" bind:checked={privateClub} />
-            🔒 Private (invite-only)
-          </label>
-        {:else}
-          <button class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
-            🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
-          </button>
-        {/if}
-      </div>
-      <button class="btn btn-primary" onclick={create} disabled={creating || !name.trim()}>
-        {creating ? 'Creating…' : 'Create club'}
-      </button>
-    </div>
-  {/if}
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 

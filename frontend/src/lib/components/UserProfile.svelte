@@ -28,7 +28,7 @@
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
-  import { ownPremium } from '../nostr/premium.svelte'
+  import { ownPremium, isPremium } from '../nostr/premium.svelte'
   import PremiumModal from './PremiumModal.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
@@ -50,6 +50,7 @@
 
   let othersPlaylists = $state<Playlist[]>([])
   let loading = $state(true)
+  let viewedIsPremium = $state(false)
   let memberOf = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
   let topClubId = $state<string | null>(null)
@@ -108,6 +109,8 @@
     zapRank = null
     void fetchZapRank(pk).then((r) => (zapRank = r))
     if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
+    viewedIsPremium = false
+    void isPremium(pk).then((v) => (viewedIsPremium = v))
   })
 
   // ── Create-club form (own profile only) ─────────────────────────────────
@@ -321,6 +324,18 @@
 </script>
 
 <div class="wrap">
+  {#if isMe}
+    <div class="profile-topbar">
+      <button class="prem-btn" class:prem-active={ownPremium.active} onclick={() => (showPremModal = true)} title="zapclub Premium">
+        {#if ownPremium.active}★ Premium{:else}⚡ Get Premium{/if}
+      </button>
+      <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
+    </div>
+  {:else if viewedIsPremium}
+    <div class="profile-topbar">
+      <span class="prem-btn prem-active">★ Premium</span>
+    </div>
+  {/if}
   <header class="phead">
     <img class="pavatar" src={avatarUrl(pubkey, profile)} alt="" width="64" height="64" />
     <div class="pinfo">
@@ -349,10 +364,6 @@
     {#if isMe}
       <div class="me-actions">
         <button class="edit-btn" onclick={openEditor} title="Edit profile">✏️ Edit</button>
-        <button class="prem-btn" class:prem-active={ownPremium.active} onclick={() => (showPremModal = true)} title="zapclub Premium">
-          {#if ownPremium.active}★ Premium{:else}⚡ Get Premium{/if}
-        </button>
-        <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
       </div>
     {/if}
   </header>
@@ -801,6 +812,13 @@
   .edit-btn:hover {
     border-color: var(--accent-2);
     color: var(--text);
+  }
+  .profile-topbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
   }
   .me-actions {
     flex: 0 0 auto;
