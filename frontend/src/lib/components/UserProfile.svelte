@@ -16,7 +16,7 @@
   import { addTracks } from '../nostr/queue.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../player/youtube'
-  import { fetchUserClubActivity } from '../nostr/groups'
+  import { fetchUserClubActivity, createClub } from '../nostr/groups'
   import { goClub, goUser, goHowto, goLeaderboard } from '../router.svelte'
   import TrackPreview from './TrackPreview.svelte'
   import { clubAvatar } from '../avatar'
@@ -109,6 +109,32 @@
     void fetchZapRank(pk).then((r) => (zapRank = r))
     if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
   })
+
+  // ── Create-club form (own profile only) ─────────────────────────────────
+  let showClubCreate = $state(false)
+  let clubName = $state('')
+  let clubAbout = $state('')
+  let clubCreating = $state(false)
+  let clubCreateErr = $state('')
+
+  const ownedClubCount = $derived(memberOf.filter((c) => c.owner === pubkey).length)
+
+  async function doCreateClub() {
+    if (!clubName.trim() || clubCreating) return
+    clubCreating = true
+    clubCreateErr = ''
+    try {
+      const id = await createClub({ name: clubName.trim(), about: clubAbout.trim() || undefined })
+      clubName = ''
+      clubAbout = ''
+      showClubCreate = false
+      goClub(id)
+    } catch (e) {
+      clubCreateErr = String((e as Error)?.message ?? e)
+    } finally {
+      clubCreating = false
+    }
+  }
 
   // ── Profile editor (own profile only) ──────────────────────────────────
   let editing = $state(false)
@@ -465,16 +491,45 @@
     </div>
   {/snippet}
 
-  {#if memberOf.length}
-    <section class="clubs">
-      <h2>Member of <span class="count">{memberOf.length}</span></h2>
+  <section class="clubs">
+    <div class="clubs-head">
+      <h2>Clubs {#if memberOf.length}<span class="count">{memberOf.length}</span>{/if}</h2>
+      {#if isMe && auth.canSign}
+        {#if ownedClubCount < 1 || ownPremium.active && ownedClubCount < 3}
+          <button class="btn btn-ghost btn-sm" onclick={() => (showClubCreate = !showClubCreate)}>
+            {showClubCreate ? 'Cancel' : '+ New club'}
+          </button>
+        {:else}
+          <button class="prem-btn" onclick={() => (showPremModal = true)} title="Upgrade for more clubs">
+            ⚡ More clubs — Premium
+          </button>
+        {/if}
+      {/if}
+    </div>
+    {#if showClubCreate}
+      <form class="club-create card" onsubmit={(e) => { e.preventDefault(); void doCreateClub() }}>
+        <label class="fld">Club name
+          <input class="in" bind:value={clubName} maxlength="60" placeholder="e.g. Midnight Synthwave" />
+        </label>
+        <label class="fld">About (optional)
+          <textarea class="in" bind:value={clubAbout} rows="2" maxlength="280" placeholder="What's this club about?"></textarea>
+        </label>
+        {#if clubCreateErr}<p class="err">{clubCreateErr}</p>{/if}
+        <button class="btn btn-primary btn-sm" disabled={!clubName.trim() || clubCreating}>
+          {clubCreating ? 'Creating…' : 'Create club'}
+        </button>
+      </form>
+    {/if}
+    {#if memberOf.length}
       <div class="club-list">
         {#each memberOf as c (c.id)}
           {@render clubRow(c, onStageIds.has(c.id), c.id === topClubId && !onStageIds.has(c.id))}
         {/each}
       </div>
-    </section>
-  {/if}
+    {:else if !loading}
+      <p class="dim">{isMe ? 'Not a member of any club yet.' : 'Not a member of any club.'}</p>
+    {/if}
+  </section>
 
   <!-- Playlists are PRIVATE: only the owner or the superadmin sees them. -->
   {#if canSeePrivate}
@@ -1054,6 +1109,22 @@
   }
   .clubs {
     margin-top: 1.4rem;
+  }
+  .clubs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .clubs-head h2 {
+    margin: 0;
+  }
+  .club-create {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.7rem;
   }
   .club-list {
     display: flex;

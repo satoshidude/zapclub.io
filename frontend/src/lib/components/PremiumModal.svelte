@@ -112,10 +112,12 @@
       <h2>⚡ zapclub Premium</h2>
       <p class="price">2,100 sats / month</p>
       <ul class="features">
+        <li>✓ Own up to 3 clubs</li>
         <li>✓ Up to 5 DJ slots on your clubs</li>
+        <li>✓ Unlimited playlists &amp; playlist management</li>
+        <li>✓ Private / invite-only clubs</li>
         <li>✓ Entry-fee clubs (Sats gate)</li>
         <li>✓ Featured listing in the directory</li>
-        <li>✓ Private / invite-only clubs</li>
       </ul>
       {#if nwcActive}
         <p class="nwc-badge">⚡ NWC auto-renew active</p>
