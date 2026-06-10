@@ -245,9 +245,9 @@
         <span class="ring">↩</span>
         <span class="nm">Leave</span>
       </button>
-      <GoLiveButton {groupId} isOwnerOrMod={canModerate || isOwner} />
-    {:else if auth.canSign && isMember && (canModerate || isOwner)}
-      <GoLiveButton {groupId} isOwnerOrMod={true} />
+    {/if}
+    {#if auth.canSign && isMember}
+      <GoLiveButton {groupId} />
     {/if}
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
