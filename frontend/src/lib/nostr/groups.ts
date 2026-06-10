@@ -31,6 +31,8 @@ export const KIND_BROKEN = 20102 // ephemeral "I can't play this track" report (
 export const KIND_ZAP_BROADCAST = 20101 // ephemeral, zapper-signed: "I zapped <p> N sats" (club-live zap signal when the DJ's LNURL doesn't publish a 9735 receipt)
 export const KIND_FLOOR_REACTION = 20103 // ephemeral floor emote (content = emoji), member-only, h-tagged
 export const KIND_LIVE_SESSION = 30109 // replaceable per DJ/club: live A/V session state
+export const KIND_AUTODJ = 30105      // replaceable per club (d=club): owner-armed auto-dj playlist
+export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-signed disarm marker
 
 const RELAYS = [CLUB_RELAY]
 
@@ -653,6 +655,8 @@ export interface ClubSubHandlers {
   onPlay?: (ev: Event) => void
   onEmote?: (ev: Event) => void
   onLiveSession?: (ev: Event) => void
+  onAutoDJ?: (ev: Event) => void
+  onAutoDJCtrl?: (ev: Event) => void
 }
 
 /**
@@ -677,6 +681,8 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_FLOOR_REACTION,
       KIND_PLAY,
       KIND_LIVE_SESSION,
+      KIND_AUTODJ,
+      KIND_AUTODJ_CTRL,
     ],
     '#h': [groupId],
   }
@@ -706,6 +712,8 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
       else if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
       else if (ev.kind === KIND_LIVE_SESSION) h.onLiveSession?.(ev)
+      else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
+      else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
     },
   })
 

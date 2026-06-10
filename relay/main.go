@@ -321,6 +321,10 @@ func main() {
 	liveG := newLiveGate(db, state, os.Getenv("SUPERADMIN"))
 	relay.RejectEvent = append(relay.RejectEvent, liveG.reject)
 
+	// Auto DJ config (kind 30105): only the club's premium owner may arm/disarm.
+	autoDJG := newAutoDJGate(db, prem, os.Getenv("SUPERADMIN"))
+	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
+
 	cond := newConductor(db, relay, state, sk)
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {

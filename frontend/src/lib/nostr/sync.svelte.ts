@@ -46,7 +46,9 @@ export const sync = {
    */
   get live() {
     const np = state.np
-    if (!np || stage.djs.length === 0) return null
+    if (!np) return null
+    // Auto DJ plays with no real stage DJs — bypass the stage-empty check for it.
+    if (!np.auto && stage.djs.length === 0) return null
     if (state.now - np.sentAt > LIVE_STALE_MS) return null
     return np
   },
@@ -71,6 +73,7 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
     pos: Number(tag('pos')) || 0,
     title: ev.content,
     writer: ev.pubkey,
+    auto: tag('auto') === '1' || undefined,
   }
 }
 

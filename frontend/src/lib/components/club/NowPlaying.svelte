@@ -177,7 +177,12 @@
             </span>
           </div>
         </div>
-        {#if parts.artist}
+        {#if np.auto}
+          <div class="autodj-badge">⚡ Auto DJ</div>
+        {:else if parts.artist}
+          <div class="artist">{parts.artist}</div>
+        {/if}
+        {#if np.auto && parts.artist}
           <div class="artist">{parts.artist}</div>
         {/if}
       {:else}
@@ -298,6 +303,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .autodj-badge {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: var(--amber, #f59e0b);
+    font-weight: 600;
+    letter-spacing: 0.03em;
   }
   .title {
     flex: 1;

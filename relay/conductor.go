@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +48,8 @@ const (
 	kindQueue             = 30103
 	kindStageKick         = 30106
 	kindSkip              = 30107
+	kindAutoDJ            = 30105 // owner-authored: arm/disarm auto-dj playlist for a club
+	kindAutoDJCtrl        = 30111 // relay-signed: disarm marker (real DJ took over)
 	kindBroken            = 20102 // ephemeral "I can't play this track" report (content = videoId)
 	kindPlay              = 1313
 	brokenWindowMS        = 120_000 // a broken-track report counts as fresh this long
@@ -76,6 +79,15 @@ type condClub struct {
 	lastBeat   int64 // ms of the last now_playing publish
 	playing    bool
 	inTakeover bool // true while a live-session (kind 30109, mode=takeover) is active
+	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
+	autoOrder []int
+	autoIdx   int
+}
+
+// autoState carries the owner + parsed tracks for a club in Auto DJ mode.
+type autoState struct {
+	owner  string
+	tracks []condTrack
 }
 
 type conductor struct {
@@ -291,20 +303,30 @@ func (c *conductor) tick() {
 	}()
 	ctx := context.Background()
 	active := c.activeClubs(ctx)
+	// Auto DJ: clubs with a premium owner-armed playlist but no real DJ on stage.
+	// armedAutoClubs publishes a 30111 disarm marker when a real DJ takes over.
+	auto := c.armedAutoClubs(ctx, active)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Forget state for clubs that no longer have any active DJ (→ lobby).
+	// Forget state for clubs with no active real DJ AND no auto-DJ.
 	for club := range c.clubs {
-		if _, ok := active[club]; !ok {
-			delete(c.clubs, club)
+		if _, ok := active[club]; ok {
+			continue
 		}
+		if _, ok := auto[club]; ok {
+			continue
+		}
+		delete(c.clubs, club)
 	}
 	now := time.Now().UnixMilli()
 	c.prunePresence(now)
 	c.pruneBroken(now)
 	for club, djs := range active {
 		c.driveClub(ctx, club, djs, now)
+	}
+	for club, st := range auto {
+		c.driveAutoClub(ctx, club, st, now)
 	}
 }
 
@@ -804,6 +826,195 @@ func (c *conductor) publishNowPlayingPaused(ctx context.Context, club string, pb
 		Content: pb.title,
 	}
 	pb.lastBeat = now
+	c.publish(ctx, ev, true)
+}
+
+// ── Auto DJ ───────────────────────────────────────────────────────────────────
+
+// makeShuffledOrder returns a slice [0, n) in a random order.
+func makeShuffledOrder(n int) []int {
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	rand.Shuffle(n, func(i, j int) { order[i], order[j] = order[j], order[i] })
+	return order
+}
+
+// armedAutoClubs returns clubs with an owner-armed Auto DJ playlist and no real DJ on stage.
+// When a real DJ takes over an armed club, it publishes a 30111 disarm marker (once, idempotent).
+func (c *conductor) armedAutoClubs(ctx context.Context, active map[string][]condDJ) map[string]*autoState {
+	type armedEntry struct {
+		ev    *nostr.Event
+		owner string
+	}
+
+	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindAutoDJ}})
+	if err != nil {
+		return nil
+	}
+	armed := map[string]armedEntry{} // club → newest armed 30105
+	for ev := range ch {
+		club := tagVal(ev, "h")
+		if club == "" || tagVal(ev, "status") != "armed" {
+			continue
+		}
+		if ex, ok := armed[club]; !ok || ev.CreatedAt > ex.ev.CreatedAt {
+			armed[club] = armedEntry{ev: ev, owner: ev.PubKey}
+		}
+	}
+	if len(armed) == 0 {
+		return nil
+	}
+
+	// Query relay-signed disarm markers (kind 30111, replaceable per d=club).
+	ch2, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindAutoDJCtrl}})
+	if err != nil {
+		return nil
+	}
+	disarmedAt := map[string]nostr.Timestamp{} // club → newest 30111 created_at
+	for ev := range ch2 {
+		club := tagVal(ev, "d")
+		if club == "" || ev.PubKey != c.pub {
+			continue // only trust relay-signed disarm markers
+		}
+		if t, ok := disarmedAt[club]; !ok || ev.CreatedAt > t {
+			disarmedAt[club] = ev.CreatedAt
+		}
+	}
+
+	out := map[string]*autoState{}
+	for club, entry := range armed {
+		// Effective-armed: no 30111 disarm marker with created_at >= the armed event's created_at.
+		disarmFresh := disarmedAt[club] >= entry.ev.CreatedAt
+
+		if _, hasRealDJ := active[club]; hasRealDJ {
+			// A real DJ is on stage → publish a disarm marker once (idempotent).
+			if !disarmFresh {
+				c.publishAutoDJDisarm(ctx, club)
+			}
+			continue // real DJ drives this club via driveClub
+		}
+
+		if disarmFresh {
+			continue // disarmed; owner must manually re-arm
+		}
+
+		tracks := parseQueueTracks(entry.ev)
+		if len(tracks) == 0 {
+			continue
+		}
+		out[club] = &autoState{owner: entry.owner, tracks: tracks}
+	}
+	return out
+}
+
+// driveAutoClub drives a club in Auto DJ mode: shuffled rotation of an owner-armed playlist,
+// with no real DJ on stage. Completely separate from the real-DJ round-robin.
+func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoState, now int64) {
+	pb := c.clubs[club]
+	if pb == nil {
+		pb = c.resume(ctx, club)
+		c.clubs[club] = pb
+	}
+
+	tracks := st.tracks
+	if len(tracks) == 0 {
+		pb.playing = false
+		return
+	}
+
+	// (Re)initialize the shuffle order when the playlist changes or on cold start.
+	if len(pb.autoOrder) != len(tracks) {
+		pb.autoOrder = makeShuffledOrder(len(tracks))
+		pb.autoIdx = 0
+	}
+
+	nextTrack := func() {
+		pb.autoIdx++
+		if pb.autoIdx >= len(tracks) {
+			pb.autoOrder = makeShuffledOrder(len(tracks))
+			pb.autoIdx = 0
+		}
+	}
+
+	startTrack := func() {
+		t := tracks[pb.autoOrder[pb.autoIdx]]
+		pb.pos++
+		pb.dj = st.owner
+		pb.videoID = t.videoID
+		pb.title = t.title
+		pb.duration = t.duration
+		pb.startedAt = now
+		pb.playing = true
+		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
+		c.publishPlay(ctx, club, pb, now)
+	}
+
+	if !pb.playing {
+		startTrack()
+		return
+	}
+
+	if c.skipRequested(ctx, club, pb) || c.brokenSkip(club, pb, now) {
+		nextTrack()
+		startTrack()
+		return
+	}
+
+	dur := pb.duration
+	if dur <= 0 {
+		dur = condMaxTrackFallbackS
+	}
+	if (now-pb.startedAt)/1000 >= int64(dur) {
+		nextTrack()
+		startTrack()
+		return
+	}
+
+	if now-pb.lastBeat >= condHeartbeatMS {
+		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
+	}
+}
+
+// publishNowPlayingAuto emits now_playing with p=owner (zap target) and auto=1 tags,
+// used when Auto DJ drives the club with no real DJ on stage.
+func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *condClub, owner string, now int64) {
+	ev := &nostr.Event{
+		Kind:      kindNowPlaying,
+		CreatedAt: nostr.Timestamp(now / 1000),
+		Tags: nostr.Tags{
+			{"h", club},
+			{"d", club},
+			{"track", "yt:" + pb.videoID},
+			{"dj", pb.dj},
+			{"pos", strconv.Itoa(pb.pos)},
+			{"started_at", strconv.FormatInt(pb.startedAt, 10)},
+			{"sent_at", strconv.FormatInt(now, 10)},
+			{"duration", strconv.Itoa(pb.duration)},
+			{"status", "playing"},
+			{"p", owner},
+			{"auto", "1"},
+		},
+		Content: pb.title,
+	}
+	pb.lastBeat = now
+	c.publish(ctx, ev, true)
+}
+
+// publishAutoDJDisarm emits a relay-signed kind-30111 disarm marker when a real DJ takes
+// over an armed-auto club. Replaceable per club (d=club).
+func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
+	ev := &nostr.Event{
+		Kind:      kindAutoDJCtrl,
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Tags: nostr.Tags{
+			{"h", club},
+			{"d", club},
+			{"armed", "0"},
+		},
+		Content: "",
+	}
 	c.publish(ctx, ev, true)
 }
 
