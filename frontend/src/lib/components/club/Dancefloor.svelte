@@ -185,7 +185,7 @@
 
 <section class="floor card" class:playing class:hyped>
   <div class="head">
-    <h3>Dancefloor</h3>
+    <h3>The Floor</h3>
     <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
   </div>
 

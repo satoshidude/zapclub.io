@@ -22,10 +22,11 @@ RPK=$(printf %s "$KEYS" | cut -d' ' -f4)
 DB=$(mktemp -d)
 go build -o /tmp/zc-e2e-relay .
 RELAY_SECRET_KEY="$RSK" RELAY_SUPERADMIN="$APK" RELAY_DB="$DB" RELAY_PORT="$PORT" \
+  RELAY_SERVICE_URL="ws://127.0.0.1:$PORT" \
   /tmp/zc-e2e-relay >/tmp/zc-e2e-relay.log 2>&1 &
 RPID=$!
 trap 'kill $RPID 2>/dev/null; rm -rf "$DB" node_modules /tmp/zc-e2e-relay' EXIT
 sleep 1.5
 
-RELAY_URL="ws://127.0.0.1:$PORT" ADMIN_URL="http://127.0.0.1:$PORT" ADMIN_SK="$ASK" RELAY_PK="$RPK" \
+RELAY_URL="ws://127.0.0.1:$PORT" ADMIN_URL="http://127.0.0.1:$PORT" ADMIN_SK="$ASK" RELAY_PK="$RPK" RELAY_SK="$RSK" \
   node grouptest.mjs

@@ -27,6 +27,10 @@ export interface Club {
   open: boolean
   /** publicly readable (vs private). */
   isPublic: boolean
+  /** Invite-only: 9021 is not auto-accepted; owner must approve (relay-enforced). */
+  closed?: boolean
+  /** Hidden from non-members: stream/chat require auth + membership (relay-enforced). */
+  isPrivate?: boolean
   /** Member count (only filled in club lists, for sorting/display). */
   memberCount?: number
   /** Owner/creator (first admin, kind 39001). pubkey (hex). */
@@ -35,6 +39,8 @@ export interface Club {
   access?: 'open' | 'paid'
   /** Entry price in sats (paid clubs). */
   price?: number
+  /** Whether this club is featured in the directory (owner has active premium). */
+  featured?: boolean
 }
 
 /**
@@ -50,6 +56,8 @@ export interface ClubConfig {
   lud16: string
   /** Resolved NIP-57 zapper pubkey of `lud16` — for relay-side receipt verification. */
   zapper: string
+  /** Whether the club is featured in the directory (premium owners only). */
+  featured: boolean
 }
 
 export interface ClubMember {

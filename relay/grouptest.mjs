@@ -238,6 +238,73 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', L]], content: '' }) // cleanup
 }
 
+// 4e. Private / invite-only clubs (premium feature).
+//     - non-premium owner cannot set ['closed'] or ['private'] on a 9002
+//     - admin API grant-premium; premium owner CAN then set the flags
+//     - closed group: 9021 is stored but NOT auto-added to 39002 (no auto-join reactor)
+//     - owner approves via 9000 put-user → joiner appears in 39002
+//     - private club absent from global {kinds:[39000]} listing (no #d filter)
+//     Uses ADMIN_SK + ADMIN_URL (same as section 5) so adminReq isn't needed — inline auth.
+//     Uses a fresh key to avoid the 3-club cap (host has already created G, C, L).
+if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
+  const P_ADMIN_URL = process.env.ADMIN_URL
+  const P_ASK = Uint8Array.from(Buffer.from(process.env.ADMIN_SK, 'hex'))
+  const grantPremium = async (pubkey) => {
+    const urlStr = P_ADMIN_URL + '/admin/grant-premium'
+    const auth = 'Nostr ' + Buffer.from(JSON.stringify(
+      finalizeEvent({ kind: 27235, created_at: now(), tags: [['u', urlStr], ['method', 'POST']], content: '' }, P_ASK),
+    )).toString('base64')
+    return fetch(urlStr, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey, months: 1 }) }).then((r) => r.status)
+  }
+
+  const GP = 'zcp' + Math.random().toString(16).slice(2, 16)
+  const privHostSk = generateSecretKey() // fresh key: 0 clubs → no cap hit
+  const privHost = await conn(privHostSk)
+  const joinerP = await conn(generateSecretKey())
+  console.log('\n-- private clubs (premium) --')
+
+  await privHost.ev({ kind: 9007, created_at: now(), tags: [['h', GP]], content: '' })
+  await privHost.ev({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['open'], ['public']], content: '' })
+  await sleep(400)
+
+  // Non-premium owner tries to set closed → rejected.
+  const npremReject = await privHost.evRaw({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
+  assert(npremReject[0] === false && (npremReject[1] || '').includes('Premium'), 'private gate: non-premium 9002 with closed/private rejected: ' + ok(npremReject))
+
+  // Grant premium via admin API.
+  const grantStatus = await grantPremium(privHost.pub)
+  assert(grantStatus === 200, 'admin /grant-premium → 200 (got ' + grantStatus + ')')
+  await sleep(400)
+
+  // Premium owner sets closed + private → accepted.
+  const premOk = await privHost.evRaw({ kind: 9002, created_at: now() + 1, tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
+  assert(premOk[0] === true, 'private gate: premium owner can set closed+private: ' + ok(premOk))
+  await sleep(400)
+
+  // Private club must NOT appear in global {kinds:[39000]} listing for non-members.
+  // (relay29: private groups are hidden from non-members in global listings; members/owner see them)
+  const globalMetaStranger = await stranger.query({ kinds: [39000] })
+  assert(!globalMetaStranger.some((e) => e.tags.some((t) => t[0] === 'd' && t[1] === GP)), 'private club absent from global 39000 listing (non-member)')
+
+  // Private club IS findable by direct #d lookup (invite-link access) — no auth required.
+  const directMeta = await stranger.query({ kinds: [39000], '#d': [GP] })
+  assert(directMeta.some((e) => e.tags.some((t) => t[0] === 'd' && t[1] === GP)), 'private club found by direct #d lookup (non-member)')
+
+  // Joiner self-joins a closed club → 9021 accepted (stored), but no auto-add to 39002.
+  await joinerP.ev({ kind: 9021, created_at: now(), tags: [['h', GP]], content: '' })
+  await sleep(600)
+  const membersAfterJoin = (await privHost.query({ kinds: [39002], '#d': [GP] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+  assert(!membersAfterJoin.includes(joinerP.pub), 'closed club: 9021 does NOT auto-add (no auto-join)')
+
+  // Owner approves via 9000 put-user → joiner appears in 39002.
+  await privHost.ev({ kind: 9000, created_at: now(), tags: [['h', GP], ['p', joinerP.pub]], content: '' })
+  await sleep(500)
+  const membersAfterApprove = (await privHost.query({ kinds: [39002], '#d': [GP] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+  assert(membersAfterApprove.includes(joinerP.pub), 'closed club: owner 9000 put-user admits the joiner')
+
+  await privHost.ev({ kind: 9008, created_at: now(), tags: [['h', GP]], content: '' }) // cleanup
+}
+
 // 4d. Zap leaderboard: a member's kind-20101 zap broadcast is aggregated by the relay and
 //     surfaced at the public GET /leaderboard endpoint (relay/leaderboard.go). Deduped by
 //     bolt11, self-zaps ignored, distinct senders counted. Needs the HTTP base (ADMIN_URL).

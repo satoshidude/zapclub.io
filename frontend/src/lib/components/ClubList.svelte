@@ -9,6 +9,8 @@
   import { fetchLeaderboard, type LeaderboardEntry } from '../nostr/leaderboard'
   import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
+  import { ownPremium } from '../nostr/premium.svelte'
+  import PremiumModal from './PremiumModal.svelte'
 
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
@@ -21,7 +23,9 @@
   let showCreate = $state(false)
   let name = $state('')
   let about = $state('')
+  let privateClub = $state(false)
   let creating = $state(false)
+  let showPremModal = $state(false)
 
   const myIds = $derived(new Set(myClubs.map((c) => c.id)))
 
@@ -55,10 +59,14 @@
     creating = true
     error = ''
     try {
-      const id = await createClub({ name: name.trim(), about: about.trim() || undefined })
+      const id = await createClub(
+        { name: name.trim(), about: about.trim() || undefined },
+        { private: privateClub },
+      )
       // Creator is auto-admin + member; jump straight into the new club.
       name = ''
       about = ''
+      privateClub = false
       showCreate = false
       goClub(id)
     } catch (e) {
@@ -119,6 +127,18 @@
         <label for="club-about">About (optional)</label>
         <textarea id="club-about" bind:value={about} rows="2" placeholder="What's this club about?" maxlength="280"></textarea>
       </div>
+      <div class="field-row">
+        {#if ownPremium.active}
+          <label class="toggle-label">
+            <input type="checkbox" bind:checked={privateClub} />
+            🔒 Private (invite-only)
+          </label>
+        {:else}
+          <button class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
+            🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
+          </button>
+        {/if}
+      </div>
       <button class="btn btn-primary" onclick={create} disabled={creating || !name.trim()}>
         {creating ? 'Creating…' : 'Create club'}
       </button>
@@ -163,6 +183,10 @@
         </div>
       {/each}
     </div>
+  {/if}
+
+  {#if showPremModal}
+    <PremiumModal onClose={() => (showPremModal = false)} />
   {/if}
 
   {#if topDjs.length}
@@ -338,6 +362,44 @@
   }
   .create {
     margin-bottom: 1.2rem;
+  }
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle-label input[type="checkbox"] {
+    accent-color: var(--accent-2);
+    cursor: pointer;
+  }
+  .toggle-upsell {
+    background: none;
+    border: none;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    opacity: 0.6;
+  }
+  .toggle-upsell:hover { opacity: 1; }
+  .prem-tag {
+    font-size: 0.75rem;
+    color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 12%, transparent);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
   }
   .list {
     list-style: none;

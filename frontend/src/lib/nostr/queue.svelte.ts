@@ -295,14 +295,6 @@ export function removeTrack(groupId: string, index: number): Promise<void> {
   return publishMyQueue(groupId, tracks)
 }
 
-export function moveTrack(groupId: string, from: number, to: number): Promise<void> {
-  const tracks = [...myTracks()]
-  if (to < 0 || to >= tracks.length) return Promise.resolve()
-  const [m] = tracks.splice(from, 1)
-  tracks.splice(to, 0, m)
-  return publishMyQueue(groupId, tracks)
-}
-
 /** Clears my own queue entirely. */
 export function clearQueue(groupId: string): Promise<void> {
   return publishMyQueue(groupId, [])

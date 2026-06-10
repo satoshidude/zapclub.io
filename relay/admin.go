@@ -168,6 +168,7 @@ type adminAPI struct {
 	bans      *banStore
 	state     *relay29.State
 	listeners *listenerStats
+	prem      *premiumStore // may be nil before prem is wired
 }
 
 func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +195,8 @@ func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.deleteClub(w, r)
 	case "/admin/listeners":
 		a.writeJSON(w, a.listeners.snapshot(time.Now().UnixMilli()))
+	case "/admin/grant-premium":
+		a.grantPremium(w, r)
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -257,6 +260,29 @@ func (a *adminAPI) deleteClub(w http.ResponseWriter, r *http.Request) {
 	})
 	log.Printf("admin: deleted club %s (evicted from memory), purged %d events", body.GroupID, n)
 	a.writeJSON(w, map[string]any{"ok": true, "purged": n})
+}
+
+// grantPremium grants or extends a premium subscription via the admin API.
+// POST /admin/grant-premium {"pubkey":"<hex>","months":1}
+func (a *adminAPI) grantPremium(w http.ResponseWriter, r *http.Request) {
+	if a.prem == nil {
+		http.Error(w, "premium not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Pubkey string `json:"pubkey"`
+		Months int    `json:"months"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !nostr.IsValidPublicKey(body.Pubkey) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Months <= 0 {
+		body.Months = 1
+	}
+	a.prem.grant(r.Context(), body.Pubkey, body.Months)
+	log.Printf("admin: granted %d month(s) premium to %s", body.Months, body.Pubkey)
+	a.writeJSON(w, map[string]any{"ok": true})
 }
 
 // purgeAuthor deletes every event authored by a pubkey from the store.

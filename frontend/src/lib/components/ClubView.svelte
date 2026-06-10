@@ -5,6 +5,8 @@
     leaveClub,
     removeUser,
     addModerator,
+    addMember,
+    fetchJoinRequests,
     deleteEvent,
     editClub,
     setClubConfig,
@@ -18,7 +20,9 @@
   import { goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
-  import { npubEncode } from 'nostr-tools/nip19'
+  import { npubEncode, decode } from 'nostr-tools/nip19'
+  import { ownPremium } from '../nostr/premium.svelte'
+  import PremiumModal from './PremiumModal.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import {
     stage,
@@ -57,6 +61,17 @@
   let error = $state('')
   let stageResumed = false
 
+  // Private-club state
+  let requested = $state(false)        // user sent a join-request to a closed club
+  let pendingRequests = $state<{ pubkey: string; createdAt: number }[]>([])
+  let inviteNpub = $state('')
+  let inviteError = $state('')
+  let showPremModal = $state(false)
+  // Bumped when the user gains membership so the subscription effect re-runs and the
+  // now-authed content subscription starts flowing.
+  let membershipKey = $state(0)
+  let _lastMember = false
+
   // Owner = the 'owner'-role admin, NOT admins[0] (tag order isn't owner-first).
   const owner = $derived(ownerPk)
   const isOwner = $derived(!!auth.pubkey && auth.pubkey === owner)
@@ -86,7 +101,8 @@
   }
 
   $effect(() => {
-    // (re)subscribe whenever groupId changes
+    // (re)subscribe whenever groupId changes, or when the user gains membership (private clubs).
+    void membershipKey
     const id = groupId
     club = null
     members = []
@@ -189,6 +205,35 @@
     registerActiveClub(groupId, club?.name ?? '')
   })
 
+  // Membership-gain detector: when the user transitions non-member → member (owner approved),
+  // bump membershipKey so the content subscription re-runs with a fresh authed REQ.
+  $effect(() => {
+    if (isMember && !_lastMember) membershipKey++
+    _lastMember = isMember
+  })
+
+  // Restore join-request state from localStorage on load (so "Request sent" persists across
+  // page refreshes until the owner approves and the user appears in 39002).
+  $effect(() => {
+    const pk = auth.pubkey
+    if (!pk) return
+    const key = `zapclub:jreq:${groupId}:${pk}`
+    if (isMember) {
+      // Approved — clear the persisted request.
+      try { localStorage.removeItem(key) } catch { /* ignore */ }
+      requested = false
+    } else if (club?.closed) {
+      try { requested = !!localStorage.getItem(key) } catch { /* ignore */ }
+    }
+  })
+
+  // Owner: load pending join-requests for invite-only clubs (refresh when member list changes).
+  $effect(() => {
+    if (!canModerate || !club?.closed) { pendingRequests = []; return }
+    const memberPks = members.map((m) => m.pubkey)
+    void fetchJoinRequests(groupId, memberPks).then((r) => (pendingRequests = r))
+  })
+
   // Only the conductor writes now_playing, so it's the conductor that ENACTS a skip
   // requested by an owner/moderator (who may not be on stage). Validate the requester's
   // role here, match it to the running track's pos, then skip.
@@ -232,6 +277,54 @@
       error = String((e as Error)?.message ?? e)
     } finally {
       busy = false
+    }
+  }
+
+  /** Sends a join-request to an invite-only club (no auto-add; owner must approve). */
+  async function doRequestJoin() {
+    busy = true
+    error = ''
+    try {
+      await joinClub(groupId)
+      requested = true
+      try {
+        if (auth.pubkey) localStorage.setItem(`zapclub:jreq:${groupId}:${auth.pubkey}`, '1')
+      } catch { /* ignore */ }
+    } catch (e) {
+      error = String((e as Error)?.message ?? e)
+    } finally {
+      busy = false
+    }
+  }
+
+  /** Owner approves a pending join-request (publishes NIP-29 kind 9000 put-user). */
+  async function doApprove(pubkey: string) {
+    error = ''
+    try {
+      await addMember(groupId, pubkey)
+      pendingRequests = pendingRequests.filter((r) => r.pubkey !== pubkey)
+    } catch (e) {
+      error = String((e as Error)?.message ?? e)
+    }
+  }
+
+  /** Owner invites a user by npub (decodes → hex → kind 9000 put-user). */
+  async function doInvite() {
+    inviteError = ''
+    let hex = ''
+    try {
+      const decoded = decode(inviteNpub.trim())
+      if (decoded.type !== 'npub') throw new Error('expected an npub')
+      hex = decoded.data as string
+    } catch {
+      inviteError = 'Invalid npub — paste an npub1… key'
+      return
+    }
+    try {
+      await addMember(groupId, hex)
+      inviteNpub = ''
+    } catch (e) {
+      inviteError = String((e as Error)?.message ?? e)
     }
   }
 
@@ -337,7 +430,7 @@
     }
   }
 
-  // Owner: edit the club (name / about / picture / access).
+  // Owner: edit the club (name / about / picture / access / privacy).
   let editing = $state(false)
   let eName = $state('')
   let eAbout = $state('')
@@ -345,6 +438,7 @@
   let eAccess = $state<'open' | 'paid'>('open')
   let ePrice = $state(21)
   let eLud16 = $state('')
+  let ePrivate = $state(false)
   function openEdit() {
     eName = club?.name ?? ''
     eAbout = club?.about ?? ''
@@ -355,17 +449,18 @@
     // else the zapclub fallback.
     const ownerLud = (useProfile(owner)?.lud16 as string) || ''
     eLud16 = clubConfig.lud16 || ownerLud || 'zapclub@nsnip.io'
+    ePrivate = !!(club?.closed)
     editing = true
   }
   async function saveEdit() {
     if (!eName.trim()) return
     error = ''
     try {
-      await editClub(groupId, {
-        name: eName.trim(),
-        about: eAbout.trim() || undefined,
-        picture: ePic.trim() || undefined,
-      })
+      await editClub(
+        groupId,
+        { name: eName.trim(), about: eAbout.trim() || undefined, picture: ePic.trim() || undefined },
+        { isPrivate: ePrivate },
+      )
       await setClubConfig(groupId, {
         access: eAccess,
         price: eAccess === 'paid' ? Math.max(1, Math.floor(ePrice)) : 0,
@@ -425,6 +520,7 @@
         <div class="tags">
           <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
           {#if isPaid}<span class="tag paid">🔒 {clubConfig.price} sats entry</span>{/if}
+          {#if club?.isPrivate}<span class="tag private">🔒 Private</span>{/if}
           {#if owner}
             {@const op = useProfile(owner)}
             <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
@@ -480,6 +576,12 @@
           {#if auth.canSign}
             {#if isMember}
               <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
+            {:else if club?.closed}
+              {#if requested}
+                <span class="badge-sent">Request sent</span>
+              {:else}
+                <button class="btn btn-primary btn-sm" onclick={doRequestJoin} disabled={busy}>Request to join</button>
+              {/if}
             {:else if isPaid}
               <button class="btn btn-primary btn-sm" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
             {:else}
@@ -522,6 +624,18 @@
           </div>
           <p class="paid-note">Guests hear nothing until they pay. Defaults to your profile address.</p>
         {/if}
+        <div class="field-row">
+          {#if ownPremium.active}
+            <label class="toggle-label">
+              <input type="checkbox" bind:checked={ePrivate} />
+              🔒 Private (invite-only, hidden from non-members)
+            </label>
+          {:else}
+            <button class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
+              🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
+            </button>
+          {/if}
+        </div>
         <div class="edit-actions">
           <button class="btn btn-primary btn-sm" onclick={saveEdit} disabled={!eName.trim()}>Save</button>
           <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)}>Cancel</button>
@@ -530,7 +644,40 @@
     {:else if club?.about}
       <p class="desc">{club.about}</p>
     {/if}
+
+    <!-- Owner panel for invite-only clubs: pending requests + invite by npub. -->
+    {#if canModerate && club?.closed}
+      <div class="invite-panel card">
+        <h4>🔒 Private club management</h4>
+        {#if pendingRequests.length > 0}
+          <p class="panel-label">Pending requests ({pendingRequests.length})</p>
+          <ul class="req-list">
+            {#each pendingRequests as req (req.pubkey)}
+              {@const rp = useProfile(req.pubkey)}
+              <li class="req-row">
+                <img class="req-av" src={avatarUrl(req.pubkey, rp)} alt="" width="24" height="24" />
+                <span class="req-name">{displayName(req.pubkey, rp)}</span>
+                <button class="btn btn-primary btn-sm" onclick={() => doApprove(req.pubkey)}>Approve</button>
+                <button class="btn btn-ghost btn-sm" onclick={() => { pendingRequests = pendingRequests.filter((r) => r.pubkey !== req.pubkey) }}>Ignore</button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="panel-empty">No pending requests.</p>
+        {/if}
+        <p class="panel-label">Invite by npub</p>
+        <div class="invite-row">
+          <input class="invite-input" bind:value={inviteNpub} placeholder="npub1…" autocomplete="off" spellcheck="false" />
+          <button class="btn btn-primary btn-sm" onclick={doInvite} disabled={!inviteNpub.trim()}>Invite</button>
+        </div>
+        {#if inviteError}<p class="invite-err">{inviteError}</p>{/if}
+      </div>
+    {/if}
   </header>
+
+  {#if showPremModal}
+    <PremiumModal onClose={() => (showPremModal = false)} />
+  {/if}
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
@@ -682,6 +829,125 @@
     color: var(--amber);
     border-color: var(--amber);
     font-weight: 700;
+  }
+  .tag.private {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+    font-weight: 700;
+  }
+  .badge-sent {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    background: var(--bg-elev-2);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.6rem;
+  }
+  /* Private toggle in edit form */
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle-label input[type="checkbox"] {
+    accent-color: var(--accent-2);
+    cursor: pointer;
+  }
+  .toggle-upsell {
+    background: none;
+    border: none;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    opacity: 0.6;
+  }
+  .toggle-upsell:hover { opacity: 1; }
+  .prem-tag {
+    font-size: 0.75rem;
+    color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 12%, transparent);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+  }
+  /* Owner invite panel */
+  .invite-panel {
+    margin-top: 1rem;
+  }
+  .invite-panel h4 {
+    margin: 0 0 0.8rem;
+    font-size: 0.9rem;
+  }
+  .panel-label {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 0.4rem;
+  }
+  .panel-empty {
+    font-size: 0.83rem;
+    color: var(--text-dim);
+    margin: 0 0 0.8rem;
+  }
+  .req-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .req-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .req-av {
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  .req-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .invite-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .invite-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-size: 0.82rem;
+    font-family: monospace;
+  }
+  .invite-input:focus { outline: none; border-color: var(--accent-2); }
+  .invite-err {
+    font-size: 0.8rem;
+    color: var(--danger);
+    margin: 0;
   }
   .tag.live-count {
     border: none;

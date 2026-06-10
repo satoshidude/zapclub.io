@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, moveTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, republishQueue, enrichQueueTitles } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, enrichQueueTitles } from '../../nostr/queue.svelte'
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
@@ -55,33 +55,6 @@
     await setMyQueue(groupId, pl.tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })))
     selectedPlaylistId = pl.id
     showLib = false
-  }
-
-  // Pointer-based reordering of my set — works with touch AND mouse (HTML5 drag-and-drop fires
-  // no events on touch). Grab the grip, drag over a row, release. The ▲▼ arrows stay as a
-  // keyboard/no-drag fallback.
-  let dragIndex = $state<number | null>(null)
-  let dropIndex = $state<number | null>(null)
-  function dragStart(e: PointerEvent, i: number) {
-    dragIndex = i
-    dropIndex = i
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
-    window.addEventListener('pointermove', dragMove)
-    window.addEventListener('pointerup', dragEnd)
-  }
-  function dragMove(e: PointerEvent) {
-    const li = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('li[data-i]') as HTMLElement | null
-    if (li?.dataset.i != null) {
-      const i = Number(li.dataset.i)
-      if (!Number.isNaN(i)) dropIndex = i
-    }
-  }
-  function dragEnd() {
-    window.removeEventListener('pointermove', dragMove)
-    window.removeEventListener('pointerup', dragEnd)
-    if (dragIndex !== null && dropIndex !== null && dragIndex !== dropIndex) void moveTrack(groupId, dragIndex, dropIndex)
-    dragIndex = null
-    dropIndex = null
   }
 
   // ▶ preview / details modal.
@@ -154,9 +127,6 @@
       {#if canSkip(canModerate)}
         <button class="btn btn-ghost btn-sm" onclick={() => requestSkip(groupId)} title="Skip current track">⏭ Skip</button>
       {/if}
-      {#if tracks.length > 0}
-        <button class="mini" onclick={() => republishQueue(groupId)} title="Apply current order to the round-robin">↻</button>
-      {/if}
       {#if tracks.length > 1}
         <button class="mini" onclick={() => shuffleQueue(groupId)} title="Shuffle">🔀</button>
       {/if}
@@ -195,26 +165,17 @@
     </ul>
   {/if}
 
-  <!-- My tracks (top), drag-free reordering with the arrows -->
   {#if tracks.length > 0}
     <ul class="tracks">
       {#each tracks as track, i (track.videoId + i)}
         <li
           data-i={i}
           class:played={track.active === false}
-          class:dragging={dragIndex === i}
-          class:drop={dropIndex === i && dragIndex !== null && dragIndex !== i}
         >
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <span class="grip" aria-hidden="true" onpointerdown={(e) => dragStart(e, i)}>⠿</span>
           <button class="play" onclick={() => (preview = { track, context: 'queue' })} title="Preview / edit details">▶</button>
           <span class="t-idx">{i + 1}</span>
           <span class="t-title">{track.title}</span>
           <span class="dur">{fmt(track.duration)}</span>
-          <span class="reorder">
-            <button class="ord" onclick={() => moveTrack(groupId, i, i - 1)} disabled={i === 0} title="Move up">▲</button>
-            <button class="ord" onclick={() => moveTrack(groupId, i, i + 1)} disabled={i === tracks.length - 1} title="Move down">▼</button>
-          </span>
           {#if track.active === false}
             <button class="reactivate" onclick={() => setTrackActive(groupId, track.videoId, true)} title="Play again — re-activate this track">↻</button>
           {/if}
@@ -367,23 +328,6 @@
     gap: 0.6rem;
     font-size: 0.85rem;
   }
-  .tracks li.dragging {
-    opacity: 0.4;
-  }
-  .tracks li.drop {
-    box-shadow: inset 0 2px 0 var(--accent);
-  }
-  .grip {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    cursor: grab;
-    user-select: none;
-    touch-action: none; /* let the grip own touch drags — don't scroll the page */
-    padding: 0.2rem 0.1rem;
-  }
-  .grip:active {
-    cursor: grabbing;
-  }
   .play {
     flex: 0 0 auto;
     background: var(--bg-elev-2);
@@ -403,35 +347,6 @@
   .play:hover {
     border-color: var(--accent);
     filter: brightness(1.15);
-  }
-  .reorder {
-    display: inline-flex;
-    flex-direction: column;
-    gap: 1px;
-    flex: 0 0 auto;
-  }
-  .ord {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 4px;
-    width: 18px;
-    height: 13px;
-    font-size: 0.55rem;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .ord:hover:not(:disabled) {
-    border-color: var(--accent-2);
-    color: var(--text);
-  }
-  .ord:disabled {
-    opacity: 0.3;
-    cursor: default;
   }
   .thumb {
     width: 48px;

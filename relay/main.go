@@ -130,6 +130,12 @@ func main() {
 		GroupCreatorDefaultRole: ownerRole,
 	})
 
+	// NIP-42 AUTH: set the canonical service URL so the relay-signed challenge carries the
+	// correct wss:// URL even when running behind a Caddy reverse proxy. Without this khatru
+	// derives the URL from the HTTP request Host (localhost), which would make client-side
+	// 22242 signature verification fail and break all private-group reads.
+	relay.ServiceURL = env("RELAY_SERVICE_URL", "wss://relay.zapclub.io")
+
 	state.AllowAction = func(ctx context.Context, group nip29.Group, role *nip29.Role, action relay29.Action) bool {
 		if _, ok := action.(relay29.PutUser); ok {
 			// Nur der Owner darf per 9000 Mitglieder/Rollen setzen (z. B. Moderator ernennen).
@@ -235,6 +241,14 @@ func main() {
 	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
 
+	// Club creation cap: free accounts may create at most 3 clubs. Superadmin is exempt.
+	cap := newClubCap(db, os.Getenv("SUPERADMIN"))
+	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
+
+	// Private-club gate: setting ['closed'] or ['private'] on a 9002/9007 requires Premium.
+	// Wired here so prem is available; prem is assigned below after newPremiumStore.
+	var privGate *privateGate
+
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
 	// enforced so it can't be bypassed by a hand-crafted join. (Reads the club config from the
@@ -283,6 +297,16 @@ func main() {
 	// even when no client is in the foreground. Single always-on writer → no client election/
 	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
+	// Premium subscription system: relay-authored kind-30108 status events + LNbits invoicing.
+	prem := newPremiumStore(db, relay, sk, relayPub)
+	pg := newPremiumGate(prem, env("LNBITS_URL", ""), os.Getenv("LNBITS_INVOICE_KEY"))
+	entryPrem = prem // gate paid-entry behind premium check
+	condPrem = prem  // per-club DJ slot cap (free=2 / premium=5)
+
+	// Wire private-gate now that prem is available (declared above near cap).
+	privGate = newPrivateGate(prem, os.Getenv("SUPERADMIN"))
+	relay.RejectEvent = append(relay.RejectEvent, privGate.reject)
+
 	cond := newConductor(db, relay, state, sk)
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
@@ -298,19 +322,29 @@ func main() {
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
+	relay.Router().HandleFunc("/premium/invoice", pg.handle)
+	relay.Router().HandleFunc("/premium/status", pg.handle)
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners}
+	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners, prem: prem}
 	relay.Router().HandleFunc("/admin/bans", admin.handle)
 	relay.Router().HandleFunc("/admin/ban", admin.handle)
 	relay.Router().HandleFunc("/admin/unban", admin.handle)
 	relay.Router().HandleFunc("/admin/delete-club", admin.handle)
 	relay.Router().HandleFunc("/admin/listeners", admin.handle)
+	relay.Router().HandleFunc("/admin/grant-premium", admin.handle)
 
 	relay.Router().HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "zapclub relay — NIP-29. Use a zapclub/nostr client to connect.")
 	})
+
+	// NIP-17 DM sender for premium payment confirmation + expiry reminders.
+	dm, dmErr := newDMSender(sk)
+	if dmErr != nil {
+		log.Fatalf("dm sender init: %v", dmErr)
+	}
+	_ = pg // pg holds premiumGate, used via routes above; dm is used in sweep below
 
 	// Hintergrund-Sweep: abgelaufene Such-Cache-Einträge + inaktive IP-Limiter-Buckets
 	// entfernen, damit die Maps nicht unbegrenzt wachsen (Memory-DoS-Schutz).
@@ -336,6 +370,8 @@ func main() {
 			board.save()
 			// Drop play-log records older than 24h (client reads only a ≤6h window).
 			pruneOldPlays(db, time.Now().Add(-24*time.Hour).Unix())
+			// Send renewal reminders for subscriptions expiring within 3 days.
+			sendRenewalReminders(context.Background(), prem, dm)
 		}
 	}()
 

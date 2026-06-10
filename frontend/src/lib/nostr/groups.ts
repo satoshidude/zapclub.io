@@ -85,22 +85,22 @@ export async function shareNote(content: string, url: string): Promise<void> {
 // ── Club lifecycle ──────────────────────────────────────────────────────────
 
 /** Creates a club (NIP-29 create-group + edit-metadata). Returns the group id. */
-export async function createClub(meta: {
-  name: string
-  about?: string
-  picture?: string
-}): Promise<string> {
+export async function createClub(
+  meta: { name: string; about?: string; picture?: string },
+  opts?: { private?: boolean },
+): Promise<string> {
   const id = generateGroupId()
   await publishClub({ kind: KIND_CREATE_GROUP, created_at: now(), tags: [['h', id]], content: '' })
 
-  const metaTags: string[][] = [
-    ['h', id],
-    ['name', meta.name],
-    // open + public so anyone can join/listen (MVP).
-    // Single-element tags (relay29 convention) — ['open',''] is NOT recognized.
-    ['open'],
-    ['public'],
-  ]
+  const metaTags: string[][] = [['h', id], ['name', meta.name]]
+  if (opts?.private) {
+    // Private clubs: invite-only join (closed) + content hidden from non-members (private).
+    // Single-element tags (relay29 convention) — ['closed',''] is NOT recognized.
+    metaTags.push(['closed'], ['private'])
+  } else {
+    // Default: open + public so anyone can join/listen.
+    metaTags.push(['open'], ['public'])
+  }
   if (meta.about) metaTags.push(['about', meta.about])
   if (meta.picture) metaTags.push(['picture', meta.picture])
   await publishClub({ kind: KIND_EDIT_METADATA, created_at: now(), tags: metaTags, content: '' })
@@ -109,19 +109,21 @@ export async function createClub(meta: {
 }
 
 /**
- * Edits club metadata (name/about/picture). Only the host/admin may do this — the relay
- * enforces the role. open/public are re-sent so the club stays open/public.
+ * Edits club metadata (name/about/picture/visibility). Only the host/admin may do this —
+ * the relay enforces the role. Pass `isPrivate:true` to make a club invite-only and hidden
+ * from non-members (requires premium on the relay side).
  */
 export async function editClub(
   groupId: string,
   meta: { name: string; about?: string; picture?: string },
+  opts?: { isPrivate?: boolean },
 ): Promise<void> {
-  const metaTags: string[][] = [
-    ['h', groupId],
-    ['name', meta.name],
-    ['open'],
-    ['public'],
-  ]
+  const metaTags: string[][] = [['h', groupId], ['name', meta.name]]
+  if (opts?.isPrivate) {
+    metaTags.push(['closed'], ['private'])
+  } else {
+    metaTags.push(['open'], ['public'])
+  }
   if (meta.about) metaTags.push(['about', meta.about])
   if (meta.picture) metaTags.push(['picture', meta.picture])
   await publishClub({ kind: KIND_EDIT_METADATA, created_at: now(), tags: metaTags, content: '' })
@@ -134,7 +136,7 @@ export async function editClub(
  */
 export async function setClubConfig(
   groupId: string,
-  cfg: { access: 'open' | 'paid'; price: number; lud16: string },
+  cfg: { access: 'open' | 'paid'; price: number; lud16: string; featured?: boolean },
 ): Promise<void> {
   const tags: string[][] = [
     ['h', groupId],
@@ -145,6 +147,7 @@ export async function setClubConfig(
     const zapper = cfg.lud16 ? await resolveZapper(cfg.lud16) : ''
     tags.push(['price', String(Math.max(0, Math.floor(cfg.price)))], ['lud16', cfg.lud16], ['zapper', zapper])
   }
+  if (cfg.featured) tags.push(['featured', '1'])
   await publishClub({ kind: KIND_CLUB_CONFIG, created_at: now(), tags, content: '' })
 }
 
@@ -156,6 +159,7 @@ export function parseClubConfig(ev: Event): ClubConfig {
     price: Number(tag('price')) || 0,
     lud16: tag('lud16'),
     zapper: tag('zapper'),
+    featured: tag('featured') === '1',
   }
 }
 
@@ -242,6 +246,49 @@ export async function addModerator(groupId: string, pubkey: string): Promise<voi
   })
 }
 
+/**
+ * Adds a plain member (NIP-29 kind 9000 put-user, no role). Used by owners to approve
+ * join-requests or to invite users directly in invite-only clubs.
+ */
+export async function addMember(groupId: string, pubkey: string): Promise<void> {
+  await publishClub({
+    kind: KIND_PUT_USER,
+    created_at: now(),
+    tags: [
+      ['h', groupId],
+      ['p', pubkey],
+    ],
+    content: '',
+  })
+}
+
+/**
+ * Fetches pending join-requests (kind 9021) for a club — for the owner's approval panel in
+ * invite-only clubs. Deduplicates to the newest request per pubkey and removes anyone already
+ * in the provided members list so approved requests don't linger.
+ */
+export async function fetchJoinRequests(
+  groupId: string,
+  existingMembers: string[] = [],
+): Promise<{ pubkey: string; createdAt: number }[]> {
+  const evs = await pool.querySync(
+    RELAYS,
+    { kinds: [KIND_JOIN_REQUEST], '#h': [groupId] },
+    { maxWait: 4000 },
+  )
+  // Keep newest request per pubkey.
+  const map = new Map<string, number>()
+  for (const ev of evs) {
+    const prev = map.get(ev.pubkey) ?? 0
+    if (ev.created_at > prev) map.set(ev.pubkey, ev.created_at)
+  }
+  const memberSet = new Set(existingMembers)
+  return [...map.entries()]
+    .filter(([pk]) => !memberSet.has(pk))
+    .map(([pubkey, createdAt]) => ({ pubkey, createdAt }))
+    .sort((a, b) => a.createdAt - b.createdAt)
+}
+
 /** Deletes an event (e.g. a chat message) in the club (NIP-29 kind 9005). */
 export async function deleteEvent(groupId: string, eventId: string): Promise<void> {
   await publishClub({
@@ -307,6 +354,8 @@ export function parseClubMetadata(ev: Event): Club {
     picture: tagValue(ev, 'picture'),
     open: has('open'),
     isPublic: has('public'),
+    closed: has('closed'),
+    isPrivate: has('private'),
   }
 }
 
@@ -366,7 +415,15 @@ export async function listClubs(): Promise<Club[]> {
     configAt.set(id, ev.created_at)
     configs.set(id, parseClubConfig(ev))
   }
-  return metaEvents
+  // Check premium status for all owners to gate featured listing.
+  const { isPremium } = await import('./premium.svelte')
+  const ownerPubs = [...new Set([...owners.values()])]
+  const premiumSet = new Set<string>()
+  await Promise.all(ownerPubs.map(async (pk) => {
+    if (await isPremium(pk)) premiumSet.add(pk)
+  }))
+
+  const clubs = metaEvents
     .map(parseClubMetadata)
     .filter((c) => c.id)
     .map((c) => ({
@@ -375,9 +432,16 @@ export async function listClubs(): Promise<Club[]> {
       owner: owners.get(c.id) || undefined,
       access: configs.get(c.id)?.access ?? 'open',
       price: configs.get(c.id)?.price ?? 0,
+      featured: !!(configs.get(c.id)?.featured && owners.get(c.id) && premiumSet.has(owners.get(c.id)!)),
     }))
     .filter((c) => (c.memberCount ?? 0) > 0)
-    .sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
+
+  // Featured clubs (owner has active premium) sort first, then by member count.
+  clubs.sort((a, b) => {
+    if (a.featured !== b.featured) return a.featured ? -1 : 1
+    return (b.memberCount ?? 0) - (a.memberCount ?? 0)
+  })
+  return clubs
 }
 
 /** Club ids that are LIVE right now: a fresh relay-authored now_playing (kind 30100) means DJs

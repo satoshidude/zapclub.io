@@ -73,6 +73,9 @@ func (g *entryGate) newest(ctx context.Context, f nostr.Filter) *nostr.Event {
 // owner is the creator (author of the kind-9007 create-group event — that's the only owner
 // source actually persisted in badger; relay29 serves 39001 dynamically, not from the store).
 // Joins are infrequent, so reading per-join (no cache) is fine.
+// prem is set by main.go after both entryGate and premiumStore are initialized.
+var entryPrem *premiumStore
+
 func (g *entryGate) access(ctx context.Context, club string) clubAccess {
 	create := g.newest(ctx, nostr.Filter{Kinds: []int{kindCreateGroup}, Tags: nostr.TagMap{"h": []string{club}}})
 	ca := clubAccess{}
@@ -87,6 +90,10 @@ func (g *entryGate) access(ctx context.Context, club string) clubAccess {
 	})
 	if cfg == nil || tagVal(cfg, "access") != "paid" {
 		return ca // no owner config or open → not gated
+	}
+	// Entry-Fee is a premium feature: ignore paid config if owner does not have premium.
+	if entryPrem != nil && !entryPrem.valid(ctx, ca.owner) {
+		return ca
 	}
 	ca.paid = true
 	ca.price, _ = strconv.Atoi(tagVal(cfg, "price"))

@@ -29,8 +29,14 @@ import (
 // and write straight to the store — the relay's signed events are trusted and need no rate-limit
 // / membership / PoW gating.
 
+// condPrem is set by main.go after premiumStore is initialized.
+// The conductor uses it to determine per-club DJ slot limits.
+var condPrem *premiumStore
+
 const (
-	condMaxDJs            = 5            // UI/slot cap (matches conductor.ts MAX_DJS)
+	condMaxDJs            = 5            // absolute max (premium clubs)
+	condMaxDJsFree        = 2            // non-premium clubs
+	condMaxDJsOrig        = 5            // kept for reference
 	condStageStaleMS      = 3_600_000    // sticky stage: 1h after last heartbeat (STALE_MS)
 	condOnlineMS          = 50_000       // a DJ is "present" within this of their last 20100 beat
 	condHeartbeatMS       = 15_000       // now_playing republish cadence (latecomers + drift)
@@ -90,6 +96,27 @@ type conductor struct {
 func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
 	pub, _ := nostr.GetPublicKey(sk)
 	return &conductor{db: db, relay: relay, state: state, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}, broken: map[string]map[string]map[string]int64{}}
+}
+
+// clubOwner returns the pubkey of the club's creator (author of its 9007 create-group event).
+func (c *conductor) clubOwner(ctx context.Context, club string) string {
+	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
+		Kinds: []int{kindCreateGroup},
+		Tags:  nostr.TagMap{"h": []string{club}},
+	})
+	if err != nil {
+		return ""
+	}
+	var newest *nostr.Event
+	for ev := range ch {
+		if newest == nil || ev.CreatedAt > newest.CreatedAt {
+			newest = ev
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.PubKey
 }
 
 // observeBroken records an ephemeral "I can't play this track" report (kind 20102, content =
@@ -346,8 +373,14 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 			}
 			return list[i].pubkey < list[j].pubkey
 		})
-		if len(list) > condMaxDJs {
-			list = list[:condMaxDJs]
+		cap := condMaxDJsFree
+		if condPrem != nil {
+			if owner := c.clubOwner(ctx, club); owner != "" && condPrem.valid(ctx, owner) {
+				cap = condMaxDJs
+			}
+		}
+		if len(list) > cap {
+			list = list[:cap]
 		}
 		out[club] = list
 	}
