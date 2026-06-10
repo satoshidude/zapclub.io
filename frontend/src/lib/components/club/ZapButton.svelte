@@ -58,7 +58,7 @@
       <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
       <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
     {:else}
-      <span class="lbl">zap</span>
+      <span class="lbl">zap dj</span>
     {/if}
   </button>
 

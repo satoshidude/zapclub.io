@@ -142,7 +142,6 @@
 <div class="np card" class:zoomed>
   {#if np}
     <div class="np-head">
-      <ZapButton club={clubId} />
       <button
         class="like"
         class:on={liked}
@@ -186,6 +185,7 @@
             <img class="avatar" src={avatarUrl(dj, profile)} alt="" width="18" height="18" />
             {displayName(dj, profile)}
           </a>
+          <ZapButton club={clubId} />
         </div>
       {:else}
         <div class="idle">
@@ -301,6 +301,7 @@
   .dj-row {
     display: flex;
     align-items: center;
+    gap: 0.6rem;
     margin-top: 0.2rem;
   }
   .dj {
