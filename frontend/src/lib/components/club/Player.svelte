@@ -2,6 +2,9 @@
   import { onDestroy } from 'svelte'
   import { createPlayer, type YouTubePlayer } from '../../player/youtube'
   import { sync, targetPosition } from '../../nostr/sync.svelte'
+  import { liveSession } from '../../nostr/livesession.svelte'
+  import { connectLivekit, attachTrack, type LivekitClient } from '../../player/livekit'
+  import { Track } from 'livekit-client'
 
   interface Props {
     onended?: () => void
@@ -18,8 +21,10 @@
      *  gate. Lets the card show the artist (from a "Artist - Topic" channel) for bare titles. */
     onmeta?: (author: string, title: string) => void
     onduration?: (seconds: number) => void
+    /** Club group-id — needed for the LiveKit token endpoint. */
+    groupId?: string
   }
-  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta, onduration }: Props = $props()
+  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta, onduration, groupId }: Props = $props()
 
   let lobbyFailed = false
 
@@ -44,6 +49,64 @@
   let loadedVideoId: string | null = null
   let idleMode = false
   let driftTimer: ReturnType<typeof setInterval> | null = null
+
+  // ── LiveKit live A/V integration ────────────────────────────────────────────
+
+  let lkClient = $state<LivekitClient | null>(null)
+  let lkConnectedGroup = $state<string | null>(null) // which group we're connected to
+  let liveVideoEl = $state<HTMLVideoElement | null>(null)
+  let liveAudioEl = $state<HTMLAudioElement | null>(null)
+  let lkError = $state('')
+  let isTakeover = $derived(liveSession.current?.mode === 'takeover')
+  let isTalkover = $derived(liveSession.current?.mode === 'talkover')
+  const TALKOVER_DUCK_VOLUME = 15
+
+  // React to live session changes.
+  $effect(() => {
+    const session = liveSession.current
+    const gid = groupId
+    if (!gid) return
+
+    if (session && (session.mode === 'takeover' || session.mode === 'talkover')) {
+      // New session or session continued — connect if not already connected to this group.
+      if (lkConnectedGroup !== gid) {
+        void (async () => {
+          try {
+            lkError = ''
+            const client = await connectLivekit(gid)
+            if (destroyed) { void client.disconnect(); return }
+            lkClient = client
+            lkConnectedGroup = gid
+            client.onRemoteTrack(({ track }) => {
+              if (track.kind === Track.Kind.Video && liveVideoEl) {
+                attachTrack(track, liveVideoEl)
+              } else if (track.kind === Track.Kind.Audio && liveAudioEl) {
+                attachTrack(track, liveAudioEl)
+              }
+            })
+          } catch (e) {
+            lkError = String((e as Error)?.message ?? e)
+          }
+        })()
+      }
+      // Duck YT for talkover.
+      if (session.mode === 'talkover' && player) {
+        player.setVolume(TALKOVER_DUCK_VOLUME)
+      }
+    } else {
+      // Session ended — disconnect and restore volume.
+      if (lkClient) {
+        const c = lkClient
+        lkClient = null
+        lkConnectedGroup = null
+        void c.disconnect()
+      }
+      // Restore YT volume.
+      if (player && !muted) {
+        player.setVolume(volume)
+      }
+    }
+  })
 
   createPlayer(elementId, {
     controls: false,
@@ -205,6 +268,7 @@
     if (driftTimer) clearInterval(driftTimer)
     if (typeof document !== 'undefined') document.removeEventListener('fullscreenchange', onFsChange)
     player?.destroy()
+    if (lkClient) { void lkClient.disconnect(); lkClient = null }
   })
 </script>
 
@@ -243,12 +307,34 @@
       </div>
     {/if}
 
-    <!-- Lobby: when no DJ is playing, overlay a hint over the muted idle stream. -->
-    {#if !sync.live}
+    <!-- Lobby: when no DJ is playing (and no live takeover), overlay a hint. -->
+    {#if !sync.live && !isTakeover}
       <div class="lobby" aria-hidden="true">
         <span class="lobby-icon">🎧</span>
         <span class="lobby-text">Lobby — no DJ on stage</span>
       </div>
+    {/if}
+
+    <!-- Takeover: the DJ's live A/V feed replaces the YT frame. -->
+    {#if isTakeover}
+      <div class="live-frame">
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video bind:this={liveVideoEl} class="live-video" autoplay playsinline></video>
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <audio bind:this={liveAudioEl} autoplay></audio>
+        <div class="live-badge" aria-hidden="true">● LIVE</div>
+      </div>
+    {:else}
+      <!-- Talkover: keep the YT frame, add an invisible audio overlay + a small badge. -->
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <audio bind:this={liveAudioEl} autoplay style="display:none"></audio>
+      {#if isTalkover}
+        <div class="live-badge live-badge-talkover" aria-hidden="true">● LIVE</div>
+      {/if}
+    {/if}
+
+    {#if lkError && (isTakeover || isTalkover)}
+      <div class="lk-error" aria-hidden="true">{lkError}</div>
     {/if}
 
     <!-- Non-members don't hear: overlay with a login/join prompt. -->
@@ -492,5 +578,54 @@
     border-radius: 0;
     justify-content: center;
     gap: 1rem;
+  }
+  /* Live A/V (LiveKit) overlay */
+  .live-frame {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .live-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .live-badge {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 5;
+    background: rgba(220, 38, 38, 0.92);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    pointer-events: none;
+  }
+  .live-badge-talkover {
+    background: rgba(245, 158, 11, 0.92);
+  }
+  .lk-error {
+    position: absolute;
+    bottom: 0.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    background: rgba(0,0,0,0.75);
+    color: var(--danger, #ef4444);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: var(--radius-sm, 4px);
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: 90%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

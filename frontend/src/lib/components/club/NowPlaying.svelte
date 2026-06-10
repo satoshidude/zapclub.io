@@ -150,7 +150,7 @@
   {/if}
   <div class="np-main">
     <div class="video">
-      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} groupId={clubId} compact={!zoomed} onmeta={(author) => {
         if (!np) return
         ytMeta = { vid: np.videoId, author }
         // If this is MY track and its stored title is still bare, fold the artist in so it

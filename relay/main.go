@@ -317,6 +317,10 @@ func main() {
 	playlistG := newPlaylistGate(db, prem, os.Getenv("SUPERADMIN"))
 	relay.RejectEvent = append(relay.RejectEvent, playlistG.reject)
 
+	// Live A/V session gate (kind 30109): only staged DJs + owner/mod may go live.
+	liveG := newLiveGate(db, state, os.Getenv("SUPERADMIN"))
+	relay.RejectEvent = append(relay.RejectEvent, liveG.reject)
+
 	cond := newConductor(db, relay, state, sk)
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
@@ -335,6 +339,15 @@ func main() {
 	relay.Router().HandleFunc("/premium/invoice", pg.handle)
 	relay.Router().HandleFunc("/premium/status", pg.handle)
 	relay.Router().HandleFunc("/premium/check", pg.handle)
+
+	// LiveKit AV spaces (NIP-29 spec): 204 probe + token endpoint.
+	lkHandler := newLivekitHandler(
+		db, state, os.Getenv("SUPERADMIN"),
+		os.Getenv("LIVEKIT_API_KEY"), os.Getenv("LIVEKIT_API_SECRET"),
+		env("LIVEKIT_URL", ""),
+	)
+	relay.Router().HandleFunc("/.well-known/nip29/livekit", lkHandler.handle)
+	relay.Router().HandleFunc("/.well-known/nip29/livekit/", lkHandler.handle)
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.

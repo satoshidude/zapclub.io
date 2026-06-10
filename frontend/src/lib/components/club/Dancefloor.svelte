@@ -12,6 +12,7 @@
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
+  import GoLiveButton from './GoLiveButton.svelte'
 
   let {
     groupId,
@@ -202,6 +203,9 @@
         <span class="ring">↩</span>
         <span class="nm">Leave</span>
       </button>
+      <GoLiveButton {groupId} isOwnerOrMod={canModerate || isOwner} />
+    {:else if auth.canSign && isMember && (canModerate || isOwner)}
+      <GoLiveButton {groupId} isOwnerOrMod={true} />
     {/if}
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}

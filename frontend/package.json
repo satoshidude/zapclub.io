@@ -32,6 +32,7 @@
     "applesauce-relay": "^6.0.3",
     "applesauce-signers": "^6.0.1",
     "jsqr": "^1.4.0",
+    "livekit-client": "^2.19.2",
     "nostr-tools": "^2.23.5",
     "qrcode-generator": "^1.5.2"
   }

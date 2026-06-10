@@ -38,6 +38,7 @@
   import { sync, ingestNowPlaying, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { ingestEmote, resetEmotes } from '../nostr/emotes.svelte'
+  import { ingestLiveSession, resetLiveSession } from '../nostr/livesession.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
@@ -133,6 +134,7 @@
       onPlay: ingestPlay,
       onChat: ingestChat,
       onEmote: ingestEmote,
+      onLiveSession: ingestLiveSession,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
         const target = ev.tags.find((t) => t[0] === 'e')?.[1]
@@ -163,6 +165,7 @@
       resetEmotes()
       resetZaps()
       resetPresence()
+      resetLiveSession()
     }
   })
 
