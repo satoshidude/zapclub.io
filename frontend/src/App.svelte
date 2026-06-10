@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome, goAbout, goHowto, goAdmin, goLeaderboard } from './lib/router.svelte'
+  import { router, goHome, goAbout, goHowto, goAdmin, goLeaderboard, goPrivacy, goTerms, goLegal } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import { accountWatch, startAccountWatch } from './lib/nostr/accountWatch.svelte'
@@ -14,6 +14,9 @@
   import HowTo from './lib/components/HowTo.svelte'
   import About from './lib/components/About.svelte'
   import Leaderboard from './lib/components/Leaderboard.svelte'
+  import LegalNotice from './lib/components/LegalNotice.svelte'
+  import Privacy from './lib/components/Privacy.svelte'
+  import Terms from './lib/components/Terms.svelte'
   import MiniPlayer from './lib/components/MiniPlayer.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
@@ -109,6 +112,12 @@
     <About />
   {:else if router.route.name === 'leaderboard'}
     <Leaderboard />
+  {:else if router.route.name === 'privacy'}
+    <Privacy />
+  {:else if router.route.name === 'terms'}
+    <Terms />
+  {:else if router.route.name === 'legal'}
+    <LegalNotice />
   {:else}
     <ClubList />
   {/if}
@@ -119,7 +128,7 @@
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <span class="foot-note"><button class="foot-link" onclick={goLeaderboard}>Leaderboard</button> · <button class="foot-link" onclick={goAbout}>How it works</button> · <a class="foot-link" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a> · Powered by Nostr &amp; Lightning · no tracking</span>
+  <span class="foot-note"><button class="foot-link" onclick={goAbout}>About</button> · <button class="foot-link" onclick={goPrivacy}>Privacy</button> · <button class="foot-link" onclick={goTerms}>Terms</button> · <button class="foot-link" onclick={goLegal}>Legal Notice</button> · <a class="foot-link" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a> · Powered by Nostr &amp; Lightning · no tracking</span>
   <span class="foot-note">released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a> with love 4 music</span>
 </footer>
 

@@ -9,6 +9,9 @@ export type Route =
   | { name: 'howto' }
   | { name: 'about' }
   | { name: 'leaderboard' }
+  | { name: 'privacy' }
+  | { name: 'terms' }
+  | { name: 'legal' }
 
 function parse(path: string): Route {
   const club = path.match(/^\/club\/([\w-]+)\/?$/)
@@ -19,6 +22,9 @@ function parse(path: string): Route {
   if (/^\/howto\/?$/.test(path)) return { name: 'howto' }
   if (/^\/about\/?$/.test(path)) return { name: 'about' }
   if (/^\/leaderboard\/?$/.test(path)) return { name: 'leaderboard' }
+  if (/^\/privacy\/?$/.test(path)) return { name: 'privacy' }
+  if (/^\/terms\/?$/.test(path)) return { name: 'terms' }
+  if (/^\/legal\/?$/.test(path)) return { name: 'legal' }
   return { name: 'home' }
 }
 
@@ -67,4 +73,16 @@ export function goAbout(): void {
 
 export function goLeaderboard(): void {
   navigate('/leaderboard')
+}
+
+export function goPrivacy(): void {
+  navigate('/privacy')
+}
+
+export function goTerms(): void {
+  navigate('/terms')
+}
+
+export function goLegal(): void {
+  navigate('/legal')
 }
