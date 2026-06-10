@@ -197,6 +197,12 @@
        joinable in place; the people live ONLY here (not repeated in the crowd below). -->
   <div class="stagerow">
     <span class="stage-tag" aria-hidden="true">stage {stageDjs.length}/{MAX_DJS}</span>
+    {#if auth.canSign && isMember && onStage}
+      <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
+        <span class="ring">↩</span>
+        <span class="nm">Leave</span>
+      </button>
+    {/if}
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
       <button
@@ -226,12 +232,6 @@
         <span class="nm">{canJoin ? 'Join' : 'open'}</span>
       </button>
     {/each}
-    {#if auth.canSign && isMember && onStage}
-      <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
-        <span class="ring">↩</span>
-        <span class="nm">Leave</span>
-      </button>
-    {/if}
   </div>
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
