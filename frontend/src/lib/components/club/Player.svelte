@@ -89,10 +89,9 @@
           }
         })()
       }
-      // Mute YT for takeover (live A/V replaces the stream); duck for talkover.
-      if (player) {
-        if (session.mode === 'takeover') player.mute()
-        else if (session.mode === 'talkover') player.setVolume(TALKOVER_DUCK_VOLUME)
+      // Duck YT for talkover; takeover keeps YT audio (video-only stream, music continues).
+      if (session.mode === 'talkover' && player) {
+        player.setVolume(TALKOVER_DUCK_VOLUME)
       }
     } else {
       // Session ended — disconnect and restore volume.
@@ -102,9 +101,8 @@
         lkConnectedGroup = null
         void c.disconnect()
       }
-      // Restore YT audio (unmute if the user hadn't muted themselves).
+      // Restore YT volume after talkover duck.
       if (player && !muted) {
-        player.unMute()
         player.setVolume(volume)
       }
     }
