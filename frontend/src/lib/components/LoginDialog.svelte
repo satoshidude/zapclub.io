@@ -219,7 +219,7 @@
         {:else}
           {#if qrSrc}
             <a class="qr-link" href={connectUri}>
-              <img class="qr" src={qrSrc} alt="QR" width="200" height="200" />
+              <img class="qr" src={qrSrc} alt="QR" width="160" height="160" />
             </a>
             <p class="hint">Scan with your signer app, or paste / scan a bunker:// link below.</p>
             <button class="copy-uri" onclick={copyUri} title={connectUri}>
@@ -329,8 +329,8 @@
     border: 1px solid var(--border);
   }
   .qr {
-    width: 200px;
-    height: 200px;
+    width: 160px;
+    height: 160px;
     border-radius: 8px;
     background: #fff;
     padding: 6px;
@@ -358,6 +358,7 @@
   }
   .bunker-in {
     width: 100%;
+    margin-top: 0.6rem;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
