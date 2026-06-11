@@ -274,7 +274,16 @@ export async function leaveStage(groupId?: string): Promise<void> {
  */
 export function clearStageView(leavingGroupId?: string): void {
   const me = auth.pubkey
-  if (me && leavingGroupId && leavingGroupId === myGroupId && hbTimer && state.djs[me]) {
+  // Preserve own entry in two cases:
+  // 1. SPA navigation: actively on stage (hbTimer running) in this club
+  // 2. Reload-resume: localStorage says we're on stage here but hbTimer not yet running
+  //    (happens when the subscription $effect re-runs after auth loads, before joinStage fires)
+  const keepOwn =
+    me &&
+    leavingGroupId &&
+    state.djs[me] &&
+    ((leavingGroupId === myGroupId && !!hbTimer) || persistedSince(leavingGroupId) !== null)
+  if (keepOwn) {
     const myEntry = state.djs[me]
     state.djs = { [me]: myEntry }
   } else {
