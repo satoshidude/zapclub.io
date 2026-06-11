@@ -3,6 +3,7 @@
   import { createPlayer, type YouTubePlayer } from '../../player/youtube'
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { liveSession } from '../../nostr/livesession.svelte'
+  import { auth } from '../../nostr/auth.svelte'
   import { connectLivekit, attachTrack, type LivekitClient } from '../../player/livekit'
   import { Track } from 'livekit-client'
 
@@ -92,6 +93,11 @@
             lkError = String((e as Error)?.message ?? e)
           }
         })()
+      }
+      // Publisher: LiveKit won't echo our own audio back via onRemoteTrack,
+      // so mute YT here directly when we are the live DJ.
+      if (session.mode === 'takeover' && session.dj === auth.pubkey && player) {
+        player.mute()
       }
       // Duck YT for talkover.
       if (session.mode === 'talkover' && player) {
