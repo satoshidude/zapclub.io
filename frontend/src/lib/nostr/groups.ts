@@ -654,7 +654,6 @@ export interface ClubSubHandlers {
   onZapBroadcast?: (ev: Event) => void
   onPlay?: (ev: Event) => void
   onEmote?: (ev: Event) => void
-  onLiveSession?: (ev: Event) => void
   onAutoDJ?: (ev: Event) => void
   onAutoDJCtrl?: (ev: Event) => void
 }
@@ -680,7 +679,6 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_ZAP_BROADCAST,
       KIND_FLOOR_REACTION,
       KIND_PLAY,
-      KIND_LIVE_SESSION,
       KIND_AUTODJ,
       KIND_AUTODJ_CTRL,
     ],
@@ -711,7 +709,6 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
       else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
       else if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
-      else if (ev.kind === KIND_LIVE_SESSION) h.onLiveSession?.(ev)
       else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
       else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
     },

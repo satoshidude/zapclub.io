@@ -12,7 +12,6 @@
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
-  import GoLiveButton from './GoLiveButton.svelte'
   import PremiumModal from '../PremiumModal.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
   import { playlists, loadMyPlaylists } from '../../nostr/playlists.svelte'
@@ -245,9 +244,6 @@
         <span class="ring">↩</span>
         <span class="nm">Leave</span>
       </button>
-    {/if}
-    {#if auth.canSign && isMember}
-      <GoLiveButton {groupId} />
     {/if}
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}

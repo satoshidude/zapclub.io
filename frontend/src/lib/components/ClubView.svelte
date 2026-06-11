@@ -38,7 +38,6 @@
   import { sync, ingestNowPlaying, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { ingestEmote, resetEmotes } from '../nostr/emotes.svelte'
-  import { ingestLiveSession, resetLiveSession } from '../nostr/livesession.svelte'
   import { ingestAutoDJ, ingestAutoCtrl, resetAutoDJ } from '../nostr/autodj.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
@@ -135,7 +134,6 @@
       onPlay: ingestPlay,
       onChat: ingestChat,
       onEmote: ingestEmote,
-      onLiveSession: ingestLiveSession,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
       onDeleteEvent: (ev) => {
@@ -168,7 +166,6 @@
       resetEmotes()
       resetZaps()
       resetPresence()
-      resetLiveSession()
       resetAutoDJ()
     }
   })
