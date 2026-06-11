@@ -57,9 +57,25 @@
   let liveVideoEl = $state<HTMLVideoElement | null>(null)
   let liveAudioEl = $state<HTMLAudioElement | null>(null)
   let lkError = $state('')
+  // Tracks that arrived before the video/audio element was mounted.
+  let pendingTracks = $state<RemoteTrack[]>([])
   let isTakeover = $derived(liveSession.current?.mode === 'takeover')
   let isTalkover = $derived(liveSession.current?.mode === 'talkover')
   const TALKOVER_DUCK_VOLUME = 15
+
+  // Attach any pending tracks when the video/audio element mounts.
+  $effect(() => {
+    const vid = liveVideoEl
+    const aud = liveAudioEl
+    if (!vid && !aud) return
+    const remaining: RemoteTrack[] = []
+    for (const t of pendingTracks) {
+      if (t.kind === Track.Kind.Video && vid) attachTrack(t, vid)
+      else if (t.kind === Track.Kind.Audio && aud) attachTrack(t, aud)
+      else remaining.push(t)
+    }
+    pendingTracks = remaining
+  })
 
   // React to live session changes.
   $effect(() => {
@@ -78,10 +94,12 @@
             lkClient = client
             lkConnectedGroup = gid
             client.onRemoteTrack(({ track }) => {
-              if (track.kind === Track.Kind.Video && liveVideoEl) {
-                attachTrack(track, liveVideoEl)
-              } else if (track.kind === Track.Kind.Audio && liveAudioEl) {
-                attachTrack(track, liveAudioEl)
+              if (track.kind === Track.Kind.Video) {
+                if (liveVideoEl) attachTrack(track, liveVideoEl)
+                else pendingTracks = [...pendingTracks, track]
+              } else if (track.kind === Track.Kind.Audio) {
+                if (liveAudioEl) attachTrack(track, liveAudioEl)
+                else pendingTracks = [...pendingTracks, track]
               }
             })
           } catch (e) {
@@ -99,6 +117,7 @@
         const c = lkClient
         lkClient = null
         lkConnectedGroup = null
+        pendingTracks = []
         void c.disconnect()
       }
       // Restore YT volume.

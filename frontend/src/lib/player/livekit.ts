@@ -77,15 +77,6 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
 
   let onRemoteCb: ((t: LivekitRemoteTrack) => void) | null = null
 
-  // Fire callback for tracks that are already subscribed when we join.
-  room.remoteParticipants.forEach((participant) => {
-    participant.trackPublications.forEach((pub) => {
-      if (pub.track && pub.isSubscribed) {
-        onRemoteCb?.({ track: pub.track as RemoteTrack, participant })
-      }
-    })
-  })
-
   room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
     onRemoteCb?.({ track, participant })
   })
@@ -94,6 +85,15 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
     room,
     onRemoteTrack(cb) {
       onRemoteCb = cb
+      // Replay tracks already subscribed before this callback was registered
+      // (publisher already in room when viewer joins).
+      room.remoteParticipants.forEach((participant) => {
+        participant.trackPublications.forEach((pub) => {
+          if (pub.track && pub.isSubscribed) {
+            cb({ track: pub.track as RemoteTrack, participant })
+          }
+        })
+      })
     },
     async publishLocal({ video }) {
       if (video) {
