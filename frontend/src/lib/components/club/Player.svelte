@@ -58,6 +58,7 @@
   let liveVideoEl = $state<HTMLVideoElement | null>(null)
   let liveAudioEl = $state<HTMLAudioElement | null>(null)
   let liveAudioMuted = $state(false)
+  let liveExpanded = $state(false)
   let lkError = $state('')
   let isTakeover = $derived(liveSession.current?.mode === 'takeover')
   let isTalkover = $derived(liveSession.current?.mode === 'talkover')
@@ -67,6 +68,10 @@
     if (!liveAudioEl) return
     liveAudioMuted = !liveAudioMuted
     liveAudioEl.muted = liveAudioMuted
+  }
+
+  function toggleLiveExpand() {
+    liveExpanded = !liveExpanded
   }
 
   // React to live session changes.
@@ -335,7 +340,7 @@
 
     <!-- Takeover: the DJ's live A/V feed replaces the YT frame. -->
     {#if isTakeover}
-      <div class="live-frame">
+      <div class="live-frame" class:live-frame-expanded={liveExpanded}>
         <!-- svelte-ignore a11y_media_has_caption -->
         <video bind:this={liveVideoEl} class="live-video" autoplay playsinline></video>
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -345,8 +350,8 @@
           <button class="live-ctrl" onclick={toggleLiveAudio} title={liveAudioMuted ? 'Unmute' : 'Mute'}>
             {liveAudioMuted ? '🔇' : '🔊'}
           </button>
-          <button class="live-ctrl" onclick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-            {isFullscreen ? '🡻' : '⛶'}
+          <button class="live-ctrl" onclick={toggleLiveExpand} title={liveExpanded ? 'Collapse' : 'Expand'}>
+            {liveExpanded ? '⊡' : '⊞'}
           </button>
         </div>
       </div>
@@ -654,6 +659,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .live-frame-expanded {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    border-radius: 0;
+  }
   .live-controls {
     position: absolute;
     bottom: 0.5rem;
@@ -664,7 +675,8 @@
     opacity: 0;
     transition: opacity 0.15s;
   }
-  .live-frame:hover .live-controls {
+  .live-frame:hover .live-controls,
+  .live-frame-expanded .live-controls {
     opacity: 1;
   }
   .live-ctrl {
