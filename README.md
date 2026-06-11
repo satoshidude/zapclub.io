@@ -30,7 +30,7 @@ a listener zaps sats straight to the DJ whose track is playing.
 
 | Role | Can do |
 |---|---|
-| **Owner** | Creates & edits the club (name, description, image, rules). Appoints moderators; skips tracks; removes DJs from the stage; bans members; is **always the master DJ** when on stage. |
+| **Owner** | Creates & edits the club (name, description, image, rules). Appoints moderators; skips tracks; removes DJs from the stage; bans members. Pinned as first in DJ rotation when on stage. |
 | **Moderator** | Keeps the club tidy: skip, remove a DJ, delete a message, kick a member. |
 | **DJ** | Any member can take a stage slot (Free clubs: up to 2; Premium clubs: up to 5), queue tracks, and earn zaps. |
 | **Member** | Joins an open club, listens in sync, chats. |
@@ -65,7 +65,7 @@ a listener zaps sats straight to the DJ whose track is playing.
 | DJs on stage | 2 | 5 |
 | Join / listen / chat / zap | ✓ | ✓ |
 | Entry-fee clubs | — | ✓ |
-| Private / invite-only clubs | — | ✓ *(coming soon)* |
+| Private / invite-only clubs | — | ✓ |
 | Featured in directory | — | ✓ |
 
 Limits are **relay-enforced** (Go `RejectEvent` hooks), not just client-side hints.

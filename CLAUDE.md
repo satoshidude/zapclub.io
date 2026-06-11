@@ -56,19 +56,18 @@ Zuhörer zappen den aktuell laufenden Track → der DJ verdient, das Voting wird
 									 └──────────────────┘
 ```
 
-**Sync-Strategie:** Pro Club schreibt genau **einer** das `now_playing` — der **Conductor**
-(ältester aktiver Bühnen-DJ, selbstheilend; Club-Besitzer auf der Bühne ist immer Master).
-Das vermeidet
-Last-Write-Wins auf dem replaceable Event bei bis zu 5 DJs. Der Conductor postet bei
-Track-Start ein `now_playing` mit `started_at` (Unix-ms) und Track-Ref. Clients berechnen
-die lokale Position aus `now() + offsetMs - started_at`, wobei `offsetMs = sent_at - now()`
-aus jedem Heartbeat neu kalibriert wird (Drift-Korrektur). Heartbeat alle ~8 s für
-Spätankömmlinge. **Achtung Zeiteinheiten:** Nostr `created_at` ist in **Sekunden**,
+**Sync-Strategie:** Pro Club schreibt genau **einer** das `now_playing` — das **Relay**
+(`conductor.go`, immer-an). Das Relay ist die einzige Zeitbehörde; Browser-DJs sind reine
+Konsumenten. Das vermeidet Last-Write-Wins auf dem replaceable Event bei bis zu 5 DJs.
+Clients berechnen die lokale Position aus `now() + offsetMs - started_at`, wobei
+`offsetMs = sent_at - now()` aus jedem Heartbeat neu kalibriert wird. Alle 5 s prüft der
+Client ob `|currentTime − target| > 3 s` und seekt nach (Threshold-Seek, max. Drift <5 s).
+Heartbeat alle ~15 s. **Achtung Zeiteinheiten:** Nostr `created_at` ist in **Sekunden**,
 `Date.now()` in **Millisekunden** — intern konsequent ms halten, beim Ingest `*1000`.
 
 ---
 
-## 4. Nostr-Datenmodell (geplant — Greenfield, noch nichts gebaut)
+## 4. Nostr-Datenmodell
 
 **Clubs = NIP-29 Relay-based Groups** (nicht der kind-30078-Entwurf).
 Das Relay (khatru + relay29) verwaltet Mitgliedschaft, Rollen und Moderation.
@@ -91,9 +90,10 @@ Clubs via `querySync({kinds:[39000]})` **ohne `#d`-Filter** (relay29 erlaubt glo
 Metadata-Listing by design). Neuer Club erscheint automatisch, sobald `9007`+`9002`
 akzeptiert sind; auf **≥1 Mitglied** filtern (leere Clubs ausblenden).
 
-### Zugang (MVP: nur offene Clubs)
-MVP: alle Clubs `open`+`public` → Beitritt via `9021` ohne Freigabe. Geschlossene/
-Einladungs-Clubs und bezahlter Eintritt (Sats-Gate, s. u.) sind Anschlusskonzepte.
+### Zugang
+Offene Clubs: `open`+`public` → Beitritt via `9021` ohne Freigabe. **Private / Einladungs-Clubs**
+(`closed`+`private`, relay29-Flags, `privategate.go`) und **bezahlter Eintritt** (Sats-Gate,
+`entryfee.go`) sind beide live — Premium-Feature (s. §6).
 
 ### Moderation (MVP)
 - **Skip** (aktuellen Track überspringen): erlaubt für **Conductor _und_ Owner/Moderator**
@@ -173,10 +173,10 @@ der Bühne senden presence **persistent** (stage.svelte.ts `hbTimer`-Layer, unab
 Club-View) — d.h. ein DJ der zur Startseite navigiert bleibt "online". Presence-Fenster:
 condOnlineMS=50 s; Offline-DJ-Guard greift wenn kein Beat innerhalb dieser Zeit kam.
 
-### zap-vote (später, selektiv aus playlister portieren)
+### zap-vote (✅ live)
 NIP-57 Zap-Receipt mit `h`-Tag auf Club + Referenz aufs now_playing; Empfänger = `p`-Tag
 (aktueller DJ). NWC (NIP-47) via `@getalby/sdk` + bitcoin-connect; Score aus verifizierten
-9735-Receipts. In playlister bereits gebaut.
+9735-Receipts.
 
 ### Sats-Eintritts-Gate (✅ live, Premium-Feature)
 Bezahlter Club-Eintritt (Preis + Zapper-Key in Club-Config, Beitritt nur gegen gültiges
@@ -190,11 +190,11 @@ eine zusätzliche Relay-Prüfung davor, ohne das Datenmodell zu ändern.
 
 - **Frontend:** Svelte 5 (Runes) + Vite + TS. `nostr-tools` für Events/Signing/Subscriptions.
 - **Login:** `nostr-login` (NIP-07/NIP-46/Read-Only) + nstart-Onboarding.
-- **Zaps (später, selektiv portieren):** `@getalby/sdk` + bitcoin-connect (NWC/NIP-47) für
-  NIP-57-Flows.
+- **Zaps:** `@getalby/sdk` + bitcoin-connect (NWC/NIP-47) für NIP-57-Flows. Live.
 - **Realtime:** eigenes **NIP-29-Relay** (khatru + relay29, Go, badger),
-  `wss://relay.zapclub.io`. Quelle in `relay/` (aus playlister portieren). Details → §7.
-- **Audio (MVP):** YouTube IFrame API, Conductor als Zeit-Autorität.
+  `wss://relay.zapclub.io`. Quelle in `relay/`. Details → §7.
+- **Audio:** YouTube IFrame API; Relay ist Zeitbehörde (`conductor.go`); Client lädt an
+  kalibrierter Position und korrigiert >3 s Drift alle 5 s (Threshold-Seek).
 - **Hosting:** statisches Frontend auf `zapclub.io` (Caddy), Relay daneben.
 - **Profile (kind 0)** leben im offenen Nostr-Netz (öffentliche Relays), nicht auf dem
   NIP-29-Relay. **Keine** zentrale User-DB, **kein** Tracking.
@@ -298,7 +298,7 @@ für alle User laufen. Es trägt alle Club-Events (NIP-29), `now_playing`, Chat,
 **✅ MVP + P1 + Monetarisierung — alles live (Stand Juni 2026):**
 - Nostr-Login (NIP-07/46/Read-Only), Club erstellen/betreten (offene Clubs)
 - Club-Verzeichnis (Top-3 + All), Bühne (Free: 2 / Premium: 5 DJs), Round-Robin, synchroner YT-Playback
-- Conductor + Owner-Master, Stop→Platzhalter
+- Relay-Conductor (`conductor.go`, immer-an), Stop→Platzhalter; Offline-DJ-Guard (1313 Played-Set + 20100 Presence-Gate); Drift-Correction (Client Threshold-Seek)
 - Moderation: Skip, DJ werfen, Ban (relay), Mods ernennen
 - Chat (kind 9), Avatare (npub/NIP-05)
 - Zaps (NIP-57/NWC) — Track-Voting + Score + Leaderboard, NWC-Zahlung via bitcoin-connect
