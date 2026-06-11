@@ -96,21 +96,13 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
       onRemoteCb = cb
     },
     async publishLocal({ video }) {
-      try {
-        await room.localParticipant.setMicrophoneEnabled(true)
-      } catch (e) {
-        const msg = (e as Error)?.message ?? ''
-        if (msg.includes('not found') || msg.includes('NotFound') || msg.includes('Requested device'))
-          throw new Error('Microphone not found — check browser permissions and that your mic is connected.')
-        throw e
-      }
       if (video) {
         try {
           await room.localParticipant.setCameraEnabled(true)
         } catch (e) {
           const msg = (e as Error)?.message ?? ''
           if (msg.includes('not found') || msg.includes('NotFound') || msg.includes('Requested device'))
-            throw new Error('Camera not found. Using OBS Virtual Camera? Start it in OBS first, then use Chrome (Safari does not support virtual cameras).')
+            throw new Error('Camera not found. Make sure your camera is connected and the browser has permission to use it.')
           throw e
         }
       }
