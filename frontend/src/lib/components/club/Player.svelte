@@ -82,6 +82,8 @@
                 attachTrack(track, liveVideoEl)
               } else if (track.kind === Track.Kind.Audio && liveAudioEl) {
                 attachTrack(track, liveAudioEl)
+                // LiveKit audio is live — mute YT to avoid double audio.
+                if (player) player.mute()
               }
             })
           } catch (e) {
@@ -89,7 +91,7 @@
           }
         })()
       }
-      // Duck YT for talkover; takeover keeps YT audio (video-only stream, music continues).
+      // Duck YT for talkover.
       if (session.mode === 'talkover' && player) {
         player.setVolume(TALKOVER_DUCK_VOLUME)
       }
@@ -101,8 +103,9 @@
         lkConnectedGroup = null
         void c.disconnect()
       }
-      // Restore YT volume after talkover duck.
+      // Restore YT audio (unmute + volume if user hadn't manually muted).
       if (player && !muted) {
+        player.unMute()
         player.setVolume(volume)
       }
     }

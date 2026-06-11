@@ -27,7 +27,7 @@
     try {
       await goLive(groupId, 'takeover', 'av')
       const c = await connectLivekit(groupId)
-      await c.publishLocal({ video: true })
+      await c.publishLocal({ video: true, audio: true })
       client = c
       step = 'live'
     } catch (e) {

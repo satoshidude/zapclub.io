@@ -27,8 +27,8 @@ export interface LivekitRemoteTrack {
 export interface LivekitClient {
   /** Attach a callback for new remote tracks (audio or video). */
   onRemoteTrack: (cb: (t: LivekitRemoteTrack) => void) => void
-  /** Start publishing microphone (and optionally camera). */
-  publishLocal: (opts: { video: boolean }) => Promise<void>
+  /** Start publishing camera and/or microphone. Audio failures are non-fatal. */
+  publishLocal: (opts: { video: boolean; audio?: boolean }) => Promise<void>
   /** Stop publishing — leaves the room if only publishing. */
   stopPublishing: () => Promise<void>
   /** Disconnect fully and release all resources. */
@@ -95,7 +95,7 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
         })
       })
     },
-    async publishLocal({ video }) {
+    async publishLocal({ video, audio }) {
       if (video) {
         try {
           await room.localParticipant.setCameraEnabled(true)
@@ -104,6 +104,13 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
           if (msg.includes('not found') || msg.includes('NotFound') || msg.includes('Requested device'))
             throw new Error('Camera not found. Make sure your camera is connected and the browser has permission to use it.')
           throw e
+        }
+      }
+      if (audio) {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(true)
+        } catch {
+          // Mic unavailable → continue video-only, don't fail the whole go-live.
         }
       }
     },
