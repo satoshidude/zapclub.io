@@ -661,11 +661,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 
 	// Not playing yet → bootstrap from the round-robin.
 	if !pb.playing {
+		log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
 	// Orphan guard: the playing DJ left the stage → move on.
 	if pb.dj != "" && indexOf(djPks, pb.dj) < 0 {
+		log.Printf("conductor [%.8s] advance reason=orphan dj=%.8s", club, pb.dj)
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
@@ -674,6 +676,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	// When the session ends/goes stale, resume with one advance() from the current position.
 	if wasTakeover, resuming := c.takeoverState(ctx, club, djPks, pb, now); wasTakeover {
 		if resuming {
+			log.Printf("conductor [%.8s] advance reason=takeover-end", club)
 			// Session just ended → clean resume from current round-robin position.
 			c.advance(ctx, club, djPks, queues, pb, now)
 		}
@@ -681,11 +684,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	}
 	// Skip requested (kind 30107, owner/mod/playing-DJ — validated in skipRequested).
 	if c.skipRequested(ctx, club, pb) {
+		log.Printf("conductor [%.8s] advance reason=skip pos=%d", club, pb.pos)
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
 	// Track reported unplayable (kind 20102) by an authorized user or a quorum of members.
 	if c.brokenSkip(club, pb, now) {
+		log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
@@ -695,6 +700,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 		dur = condMaxTrackFallbackS
 	}
 	if (now-pb.startedAt)/1000 >= int64(dur) {
+		log.Printf("conductor [%.8s] advance reason=duration elapsed=%ds dur=%ds vid=%s", club, (now-pb.startedAt)/1000, dur, pb.videoID)
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
@@ -715,20 +721,24 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.stop(pb)
 		return
 	}
-	di, ti := fairNext(djPks, pb.dj, c.matrix(djPks, queues, pb, club, now))
+	mat := c.matrix(djPks, queues, pb, club, now)
+	di, ti := fairNext(djPks, pb.dj, mat)
 	if di == -1 {
 		// Every DJ's queue is fully played-off (or empty) → stop to the lobby. No auto-loop: a set
 		// plays through once, then the lobby runs until a DJ adds / re-activates tracks.
+		log.Printf("conductor [%.8s] stop: no playable track djs=%d", club, len(djPks))
 		c.stop(pb)
 		return
 	}
 	tracks := queues[djPks[di]]
 	if ti >= len(tracks) {
+		log.Printf("conductor [%.8s] stop: track index out of range di=%d ti=%d", club, di, ti)
 		c.stop(pb)
 		return
 	}
 	t := tracks[ti]
 	pb.pos++
+	log.Printf("conductor [%.8s] play pos=%d dj=%.8s vid=%s dur=%d", club, pb.pos, djPks[di], t.videoID, t.duration)
 	pb.dj = djPks[di]
 	pb.videoID = t.videoID
 	pb.title = t.title
