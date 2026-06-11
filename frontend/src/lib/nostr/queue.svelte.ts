@@ -47,12 +47,17 @@ function parseTracks(ev: Event): QueueTrack[] {
  *  never regresses their state (newest created_at wins) — safe to re-ingest from the poll. */
 export function ingestQueue(ev: Event): void {
   const prev = state.byDj[ev.pubkey]
-  if (prev && ev.created_at < prev.updatedAt) return
+  if (prev && ev.created_at < prev.updatedAt) {
+    console.log(`[zc:queue] ingest: skip old ${ev.pubkey.slice(0, 8)}`)
+    return
+  }
+  const tracks = parseTracks(ev)
   state.byDj[ev.pubkey] = {
     dj: ev.pubkey,
-    tracks: parseTracks(ev),
+    tracks,
     updatedAt: ev.created_at,
   }
+  console.log(`[zc:queue] ingest: ${ev.pubkey.slice(0, 8)} tracks=${tracks.length} active=${tracks.filter((t) => t.active !== false).length}`)
 }
 
 // ── reliable queue re-sync ──────────────────────────────────────────────────
@@ -72,11 +77,13 @@ let syncing = false
 export async function refreshQueues(groupId: string): Promise<void> {
   if (syncing) return
   syncing = true
+  console.log(`[zc:queue] refresh: ${groupId.slice(0, 8)}`)
   try {
     const events = await fetchClubQueues(groupId)
     for (const ev of events) ingestQueue(ev)
+    console.log(`[zc:queue] refresh: done ${events.length} queues`)
   } catch {
-    /* transient relay/network error — the next tick retries */
+    console.log('[zc:queue] refresh: error')
   } finally {
     syncing = false
   }
@@ -85,6 +92,7 @@ export async function refreshQueues(groupId: string): Promise<void> {
 /** Start the periodic queue re-sync for a club (immediate refresh + interval). Idempotent. */
 export function startQueueSync(groupId: string): void {
   if (syncGroup === groupId && syncTimer) return
+  console.log(`[zc:queue] startSync: ${groupId.slice(0, 8)}`)
   stopQueueSync()
   syncGroup = groupId
   void refreshQueues(groupId)

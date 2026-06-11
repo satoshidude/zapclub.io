@@ -43,12 +43,14 @@ export const auth = {
 }
 
 export function setLoggedIn(pubkey: string, method: LoginMethod): void {
+  console.log(`[zc:auth] login: ${pubkey.slice(0, 8)} method=${method}`)
   state.pubkey = pubkey
   state.npub = npubEncode(pubkey)
   state.method = method
 }
 
 export function setLoggedOut(): void {
+  console.log(`[zc:auth] logout: ${state.pubkey?.slice(0, 8) ?? 'none'}`)
   state.pubkey = null
   state.npub = null
   state.method = null

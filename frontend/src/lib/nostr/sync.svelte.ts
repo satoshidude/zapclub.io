@@ -30,9 +30,17 @@ const state = $state<SyncState>({ np: null, offsetMs: 0, now: Date.now() })
 
 // Reactive clock: without incoming events, `live` must still flip to the lobby once the relay
 // goes silent. A plain Date.now() in the getter wouldn't be reactive.
+let _npWasFresh: boolean | null = null
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     state.now = Date.now()
+    const np = state.np
+    const fresh = !!np && state.now - np.sentAt <= LIVE_STALE_MS
+    if (_npWasFresh !== null && _npWasFresh !== fresh) {
+      if (!fresh) console.log(`[zc:sync] now_playing→STALE age=${np ? Math.round((state.now - np.sentAt) / 1000) : '?'}s track=${np?.videoId}`)
+      else console.log('[zc:sync] now_playing→fresh')
+    }
+    _npWasFresh = fresh
   }, 5000)
 }
 
@@ -81,8 +89,12 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
 export function ingestNowPlaying(ev: Event): void {
   const np = parseNowPlaying(ev)
   if (!np) return
-  if (state.np && np.sentAt < state.np.sentAt) return
+  if (state.np && np.sentAt < state.np.sentAt) {
+    console.log(`[zc:sync] drop old np sentAt=${np.sentAt} cur=${state.np.sentAt} track=${np.videoId}`)
+    return
+  }
   if (np.sentAt > 0) state.offsetMs = np.sentAt - Date.now()
+  console.log(`[zc:sync] now_playing: ${np.videoId} pos=${np.pos} status=${np.status} offset=${Math.round(state.offsetMs)}ms sentAt=${np.sentAt}`)
   state.np = np
 }
 
@@ -177,6 +189,7 @@ export function onTrackError(groupId: string, videoId: string): void {
 }
 
 export function resetSync(): void {
+  console.log('[zc:sync] reset')
   state.np = null
   state.offsetMs = 0
 }

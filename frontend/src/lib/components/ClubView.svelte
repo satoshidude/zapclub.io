@@ -100,6 +100,7 @@
 
   $effect(() => {
     const id = groupId
+    console.log(`[zc:club] subscribe: ${id.slice(0, 8)} auth=${auth.pubkey?.slice(0, 8) ?? 'none'}`)
     club = null
     members = []
     admins = []
@@ -118,8 +119,9 @@
       // an on-stage DJ's now_playing as a transition fallback for any not-yet-migrated event;
       // a rogue non-DJ member can't steer playback.)
       onNowPlaying: (ev) => {
-        if (ev.pubkey === CLUB_RELAY_PUBKEY || stage.djs.length === 0 || stage.isOnStage(ev.pubkey))
-          ingestNowPlaying(ev)
+        const ok = ev.pubkey === CLUB_RELAY_PUBKEY || stage.djs.length === 0 || stage.isOnStage(ev.pubkey)
+        if (!ok) { console.log(`[zc:club] onNowPlaying: drop non-conductor ${ev.pubkey.slice(0, 8)}`); return }
+        ingestNowPlaying(ev)
       },
       onStage: ingestStage,
       onStageKick: (ev) => {
@@ -156,6 +158,7 @@
     startPlayLogSync(id)
 
     return () => {
+      console.log(`[zc:club] cleanup: ${id.slice(0, 8)}`)
       stop()
       stopQueueSync()
       stopPlayLogSync()
@@ -235,6 +238,7 @@
   $effect(() => {
     if (stageResumed || !auth.canSign) return
     if (persistedStageGroup() !== groupId) return
+    console.log(`[zc:club] reload-resume: joining ${groupId.slice(0, 8)}`)
     stageResumed = true
     void joinStage(groupId)
   })
