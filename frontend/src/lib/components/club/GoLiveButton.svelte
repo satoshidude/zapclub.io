@@ -11,12 +11,14 @@
   type Step = 'idle' | 'connecting' | 'live' | 'error'
   let step = $state<Step>('idle')
   let err = $state('')
+  let hasAudio = $state(false)
   let client = $state<LivekitClient | null>(null)
 
   // If the relay ended our session (e.g. another client took over), reset.
   $effect(() => {
     if (step === 'live' && !iAmLive) {
       step = 'idle'
+      hasAudio = false
       if (client) { void client.disconnect(); client = null }
     }
   })
@@ -27,7 +29,8 @@
     try {
       await goLive(groupId, 'takeover', 'av')
       const c = await connectLivekit(groupId)
-      await c.publishLocal({ video: true, audio: true })
+      const result = await c.publishLocal({ video: true, audio: true })
+      hasAudio = result.hasAudio
       client = c
       step = 'live'
     } catch (e) {
@@ -42,6 +45,7 @@
     await endLive(groupId)
     if (client) { void client.disconnect(); client = null }
     step = 'idle'
+    hasAudio = false
   }
 
   function dismiss() {
@@ -57,8 +61,8 @@
 {:else if step === 'connecting'}
   <button class="btn-live" disabled>Connecting…</button>
 {:else if step === 'live'}
-  <button class="btn-live btn-live-on" onclick={stopLive}>
-    ● Live — Go offline
+  <button class="btn-live btn-live-on" onclick={stopLive} title={hasAudio ? '' : 'No microphone — video only'}>
+    ● Live{hasAudio ? '' : ' (no mic)'} — Go offline
   </button>
 {:else if step === 'error'}
   <div class="live-wrap">

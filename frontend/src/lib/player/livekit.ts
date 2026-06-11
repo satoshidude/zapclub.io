@@ -27,8 +27,8 @@ export interface LivekitRemoteTrack {
 export interface LivekitClient {
   /** Attach a callback for new remote tracks (audio or video). */
   onRemoteTrack: (cb: (t: LivekitRemoteTrack) => void) => void
-  /** Start publishing camera and/or microphone. Audio failures are non-fatal. */
-  publishLocal: (opts: { video: boolean; audio?: boolean }) => Promise<void>
+  /** Start publishing camera and/or microphone. Returns whether audio was captured. Audio failures are non-fatal. */
+  publishLocal: (opts: { video: boolean; audio?: boolean }) => Promise<{ hasAudio: boolean }>
   /** Stop publishing — leaves the room if only publishing. */
   stopPublishing: () => Promise<void>
   /** Disconnect fully and release all resources. */
@@ -106,13 +106,16 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
           throw e
         }
       }
+      let hasAudio = false
       if (audio) {
         try {
           await room.localParticipant.setMicrophoneEnabled(true)
+          hasAudio = true
         } catch (e) {
           console.warn('[zapclub] mic unavailable, video-only:', e)
         }
       }
+      return { hasAudio }
     },
     async stopPublishing() {
       await room.localParticipant.setMicrophoneEnabled(false)
