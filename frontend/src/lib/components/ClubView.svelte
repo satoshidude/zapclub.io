@@ -159,7 +159,8 @@
       resetSync()
       // Only clear the stage DISPLAY — keep my own presence + heartbeat so navigating
       // doesn't drop me off the stage (WebKit). Full reset happens on logout.
-      clearStageView()
+      // Pass the group we're leaving so my own entry is preserved on re-entry.
+      clearStageView(id)
       resetQueues()
       resetPlayLog()
       resetChat()

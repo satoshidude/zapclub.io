@@ -72,6 +72,21 @@ interface StageState {
 
 const state = $state<StageState>({ djs: {}, kicks: {}, tick: 0 })
 
+// Pre-populate the current user's stage entry from localStorage before auth loads.
+// This prevents a flash of "off-stage" during page reload while the signer is still loading
+// and the 30102 subscription is refetching. The subscription will confirm/overwrite shortly.
+;(function seedMyStage() {
+  try {
+    const raw = localStorage.getItem(ONSTAGE_KEY)
+    if (!raw) return
+    const o = JSON.parse(raw)
+    if (!o?.pubkey || !o?.group || typeof o.since !== 'number') return
+    state.djs[o.pubkey] = { since: o.since, lastSeen: Date.now(), on: true }
+  } catch {
+    /* ignore */
+  }
+})()
+
 let tickTimer: ReturnType<typeof setInterval> | null = null
 function ensureTicking(): void {
   if (tickTimer) return
@@ -220,9 +235,19 @@ export async function leaveStage(groupId?: string): Promise<void> {
  * between clubs. Crucially does NOT post 'off' and does NOT stop the heartbeat, so you
  * stay on your current stage while browsing around (sticky until you switch stages or log
  * out). Without this, leaving the club view dropped you off the stage (visible on WebKit).
+ *
+ * Pass `leavingGroupId` (the club you're navigating away from). If the user is actively
+ * on stage in that club (hbTimer running), their own entry is preserved so re-entering
+ * the same club shows them on stage immediately (no flash while subscription refetches).
  */
-export function clearStageView(): void {
-  state.djs = {}
+export function clearStageView(leavingGroupId?: string): void {
+  const me = auth.pubkey
+  if (me && leavingGroupId && leavingGroupId === myGroupId && hbTimer && state.djs[me]) {
+    const myEntry = state.djs[me]
+    state.djs = { [me]: myEntry }
+  } else {
+    state.djs = {}
+  }
   state.kicks = {}
 }
 
