@@ -17,6 +17,7 @@
     parseOwner,
     shareNote,
   } from '../nostr/groups'
+  import { untrack } from 'svelte'
   import { goUser } from '../router.svelte'
   import { auth } from '../nostr/auth.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
@@ -105,7 +106,7 @@
     configEvs = {}
     stageResumed = false
     const me = auth.pubkey
-    seedStageFromCache(id)
+    untrack(() => seedStageFromCache(id))
     const stop = subscribeClub(id, {
       onMeta: (ev) => (club = parseClubMetadata(ev)),
       onMembers: (ev) => (members = parseMembers(ev)),
