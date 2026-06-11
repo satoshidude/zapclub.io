@@ -117,6 +117,7 @@
   let showClubCreate = $state(false)
   let clubName = $state('')
   let clubAbout = $state('')
+  let createPrivate = $state(false)
   let clubCreating = $state(false)
   let clubCreateErr = $state('')
 
@@ -127,9 +128,13 @@
     clubCreating = true
     clubCreateErr = ''
     try {
-      const id = await createClub({ name: clubName.trim(), about: clubAbout.trim() || undefined })
+      const id = await createClub(
+        { name: clubName.trim(), about: clubAbout.trim() || undefined },
+        { private: createPrivate },
+      )
       clubName = ''
       clubAbout = ''
+      createPrivate = false
       showClubCreate = false
       goClub(id)
     } catch (e) {
@@ -529,6 +534,18 @@
         <label class="fld">About (optional)
           <textarea class="in" bind:value={clubAbout} rows="2" maxlength="280" placeholder="What's this club about?"></textarea>
         </label>
+        <div class="field-row">
+          {#if ownPremium.active}
+            <label class="toggle-label">
+              <input type="checkbox" bind:checked={createPrivate} />
+              🔒 Private (invite-only, hidden from non-members)
+            </label>
+          {:else}
+            <button type="button" class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
+              🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
+            </button>
+          {/if}
+        </div>
         {#if clubCreateErr}<p class="err">{clubCreateErr}</p>{/if}
         <button class="btn btn-primary btn-sm" disabled={!clubName.trim() || clubCreating}>
           {clubCreating ? 'Creating…' : 'Create club'}
@@ -1161,6 +1178,44 @@
     flex-direction: column;
     gap: 0.6rem;
     margin-top: 0.7rem;
+  }
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle-label input[type="checkbox"] {
+    accent-color: var(--accent-2);
+    cursor: pointer;
+  }
+  .toggle-upsell {
+    background: none;
+    border: none;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    opacity: 0.6;
+  }
+  .toggle-upsell:hover { opacity: 1; }
+  .prem-tag {
+    font-size: 0.75rem;
+    color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 12%, transparent);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
   }
   .club-list {
     display: flex;

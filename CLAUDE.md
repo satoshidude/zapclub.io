@@ -33,7 +33,7 @@ Zuhörer zappen den aktuell laufenden Track → der DJ verdient, das Voting wird
 | Zap-Voting | NIP-57 Zap auf aktuellen Track → Animation + Score; NWC-Zahlung | ✅ live |
 | Entry-fee Clubs | Sats-Gate relay-erzwungen (`entryfee.go`), Premium-Feature | ✅ live |
 | Freemium / Premium | 2.100 sats/Monat; relay-seitige Limits; NIP-57-Verifizierung | ✅ live |
-| Private / Einladungs-Clubs | closed+private (relay29), Premium-Feature | 🔧 geplant |
+| Private / Einladungs-Clubs | closed+private (relay29), Premium-Feature | ✅ live |
 | Folgen (Clubs/DJs) | Social-Graph, NIP-51-Listen | Phase 2 |
 
 ## 3. Architektur
@@ -209,7 +209,7 @@ Die Limits sind **relay-seitig** erzwungen (RejectEvent-Hooks in Go), nicht nur 
 | DJs auf der Bühne (kind 30102) | 2 | 5 |
 | Clubs joinen / hören / chatten | unbegrenzt | unbegrenzt |
 | Zaps senden & empfangen | ✓ | ✓ |
-| Private / Einladungs-Clubs | — | ✓ (geplant) |
+| Private / Einladungs-Clubs | — | ✓ |
 | Entry-fee Clubs (Sats-Gate) | — | ✓ |
 | Featured Listing im Verzeichnis | — | ✓ |
 
@@ -299,10 +299,8 @@ für alle User laufen. Es trägt alle Club-Events (NIP-29), `now_playing`, Chat,
 - Entry-fee Clubs (`entryfee.go`, relay-erzwungen), Premium-Feature
 - Freemium-Modell: 2.100 sats/Monat, relay-seitige Limits, NIP-57-Verifizierung
 - Playlist-Verwaltung (kind 30104, 1 free / unbegrenzt Premium)
-
-**🔧 Nächstes Feature:**
-- **Private / Einladungs-Clubs** (`closed`+`private` relay29-Flags, Premium) — Plan liegt vor.
-  Relay-Gate (`privategate.go`), Frontend-Toggle, Request+Approve+Invite-Flow.
+- Private / Einladungs-Clubs (`closed`+`private` relay29-Flags, Premium) — `privategate.go`,
+  Request+Approve+Invite-Flow, Premium-gated Toggle bei Club-Erstellung
 
 **Phase 2 — Social-Graph (Folgen):**
 - Club folgen: NIP-51 `kind 10009` (user-groups), getrennt von Membership.

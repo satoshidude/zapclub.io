@@ -135,9 +135,10 @@ heartbeat; when no DJ is active or the queue is empty, the stream stops and a
 
 A single integer `pos` on `now_playing` indexes the whole club set across `n`
 staged DJs: `djIndex = pos % n`, `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0,
-… dj0.t1, …`. A "playable" matrix masks out already-played tracks, tracks marked
-`off`, and DJs who aren't present (no recent `20100` presence beat); `advance()`
-walks to the next playable slot. It's O(1) and the 5-DJ cap is purely a UI limit.
+… dj0.t1, …`. A "playable" matrix masks out tracks marked `off` and the currently-playing
+track; `advance()` walks to the next playable slot. (Presence beats `20100`
+determine whether a club has active DJs at all — they don't filter individual
+tracks inside the matrix.) It's O(1) and the 5-DJ cap is purely a UI limit.
 DJ order is deterministic across all clients because it's sorted by the persisted
 `since` from each `30102`; a stage slot stays **sticky for ~1 h** after the last
 heartbeat so a reload or brief drop doesn't bump a DJ. (When the owner is on stage

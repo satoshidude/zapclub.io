@@ -1,31 +1,20 @@
 <script lang="ts">
-  import { listClubs, createClub, joinClub, fetchLiveClubIds, type MyClub } from '../nostr/groups'
+  import { listClubs, joinClub, fetchLiveClubIds, type MyClub } from '../nostr/groups'
   import { fetchMyClubs } from '../nostr/groups'
-  import { goClub, goUser, goLeaderboard } from '../router.svelte'
+  import { goClub, goUser } from '../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
-  import { fetchLeaderboard, type LeaderboardEntry } from '../nostr/leaderboard'
   import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
   import { ownPremium } from '../nostr/premium.svelte'
-  import PremiumModal from './PremiumModal.svelte'
 
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
-  let topDjs = $state<LeaderboardEntry[]>([])
   let liveClubIds = $state<Set<string>>(new Set())
   let loading = $state(true)
   let error = $state('')
-
-  // Create-club form
-  let showCreate = $state(false)
-  let name = $state('')
-  let about = $state('')
-  let privateClub = $state(false)
-  let creating = $state(false)
-  let showPremModal = $state(false)
 
   const myIds = $derived(new Set(myClubs.map((c) => c.id)))
   let showAllClubs = $state(false)
@@ -52,31 +41,7 @@
     } finally {
       loading = false
     }
-    // Top-zapped DJs block + which clubs are live right now (green border) — best-effort.
-    void fetchLeaderboard().then((r) => (topDjs = r.top.slice(0, 5)))
     void fetchLiveClubIds(clubs.map((c) => c.id)).then((s) => (liveClubIds = s))
-  }
-
-  async function create() {
-    if (!name.trim()) return
-    creating = true
-    error = ''
-    try {
-      const id = await createClub(
-        { name: name.trim(), about: about.trim() || undefined },
-        { private: privateClub },
-      )
-      // Creator is auto-admin + member; jump straight into the new club.
-      name = ''
-      about = ''
-      privateClub = false
-      showCreate = false
-      goClub(id)
-    } catch (e) {
-      error = String((e as Error)?.message ?? e)
-    } finally {
-      creating = false
-    }
   }
 
   async function join(id: string, ev: MouseEvent) {
@@ -159,51 +124,6 @@
       </button>
     {/if}
   {/if}
-
-  {#if showPremModal}
-    <PremiumModal onClose={() => (showPremModal = false)} />
-  {/if}
-
-  {#if topDjs.length}
-    <section class="top-djs">
-      <h2>🏆 Top DJs</h2>
-      <!-- Podium: #2 left · #1 center · #3 right -->
-      {#if topDjs.length >= 3}
-        <div class="podium">
-          {#each [topDjs[1], topDjs[0], topDjs[2]] as e, pi (e.pubkey)}
-            {@const p = useProfile(e.pubkey)}
-            {@const npub = npubEncode(e.pubkey)}
-            {@const isFirst = e.rank === 1}
-            {@const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}
-            <button class="pod-slot" class:pod-first={isFirst} onclick={() => goUser(npub)}>
-              <span class="pod-medal">{medal}</span>
-              <img class="pod-av" src={avatarUrl(e.pubkey, p)} alt=""
-                width={isFirst ? 52 : 40} height={isFirst ? 52 : 40} />
-              <span class="pod-name">{displayName(e.pubkey, p)}</span>
-              <span class="pod-sats">⚡ {e.sats.toLocaleString()}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-      <!-- Ranks #4 and #5 as compact rows -->
-      {#if topDjs.length > 3}
-        <div class="board-rows">
-          {#each topDjs.slice(3) as e (e.pubkey)}
-            {@const p = useProfile(e.pubkey)}
-            {@const npub = npubEncode(e.pubkey)}
-            <button class="board-row" onclick={() => goUser(npub)}>
-              <span class="b-rank">#{e.rank}</span>
-              <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-              <span class="b-name">{displayName(e.pubkey, p)}</span>
-              <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
-              <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-      <button class="all-clubs-link leaderboard-link" onclick={goLeaderboard}>Full leaderboard →</button>
-    </section>
-  {/if}
 </div>
 
 <style>
@@ -277,138 +197,6 @@
     letter-spacing: 0.01em;
   }
   .all-clubs-link:hover { text-decoration: underline; }
-  .leaderboard-link {
-    margin-top: 1rem;
-    color: var(--text-dim);
-    font-weight: 600;
-  }
-  /* Top zapped DJs — its own block, below the clubs list. */
-  .top-djs {
-    margin-top: 2rem;
-  }
-  .top-djs h2 {
-    margin: 0 0 1rem;
-    font-size: 1.3rem;
-  }
-  /* Podium: #2 left, #1 center (tallest), #3 right */
-  .podium {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 0.5rem;
-    margin-bottom: 0.6rem;
-    align-items: end;
-  }
-  .pod-slot {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.8rem 0.5rem 0.7rem;
-    cursor: pointer;
-    color: var(--text);
-    transition: border-color 0.15s ease, transform 0.08s ease;
-    text-align: center;
-  }
-  .pod-slot:hover { border-color: var(--accent-2); }
-  .pod-slot:active { transform: translateY(1px); }
-  .pod-slot.pod-first {
-    border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
-    background: radial-gradient(120% 140% at 50% 0%, rgba(245,166,35,0.13) 0%, transparent 65%), var(--bg-elev);
-    padding-top: 1.1rem;
-    padding-bottom: 0.9rem;
-  }
-  .pod-medal {
-    font-size: 1.2rem;
-    line-height: 1;
-  }
-  .pod-first .pod-medal { font-size: 1.5rem; }
-  .pod-av {
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-    border: 2px solid var(--border);
-  }
-  .pod-first .pod-av { border-color: var(--amber); }
-  .pod-name {
-    font-weight: 700;
-    font-size: 0.8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-  .pod-first .pod-name { font-size: 0.95rem; }
-  .pod-sats {
-    color: var(--amber);
-    font-weight: 800;
-    font-size: 0.76rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .pod-first .pod-sats { font-size: 0.88rem; }
-  .board-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .board-row {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.45rem 0.9rem 0.45rem 0.6rem;
-    cursor: pointer;
-    color: var(--text);
-    transition: border-color 0.15s ease, transform 0.08s ease;
-  }
-  .board-row:hover { border-color: var(--accent-2); }
-  .board-row:active { transform: translateY(1px); }
-  .b-rank {
-    flex: 0 0 auto;
-    min-width: 1.8rem;
-    text-align: center;
-    font-size: 0.9rem;
-    font-weight: 800;
-    color: var(--text-dim);
-  }
-  .b-av {
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-  }
-  .b-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 700;
-    font-size: 0.88rem;
-  }
-  .b-from {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    font-size: 0.74rem;
-  }
-  .b-sats {
-    flex: 0 0 auto;
-    color: var(--amber);
-    font-weight: 800;
-    font-size: 0.85rem;
-    font-variant-numeric: tabular-nums;
-    min-width: 4.5rem;
-    text-align: right;
-  }
-  @media (max-width: 460px) {
-    .b-from { display: none; }
-  }
   .head {
     display: flex;
     align-items: center;
@@ -424,47 +212,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1rem;
-  }
-  .create {
-    margin-bottom: 1.2rem;
-  }
-  .field-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    cursor: pointer;
-    user-select: none;
-  }
-  .toggle-label input[type="checkbox"] {
-    accent-color: var(--accent-2);
-    cursor: pointer;
-  }
-  .toggle-upsell {
-    background: none;
-    border: none;
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    opacity: 0.6;
-  }
-  .toggle-upsell:hover { opacity: 1; }
-  .prem-tag {
-    font-size: 0.75rem;
-    color: var(--amber);
-    background: color-mix(in srgb, var(--amber) 12%, transparent);
-    border-radius: 4px;
-    padding: 0.1rem 0.4rem;
   }
   .list {
     list-style: none;
