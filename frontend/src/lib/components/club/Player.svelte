@@ -107,9 +107,10 @@
           }
         })()
       }
-      // Duck YT for talkover.
-      if (session.mode === 'talkover' && player) {
-        player.setVolume(TALKOVER_DUCK_VOLUME)
+      // Mute YT for takeover (live A/V replaces the stream); duck for talkover.
+      if (player) {
+        if (session.mode === 'takeover') player.mute()
+        else if (session.mode === 'talkover') player.setVolume(TALKOVER_DUCK_VOLUME)
       }
     } else {
       // Session ended — disconnect and restore volume.
@@ -120,9 +121,12 @@
         pendingTracks = []
         void c.disconnect()
       }
-      // Restore YT volume.
-      if (player && !muted) {
-        player.setVolume(volume)
+      // Restore YT audio (unmute if the user hadn't muted themselves).
+      if (player) {
+        if (!muted) {
+          player.unMute()
+          player.setVolume(volume)
+        }
       }
     }
   })
