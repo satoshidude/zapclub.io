@@ -12,6 +12,9 @@ export { MAX_DJS }
 // itself (the heartbeat would otherwise stop). Cleared on explicit leave/logout, NOT on
 // reset (otherwise no reload-resume).
 const ONSTAGE_KEY = 'zapclub:onstage'
+// Per-club snapshot of all known on-stage DJs → pre-populates the stage display before the
+// 30102 subscription returns. Prevents other DJs from flashing off on reload/navigate.
+const STAGE_CACHE_PREFIX = 'zapclub:stage_djs:'
 function rememberStage(groupId: string, since: number): void {
   try {
     localStorage.setItem(
@@ -40,6 +43,33 @@ function persistedSince(groupId: string): number | null {
 function forgetStage(): void {
   try {
     localStorage.removeItem(ONSTAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+function cacheStage(groupId: string): void {
+  try {
+    const snapshot: Record<string, { since: number; lastSeen: number; on: boolean }> = {}
+    for (const [pk, entry] of Object.entries(state.djs)) {
+      if (entry.on) snapshot[pk] = entry
+    }
+    localStorage.setItem(STAGE_CACHE_PREFIX + groupId, JSON.stringify(snapshot))
+  } catch {
+    /* ignore */
+  }
+}
+/** Pre-populate the stage display from the last-known cache for a club.
+ *  Called before the 30102 subscription fires so other DJs don't flash off on reload. */
+export function seedStageFromCache(groupId: string): void {
+  try {
+    const raw = localStorage.getItem(STAGE_CACHE_PREFIX + groupId)
+    if (!raw) return
+    const snapshot = JSON.parse(raw) as Record<string, { since: number; lastSeen: number; on: boolean }>
+    for (const [pk, entry] of Object.entries(snapshot)) {
+      if (!state.djs[pk]) {
+        state.djs[pk] = { since: Number(entry.since), lastSeen: Number(entry.lastSeen), on: Boolean(entry.on) }
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -128,6 +158,8 @@ export function ingestStage(ev: Event): void {
   // Otherwise long-watching clients keep a stale `since` on rejoin and the DJ order
   // (round-robin mapping pos%n) drifts between clients.
   state.djs[ev.pubkey] = { since, lastSeen, on }
+  const groupId = ev.tags.find((t) => t[0] === 'h')?.[1]
+  if (groupId) cacheStage(groupId)
 }
 
 /**

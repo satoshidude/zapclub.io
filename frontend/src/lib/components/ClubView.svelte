@@ -29,6 +29,7 @@
     ingestStage,
     ingestStageKick,
     clearStageView,
+    seedStageFromCache,
     joinStage,
     leaveStage,
     persistedStageGroup,
@@ -104,6 +105,7 @@
     configEvs = {}
     stageResumed = false
     const me = auth.pubkey
+    seedStageFromCache(id)
     const stop = subscribeClub(id, {
       onMeta: (ev) => (club = parseClubMetadata(ev)),
       onMembers: (ev) => (members = parseMembers(ev)),
