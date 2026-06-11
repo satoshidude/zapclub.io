@@ -125,20 +125,23 @@ sticky-conductor handoff, and the round-robin divergence bugs they caused.
 The relay republishes `now_playing` on every track change and as a **~15 s
 heartbeat** carrying a fresh `sent_at`. Each client calibrates a clock offset
 `offset = sent_at − now()` from every heartbeat and computes its local position as
-`pos_ms = now() + offset − started_at`. The YouTube player **loads once at the
-drift-corrected position** when a track starts and then runs uninterrupted — no
-continuous re-seeking, no threshold polling. Late arrivals are in sync within one
-heartbeat; when no DJ is active or the queue is empty, the stream stops and a
-**lobby placeholder** plays.
+`pos_ms = now() + offset − started_at`. The YouTube player **loads at the
+calibrated position** when a track starts, then a **drift check runs every ~5 s**:
+if `|player.getCurrentTime() − target| > 3 s`, the client seeks to the correct
+position (a 3 s threshold avoids disrupting smooth playback while keeping drift
+under 5 s). Late arrivals are in sync within one heartbeat; when no DJ is active or
+the queue is empty, the stream stops and a **lobby placeholder** plays.
 
 ### Round-robin
 
 A single integer `pos` on `now_playing` indexes the whole club set across `n`
 staged DJs: `djIndex = pos % n`, `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0,
 … dj0.t1, …`. A "playable" matrix masks out tracks marked `off` and the currently-playing
-track; `advance()` walks to the next playable slot. (Presence beats `20100`
-determine whether a club has active DJs at all — they don't filter individual
-tracks inside the matrix.) It's O(1) and the 5-DJ cap is purely a UI limit.
+track; `advance()` walks to the next playable slot. For **offline DJs** (no recent
+`20100` presence beat), the relay also applies a **played-set guard** backed by the
+`1313` play-log: each played track is blocked so an offline DJ's queue drains to
+the lobby instead of replaying infinitely. Online DJs are unaffected — their
+browser marks tracks `off` directly. It's O(1) and the 5-DJ cap is purely a UI limit.
 DJ order is deterministic across all clients because it's sorted by the persisted
 `since` from each `30102`; a stage slot stays **sticky for ~1 h** after the last
 heartbeat so a reload or brief drop doesn't bump a DJ. (When the owner is on stage
@@ -189,7 +192,7 @@ tallied from verified receipts.
 - **Frontend** — Svelte 5 (Runes) + Vite + TS. `nostr-tools` (events/signing/
   pool), `applesauce-*` (accounts/signers), `qrcode-generator`, `@dicebear/*`.
 - **Relay** — Go: `khatru` + `relay29` (pinned to `master`) + `eventstore/badger`.
-- **Audio** — YouTube IFrame API; relay is the time authority (`sent_at` heartbeats), clients drift-correct locally.
+- **Audio** — YouTube IFrame API; relay is the time authority (`sent_at` heartbeats); clients load at the calibrated position and seek to correct >3 s drift every 5 s.
 - **Lightning** — NIP-57 zaps via LNURL; WebLN / Alby Go / any wallet.
 - **Hosting** — static frontend + relay behind Caddy on one box.
 

@@ -112,14 +112,12 @@ Einladungs-Clubs und bezahlter Eintritt (Sats-Gate, s. u.) sind Anschlusskonzept
 - **Verwarnen** hat kein eigenes Nostr-Event (kein NIP-29-Kind) → als Chat-/Client-Hinweis
   umsetzen, nicht relay-erzwungen.
 
-### Zeit-Autorität: Conductor + Owner-Override (playlister-bewährt)
-Genau **einer** schreibt `now_playing` pro Club, sonst Last-Write-Wins auf dem replaceable
-Event. Master-Regel:
-- Default: **Conductor = ältester aktiver Bühnen-DJ** (längste Bühnenzeit, deterministisch
-  über alle Clients via persistiertem `since`, localStorage). Verlässt er die Bühne,
-  übernimmt automatisch der nächste → **selbstheilend**.
-- **Ausnahme: Ist der Club-Besitzer als DJ auf der Bühne, ist er immer Master** — unabhängig
-  von `since`. (Besitzer = Creator/Admin aus `39001`.)
+### Zeit-Autorität: Conductor (relay-seitig, immer-an)
+Genau **einer** schreibt `now_playing` pro Club — das **Relay** (conductor.go). Es ist der
+einzige Schreiber von 30100 und 1313 (play-log). Clients sind reine Consumer: sie lesen
+`now_playing`, kalibrieren `offsetMs = sent_at − now()` aus jedem Heartbeat und laden den
+Track an Position `now() + offsetMs − started_at`. Alle 5 s prüft der Client ob
+`|currentTime − target| > 3 s` und seekt dann nach (Threshold-Seek, max. Drift <5 s).
 
 `since` über Reloads persistieren und aus dem **neuesten** Bühnen-Event lesen — sonst
 driften DJ-Sortierung und `pos`-Mapping zwischen Clients auseinander.
@@ -145,12 +143,16 @@ bereits gespielt/inaktiv). Gespeicherte User-Playlisten („Playlistenverwaltung
 ### Round-Robin
 Über einen **globalen Integer `pos`** im `now_playing`: `djIndex = pos % n`,
 `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0, …, dj0.t1, …`. `playable(djs)`-Matrix
-filtert `off`-Tracks und abwesende DJs; `advance()` sucht den nächsten spielbaren Slot.
-Skaliert O(1), die 5 ist nur eine UI-/Slot-Grenze.
+filtert `off`-Tracks und den laufenden Track. **Offline-DJ-Guard** (neu): für DJs ohne
+frischen 20100-Presence-Beat (condOnlineMS=50 s) wendet das Relay zusätzlich ein
+**Played-Set** (aus 1313-Play-Log + in-memory advance()-Records) an, das jeden bereits
+gespielten Track sperrt — die Queue leert sich so natürlich zur Lobby statt ewig zu
+rotieren. Online-DJs sind davon nicht betroffen (ihr Browser markiert Tracks als `off`).
+`advance()` sucht den nächsten spielbaren Slot. Skaliert O(1), die 5 ist nur eine UI-/Slot-Grenze.
 
 ### now_playing (parameterized-replaceable, kind 30100)
 Genau 1 aktuelle Version pro Club (`d`=club). **Nur der Conductor** überschreibt bei
-Track-Wechsel + Heartbeat (~8 s). Tags: `h`, `d`, `track`=`yt:<id>`, `pos` (Round-Robin-
+Track-Wechsel + Heartbeat (~15 s). Tags: `h`, `d`, `track`=`yt:<id>`, `pos` (Round-Robin-
 Index), `p`=pubkey des DJs, dessen Track läuft (Zap-Ziel), `started_at` (ms), `sent_at`
 (ms, Offset-Kalibrierung), `duration`, `status`. content = `Artist – Title`.
 **Track im Heartbeat einfrieren:** denselben Track mit frischem `sent_at` republizieren,
@@ -165,7 +167,11 @@ validiert clientseitig die Rolle des Absenders (das Relay akzeptiert jeden Membe
 kennt keine Kind-Allowlist). Replaceable → genau 1 offene Anfrage pro Club.
 
 ### chat (kind 9), presence (ephemeral, kind 20100)
-Chat per `h`-Tag. Presence ephemeral (nicht persistiert) — vorgesehen.
+Chat per `h`-Tag. Presence beats 20100 (25 s Takt) sind ephemer (nicht persistiert). Der
+Conductor beobachtet sie via `observePresence` → `c.pres[club][pk]` (in-memory). DJs auf
+der Bühne senden presence **persistent** (stage.svelte.ts `hbTimer`-Layer, unabhängig vom
+Club-View) — d.h. ein DJ der zur Startseite navigiert bleibt "online". Presence-Fenster:
+condOnlineMS=50 s; Offline-DJ-Guard greift wenn kein Beat innerhalb dieser Zeit kam.
 
 ### zap-vote (später, selektiv aus playlister portieren)
 NIP-57 Zap-Receipt mit `h`-Tag auf Club + Referenz aufs now_playing; Empfänger = `p`-Tag

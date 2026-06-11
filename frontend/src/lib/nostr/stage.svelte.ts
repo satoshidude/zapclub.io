@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure'
-import { KIND_STAGE, publishClub } from './groups'
+import { KIND_STAGE, KIND_PRESENCE, publishClub } from './groups'
 import { auth } from './auth.svelte'
 import { selectActiveDjs, MAX_DJS } from './conductor'
 import type { StageDj } from './types'
@@ -133,11 +133,22 @@ export function ingestStageKick(ev: Event): string | null {
 // ── my own stage presence ─────────────────────────────────────────────────
 
 let hbTimer: ReturnType<typeof setInterval> | null = null
+let presTimer: ReturnType<typeof setInterval> | null = null
 let myGroupId: string | null = null
 let mySince = 0
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
+}
+
+function postPresence(groupId: string): void {
+  if (!auth.pubkey) return
+  void publishClub({
+    kind: KIND_PRESENCE,
+    created_at: nowSec(),
+    tags: [['h', groupId]],
+    content: '',
+  })
 }
 
 async function postStage(groupId: string, on: boolean): Promise<void> {
@@ -169,6 +180,14 @@ export async function joinStage(groupId: string): Promise<void> {
   hbTimer = setInterval(() => {
     if (myGroupId) void postStage(myGroupId, true)
   }, HEARTBEAT_MS)
+  // Keep presence (20100) alive while on stage even when the club view isn't mounted.
+  // ClubView.svelte starts/stops its own presence; this ensures a navigated-away DJ
+  // remains "online" so the conductor's offline played-set guard doesn't apply to them.
+  if (presTimer) clearInterval(presTimer)
+  postPresence(groupId) // immediate beat
+  presTimer = setInterval(() => {
+    if (myGroupId) postPresence(myGroupId)
+  }, 25_000)
 }
 
 /**
@@ -180,6 +199,10 @@ export async function leaveStage(groupId?: string): Promise<void> {
   if (hbTimer) {
     clearInterval(hbTimer)
     hbTimer = null
+  }
+  if (presTimer) {
+    clearInterval(presTimer)
+    presTimer = null
   }
   forgetStage() // explicit leave → no more reload-resume
   const gid = myGroupId ?? groupId ?? null
@@ -207,6 +230,10 @@ export function resetStage(): void {
   if (hbTimer) {
     clearInterval(hbTimer)
     hbTimer = null
+  }
+  if (presTimer) {
+    clearInterval(presTimer)
+    presTimer = null
   }
   if (tickTimer) {
     clearInterval(tickTimer)

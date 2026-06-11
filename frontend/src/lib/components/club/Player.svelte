@@ -197,8 +197,21 @@
   }
   if (typeof document !== 'undefined') document.addEventListener('fullscreenchange', onFsChange)
 
-  // Only ensure playback doesn't silently stall (no seek).
-  driftTimer = setInterval(() => apply(false), 5000)
+  // Drift correction: every 5 s, seek if we're >3 s off the relay-calibrated position.
+  // Only fires while actually playing (state=1) — never fights a buffer or a fresh load.
+  // Threshold 3 s keeps drift <5 s (relay requirement) without seeking during normal playback.
+  driftTimer = setInterval(() => {
+    if (!player || !sync.live || sync.live.status === 'paused') return
+    if (player.getState() !== 1) {
+      // Stalled/paused — just ensure it's running (original stall-recovery behavior).
+      apply(false)
+      return
+    }
+    const drift = player.getCurrentTime() - targetPosition()
+    if (Math.abs(drift) > 3) {
+      player.seekTo(targetPosition() + 0.4)
+    }
+  }, 5000)
 
   onDestroy(() => {
     destroyed = true

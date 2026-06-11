@@ -90,6 +90,22 @@ type autoState struct {
 	tracks []condTrack
 }
 
+// stageEntry is the newest known state for one DJ in one club (from 30102 index).
+type stageEntry struct {
+	since    int64
+	lastSeen int64
+	on       bool
+}
+
+// premCacheEntry caches a per-club premium-owner check with a TTL so we avoid
+// hitting the premium store on every tick.
+type premCacheEntry struct {
+	valid bool
+	t     int64 // time.Now().UnixMilli() when cached
+}
+
+const premCacheTTL = 60_000 // ms
+
 type conductor struct {
 	db    *badger.BadgerBackend
 	relay *khatru.Relay
@@ -98,21 +114,220 @@ type conductor struct {
 	pub   string
 	mu    sync.Mutex
 	clubs map[string]*condClub
+	// played tracks per (club, dj, videoID); guarded by mu. Applied only to offline DJs so
+	// their queue drains to the lobby instead of replaying infinitely when they can't sign.
+	played map[string]map[string]map[string]bool
 
 	presMu sync.Mutex
 	pres   map[string]map[string]int64 // club → pubkey → last presence beat (ms)
 
 	brokenMu sync.Mutex
 	broken   map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
+
+	// Event-driven in-memory indexes (populated by warmIndexes + observeEvent). Replacing
+	// per-tick full-table DB scans with O(1) lookups. Guarded by idxMu.
+	idxMu         sync.Mutex
+	stageIdx      map[string]map[string]stageEntry  // club → pubkey → newest 30102
+	kickIdx       map[string]map[string]int64        // club → dj → newest kick ms
+	queueIdx      map[string]map[string]*nostr.Event // club → pubkey → newest 30103
+	skipIdx       map[string]*nostr.Event            // club → newest 30107
+	autoDJIdx     map[string]*nostr.Event            // club → newest 30105
+	autoDJCtrlIdx map[string]nostr.Timestamp         // club → newest relay-signed 30111
+	ownerCache    map[string]string                  // club → creator pubkey (permanent)
+	premCache     map[string]premCacheEntry          // club → {valid bool, t ms}
 }
 
 func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
 	pub, _ := nostr.GetPublicKey(sk)
-	return &conductor{db: db, relay: relay, state: state, sk: sk, pub: pub, clubs: map[string]*condClub{}, pres: map[string]map[string]int64{}, broken: map[string]map[string]map[string]int64{}}
+	return &conductor{
+		db: db, relay: relay, state: state, sk: sk, pub: pub,
+		clubs:         map[string]*condClub{},
+		played:        map[string]map[string]map[string]bool{},
+		pres:          map[string]map[string]int64{},
+		broken:        map[string]map[string]map[string]int64{},
+		stageIdx:      map[string]map[string]stageEntry{},
+		kickIdx:       map[string]map[string]int64{},
+		queueIdx:      map[string]map[string]*nostr.Event{},
+		skipIdx:       map[string]*nostr.Event{},
+		autoDJIdx:     map[string]*nostr.Event{},
+		autoDJCtrlIdx: map[string]nostr.Timestamp{},
+		ownerCache:    map[string]string{},
+		premCache:     map[string]premCacheEntry{},
+	}
+}
+
+// ── event-driven indexes ──────────────────────────────────────────────────────
+
+// warmIndexes does one full scan per indexed kind at startup to seed the in-memory indexes.
+// After this, observeEvent keeps them current via OnEventSaved.
+func (c *conductor) warmIndexes(ctx context.Context) {
+	for _, kind := range []int{kindStage, kindStageKick, kindQueue, kindSkip, kindAutoDJ, kindAutoDJCtrl} {
+		ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kind}})
+		if err != nil {
+			log.Printf("conductor: warm index kind %d: %v", kind, err)
+			continue
+		}
+		for ev := range ch {
+			c.indexEvent(ev)
+		}
+	}
+	log.Printf("conductor: indexes warmed")
+}
+
+// observeEvent is registered on relay.OnEventSaved and keeps the indexes current.
+func (c *conductor) observeEvent(_ context.Context, ev *nostr.Event) {
+	c.indexEvent(ev)
+}
+
+func (c *conductor) indexEvent(ev *nostr.Event) {
+	switch ev.Kind {
+	case kindStage:
+		c.idxStage(ev)
+	case kindStageKick:
+		c.idxKick(ev)
+	case kindQueue:
+		c.idxQueue(ev)
+	case kindSkip:
+		c.idxSkip(ev)
+	case kindAutoDJ:
+		c.idxAutoDJ(ev)
+	case kindAutoDJCtrl:
+		c.idxAutoDJCtrl(ev)
+	}
+}
+
+func (c *conductor) idxStage(ev *nostr.Event) {
+	club := tagVal(ev, "h")
+	if club == "" {
+		return
+	}
+	lastSeen := int64(ev.CreatedAt) * 1000
+	since := int64(ev.CreatedAt)
+	if s := tagVal(ev, "since"); s != "" {
+		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+			since = v
+		}
+	}
+	entry := stageEntry{since: since, lastSeen: lastSeen, on: ev.Content != "off"}
+	c.idxMu.Lock()
+	m := c.stageIdx[club]
+	if m == nil {
+		m = map[string]stageEntry{}
+		c.stageIdx[club] = m
+	}
+	if ex, ok := m[ev.PubKey]; !ok || lastSeen > ex.lastSeen {
+		m[ev.PubKey] = entry
+	}
+	c.idxMu.Unlock()
+}
+
+func (c *conductor) idxKick(ev *nostr.Event) {
+	club := tagVal(ev, "h")
+	dj := tagVal(ev, "d")
+	if club == "" || dj == "" {
+		return
+	}
+	ms := int64(ev.CreatedAt) * 1000
+	c.idxMu.Lock()
+	m := c.kickIdx[club]
+	if m == nil {
+		m = map[string]int64{}
+		c.kickIdx[club] = m
+	}
+	if ms > m[dj] {
+		m[dj] = ms
+	}
+	c.idxMu.Unlock()
+}
+
+func (c *conductor) idxQueue(ev *nostr.Event) {
+	club := tagVal(ev, "h")
+	if club == "" {
+		return
+	}
+	c.idxMu.Lock()
+	m := c.queueIdx[club]
+	if m == nil {
+		m = map[string]*nostr.Event{}
+		c.queueIdx[club] = m
+	}
+	if ex, ok := m[ev.PubKey]; !ok || ev.CreatedAt > ex.CreatedAt {
+		m[ev.PubKey] = ev
+	}
+	c.idxMu.Unlock()
+}
+
+func (c *conductor) idxSkip(ev *nostr.Event) {
+	club := tagVal(ev, "h")
+	if club == "" {
+		return
+	}
+	c.idxMu.Lock()
+	if ex, ok := c.skipIdx[club]; !ok || ev.CreatedAt > ex.CreatedAt {
+		c.skipIdx[club] = ev
+	}
+	c.idxMu.Unlock()
+}
+
+func (c *conductor) idxAutoDJ(ev *nostr.Event) {
+	club := tagVal(ev, "h")
+	if club == "" {
+		return
+	}
+	c.idxMu.Lock()
+	if ex, ok := c.autoDJIdx[club]; !ok || ev.CreatedAt > ex.CreatedAt {
+		c.autoDJIdx[club] = ev
+	}
+	c.idxMu.Unlock()
+}
+
+func (c *conductor) idxAutoDJCtrl(ev *nostr.Event) {
+	if ev.PubKey != c.pub {
+		return // only relay-signed disarm markers are trusted
+	}
+	club := tagVal(ev, "d")
+	if club == "" {
+		return
+	}
+	c.idxMu.Lock()
+	if t, ok := c.autoDJCtrlIdx[club]; !ok || ev.CreatedAt > t {
+		c.autoDJCtrlIdx[club] = ev.CreatedAt
+	}
+	c.idxMu.Unlock()
+}
+
+// isPremiumOwner returns whether the club's creator has an active premium subscription,
+// using a short-TTL cache (premCacheTTL) to avoid hitting the premium store every tick.
+func (c *conductor) isPremiumOwner(ctx context.Context, club string, now int64) bool {
+	if condPrem == nil {
+		return false
+	}
+	c.idxMu.Lock()
+	if entry, ok := c.premCache[club]; ok && now-entry.t < premCacheTTL {
+		c.idxMu.Unlock()
+		return entry.valid
+	}
+	c.idxMu.Unlock()
+	owner := c.clubOwner(ctx, club)
+	if owner == "" {
+		return false
+	}
+	valid := condPrem.valid(ctx, owner)
+	c.idxMu.Lock()
+	c.premCache[club] = premCacheEntry{valid: valid, t: now}
+	c.idxMu.Unlock()
+	return valid
 }
 
 // clubOwner returns the pubkey of the club's creator (author of its 9007 create-group event).
+// Result is cached permanently (club creator never changes).
 func (c *conductor) clubOwner(ctx context.Context, club string) string {
+	c.idxMu.Lock()
+	if owner, ok := c.ownerCache[club]; ok {
+		c.idxMu.Unlock()
+		return owner
+	}
+	c.idxMu.Unlock()
 	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
 		Kinds: []int{kindCreateGroup},
 		Tags:  nostr.TagMap{"h": []string{club}},
@@ -129,6 +344,9 @@ func (c *conductor) clubOwner(ctx context.Context, club string) string {
 	if newest == nil {
 		return ""
 	}
+	c.idxMu.Lock()
+	c.ownerCache[club] = newest.PubKey
+	c.idxMu.Unlock()
 	return newest.PubKey
 }
 
@@ -334,58 +552,39 @@ func (c *conductor) tick() {
 
 // activeClubs returns, per club with ≥1 active stage DJ, the DJ list in round-robin order
 // (oldest `since` first, pubkey tiebreak, capped) — the same selection as conductor.ts
-// selectActiveDjs: on + fresh (<1h) + not kicked.
+// selectActiveDjs: on + fresh (<1h) + not kicked. Reads from the in-memory indexes (no DB).
 func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
-	type stageEv struct {
-		since, lastSeen int64
-		on              bool
-	}
-	stages := map[string]map[string]stageEv{} // club → dj → newest stage event
-
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindStage}})
-	if err != nil {
-		log.Printf("conductor: query stage: %v", err)
-		return nil
-	}
-	for ev := range ch {
-		club := tagVal(ev, "h")
-		if club == "" {
-			continue
-		}
-		lastSeen := int64(ev.CreatedAt) * 1000
-		m := stages[club]
-		if m == nil {
-			m = map[string]stageEv{}
-			stages[club] = m
-		}
-		if ex, ok := m[ev.PubKey]; ok && lastSeen < ex.lastSeen {
-			continue // keep the newest per DJ
-		}
-		since := int64(ev.CreatedAt)
-		if s := tagVal(ev, "since"); s != "" {
-			if v, err := strconv.ParseInt(s, 10, 64); err == nil {
-				since = v
-			}
-		}
-		m[ev.PubKey] = stageEv{since: since, lastSeen: lastSeen, on: ev.Content != "off"}
-	}
-	if len(stages) == 0 {
-		return nil
-	}
-
-	kicks := c.kicksByClub(ctx) // club → dj → newest kick (ms)
 	now := time.Now().UnixMilli()
+	// Snapshot indexes under lock, then process without holding it.
+	type djSnap struct {
+		pubkey  string
+		entry   stageEntry
+		kickMs  int64 // newest kick for this dj in this club, or 0
+	}
+	c.idxMu.Lock()
+	type clubSnap struct{ djs []djSnap }
+	snaps := make(map[string]clubSnap, len(c.stageIdx))
+	for club, djMap := range c.stageIdx {
+		var djs []djSnap
+		km := c.kickIdx[club]
+		for pk, e := range djMap {
+			djs = append(djs, djSnap{pubkey: pk, entry: e, kickMs: km[pk]})
+		}
+		snaps[club] = clubSnap{djs: djs}
+	}
+	c.idxMu.Unlock()
+
 	out := map[string][]condDJ{}
-	for club, djmap := range stages {
+	for club, snap := range snaps {
 		var list []condDJ
-		for pk, s := range djmap {
-			if !s.on || now-s.lastSeen >= condStageStaleMS {
+		for _, se := range snap.djs {
+			if !se.entry.on || now-se.entry.lastSeen >= condStageStaleMS {
 				continue
 			}
-			if k := kicks[club]; k != nil && s.lastSeen <= k[pk] {
+			if se.kickMs > 0 && se.entry.lastSeen <= se.kickMs {
 				continue // kicked after their last heartbeat
 			}
-			list = append(list, condDJ{pubkey: pk, since: s.since})
+			list = append(list, condDJ{pubkey: se.pubkey, since: se.entry.since})
 		}
 		if len(list) == 0 {
 			continue
@@ -397,10 +596,8 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 			return list[i].pubkey < list[j].pubkey
 		})
 		cap := condMaxDJsFree
-		if condPrem != nil {
-			if owner := c.clubOwner(ctx, club); owner != "" && condPrem.valid(ctx, owner) {
-				cap = condMaxDJs
-			}
+		if c.isPremiumOwner(ctx, club, now) {
+			cap = condMaxDJs
 		}
 		if len(list) > cap {
 			list = list[:cap]
@@ -410,43 +607,18 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 	return out
 }
 
-func (c *conductor) kicksByClub(ctx context.Context) map[string]map[string]int64 {
-	out := map[string]map[string]int64{}
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindStageKick}})
-	if err != nil {
-		return out
-	}
-	for ev := range ch {
-		club := tagVal(ev, "h")
-		dj := tagVal(ev, "d")
-		if club == "" || dj == "" {
-			continue
-		}
-		m := out[club]
-		if m == nil {
-			m = map[string]int64{}
-			out[club] = m
-		}
-		if t := int64(ev.CreatedAt) * 1000; t > m[dj] {
-			m[dj] = t
-		}
-	}
-	return out
-}
-
 // clubQueues returns the newest queue (kind 30103) per DJ for a club, parsed to tracks.
-func (c *conductor) clubQueues(ctx context.Context, club string) map[string][]condTrack {
-	out := map[string][]condTrack{}
-	at := map[string]int64{}
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindQueue}, Tags: nostr.TagMap{"h": []string{club}}})
-	if err != nil {
-		return out
+// Reads from the in-memory index (no DB).
+func (c *conductor) clubQueues(_ context.Context, club string) map[string][]condTrack {
+	c.idxMu.Lock()
+	m := c.queueIdx[club]
+	evs := make([]*nostr.Event, 0, len(m))
+	for _, ev := range m {
+		evs = append(evs, ev)
 	}
-	for ev := range ch {
-		if t, ok := at[ev.PubKey]; ok && int64(ev.CreatedAt) < t {
-			continue
-		}
-		at[ev.PubKey] = int64(ev.CreatedAt)
+	c.idxMu.Unlock()
+	out := map[string][]condTrack{}
+	for _, ev := range evs {
 		out[ev.PubKey] = parseQueueTracks(ev)
 	}
 	return out
@@ -543,7 +715,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.stop(pb)
 		return
 	}
-	di, ti := fairNext(djPks, pb.dj, c.matrix(djPks, queues, pb))
+	di, ti := fairNext(djPks, pb.dj, c.matrix(djPks, queues, pb, club, now))
 	if di == -1 {
 		// Every DJ's queue is fully played-off (or empty) → stop to the lobby. No auto-loop: a set
 		// plays through once, then the lobby runs until a DJ adds / re-activates tracks.
@@ -563,23 +735,34 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	pb.duration = t.duration
 	pb.startedAt = now
 	pb.playing = true
+	// Record into the relay played-set. Applied only to offline DJs (see matrix()) so their
+	// queue drains to lobby when they can't sign. Online DJs are unaffected.
+	if c.played[club] == nil {
+		c.played[club] = map[string]map[string]bool{}
+	}
+	if c.played[club][pb.dj] == nil {
+		c.played[club][pb.dj] = map[string]bool{}
+	}
+	c.played[club][pb.dj][t.videoID] = true
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
-// and not the currently-playing one. The DJ's QUEUE is the single source of truth: a played track
-// becomes `off` (client-marked) and drops out; reordering changes which active track is on top; a
-// manually re-activated track (`off`→active) plays again. The relay does NOT keep its own hidden
-// played-set — that would override the visible queue (e.g. exclude a re-activated track the DJ
-// put back at the top). Mirrors the client's playableMatrix (sync.svelte.ts) exactly.
-func (c *conductor) matrix(djPks []string, queues map[string][]condTrack, pb *condClub) [][]bool {
+// and not the currently-playing one. For OFFLINE DJs, tracks recorded in the relay played-set
+// (from 1313 play-log + in-memory advance() records) are additionally excluded so their queue
+// drains to lobby instead of replaying forever when they can't sign. Online DJs are unaffected
+// (their browser marks tracks off via the visible queue — the single source of truth for them).
+func (c *conductor) matrix(djPks []string, queues map[string][]condTrack, pb *condClub, club string, now int64) [][]bool {
 	out := make([][]bool, len(djPks))
 	for i, pk := range djPks {
 		tracks := queues[pk]
 		row := make([]bool, len(tracks))
+		djOnline := c.online(club, pk, now)
+		playedByDJ := c.played[club][pk] // nil-safe: map lookup on nil map is zero value
 		for j, t := range tracks {
-			row[j] = t.active && t.videoID != pb.videoID
+			playedOff := !djOnline && playedByDJ[t.videoID]
+			row[j] = t.active && t.videoID != pb.videoID && !playedOff
 		}
 		out[i] = row
 	}
@@ -588,24 +771,15 @@ func (c *conductor) matrix(djPks []string, queues map[string][]condTrack, pb *co
 
 // skipRequested reports whether a fresh, AUTHORIZED skip-request (kind 30107) targets the
 // running track. The request must (a) name the current pos, (b) be newer than the current
-// track's start (so a stale request from a previous track is ignored, and the relay never
-// re-acts after advancing — the new track has a different pos/start), and (c) come from a club
-// owner/moderator or the currently-playing DJ. The relay accepts any member's 30107 into the
-// store (it knows no kind allowlist), so the role check is enforced HERE.
-func (c *conductor) skipRequested(ctx context.Context, club string, pb *condClub) bool {
+// track's start (so a stale request from a previous track is ignored), and (c) come from a club
+// owner/moderator or the currently-playing DJ. Reads from the in-memory index (no DB).
+func (c *conductor) skipRequested(_ context.Context, club string, pb *condClub) bool {
 	if !pb.playing {
 		return false
 	}
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindSkip}, Tags: nostr.TagMap{"h": []string{club}}})
-	if err != nil {
-		return false
-	}
-	var latest *nostr.Event
-	for ev := range ch {
-		if latest == nil || ev.CreatedAt > latest.CreatedAt {
-			latest = ev
-		}
-	}
+	c.idxMu.Lock()
+	latest := c.skipIdx[club]
+	c.idxMu.Unlock()
 	if latest == nil {
 		return false
 	}
@@ -692,7 +866,8 @@ func (c *conductor) publish(ctx context.Context, ev *nostr.Event, replace bool) 
 // ── cold-start resume ─────────────────────────────────────────────────────────
 
 // resume rebuilds a club's playback state after a relay restart from the newest relay-authored
-// now_playing (continue the current track) + recent 1313 plays (re-seed the played-set/loop).
+// now_playing (continue the current track). Also seeds the played-set from recent 1313 records
+// so offline DJs' queues don't replay tracks from before the restart.
 // Best-effort: if no relay now_playing exists, returns an empty state (the next tick bootstraps).
 func (c *conductor) resume(ctx context.Context, club string) *condClub {
 	pb := &condClub{}
@@ -719,6 +894,26 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 		pb.startedAt = v
 	}
 	pb.playing = pb.videoID != ""
+
+	// Seed played-set from 1313 play-log so offline DJs don't replay after a restart.
+	// Only applies while their browser hasn't sent presence yet (online() = false).
+	ch2, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindPlay}, Tags: nostr.TagMap{"h": []string{club}}})
+	if err == nil {
+		for ev := range ch2 {
+			dj := tagVal(ev, "p")
+			vid := ev.Content
+			if dj == "" || vid == "" {
+				continue
+			}
+			if c.played[club] == nil {
+				c.played[club] = map[string]map[string]bool{}
+			}
+			if c.played[club][dj] == nil {
+				c.played[club][dj] = map[string]bool{}
+			}
+			c.played[club][dj][vid] = true
+		}
+	}
 	return pb
 }
 
@@ -843,49 +1038,32 @@ func makeShuffledOrder(n int) []int {
 
 // armedAutoClubs returns clubs with an owner-armed Auto DJ playlist and no real DJ on stage.
 // When a real DJ takes over an armed club, it publishes a 30111 disarm marker (once, idempotent).
+// Reads from the in-memory indexes (no DB).
 func (c *conductor) armedAutoClubs(ctx context.Context, active map[string][]condDJ) map[string]*autoState {
 	type armedEntry struct {
 		ev    *nostr.Event
 		owner string
 	}
 
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindAutoDJ}})
-	if err != nil {
-		return nil
-	}
-	armed := map[string]armedEntry{} // club → newest armed 30105
-	for ev := range ch {
-		club := tagVal(ev, "h")
-		if club == "" || tagVal(ev, "status") != "armed" {
-			continue
-		}
-		if ex, ok := armed[club]; !ok || ev.CreatedAt > ex.ev.CreatedAt {
+	c.idxMu.Lock()
+	armed := map[string]armedEntry{}
+	for club, ev := range c.autoDJIdx {
+		if tagVal(ev, "status") == "armed" {
 			armed[club] = armedEntry{ev: ev, owner: ev.PubKey}
 		}
 	}
+	disarmedAt := make(map[string]nostr.Timestamp, len(c.autoDJCtrlIdx))
+	for club, t := range c.autoDJCtrlIdx {
+		disarmedAt[club] = t
+	}
+	c.idxMu.Unlock()
+
 	if len(armed) == 0 {
 		return nil
 	}
 
-	// Query relay-signed disarm markers (kind 30111, replaceable per d=club).
-	ch2, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindAutoDJCtrl}})
-	if err != nil {
-		return nil
-	}
-	disarmedAt := map[string]nostr.Timestamp{} // club → newest 30111 created_at
-	for ev := range ch2 {
-		club := tagVal(ev, "d")
-		if club == "" || ev.PubKey != c.pub {
-			continue // only trust relay-signed disarm markers
-		}
-		if t, ok := disarmedAt[club]; !ok || ev.CreatedAt > t {
-			disarmedAt[club] = ev.CreatedAt
-		}
-	}
-
 	out := map[string]*autoState{}
 	for club, entry := range armed {
-		// Effective-armed: no 30111 disarm marker with created_at >= the armed event's created_at.
 		disarmFresh := disarmedAt[club] >= entry.ev.CreatedAt
 
 		if _, hasRealDJ := active[club]; hasRealDJ {
@@ -1003,7 +1181,8 @@ func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *
 }
 
 // publishAutoDJDisarm emits a relay-signed kind-30111 disarm marker when a real DJ takes
-// over an armed-auto club. Replaceable per club (d=club).
+// over an armed-auto club. Replaceable per club (d=club). Also updates the ctrl index
+// directly (relay-signed events bypass OnEventSaved so can't be indexed via observeEvent).
 func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
 	ev := &nostr.Event{
 		Kind:      kindAutoDJCtrl,
@@ -1016,6 +1195,12 @@ func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
 		Content: "",
 	}
 	c.publish(ctx, ev, true)
+	// Update the ctrl index directly since relay-signed writes bypass OnEventSaved.
+	c.idxMu.Lock()
+	if t, ok := c.autoDJCtrlIdx[club]; !ok || ev.CreatedAt > t {
+		c.autoDJCtrlIdx[club] = ev.CreatedAt
+	}
+	c.idxMu.Unlock()
 }
 
 // ── stageGate: enforce per-club DJ slot cap on kind-30102 events ─────────────

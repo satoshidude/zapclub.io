@@ -330,6 +330,10 @@ func main() {
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
 		log.Printf("startup: purged %d foreign now_playing event(s)", n)
 	}
+	// Warm the in-memory event indexes from the DB (replaces per-tick full-table scans).
+	// After this, observeEvent keeps the indexes current via OnEventSaved.
+	cond.warmIndexes(context.Background())
+	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
 	go cond.run()
 
