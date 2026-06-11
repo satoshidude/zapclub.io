@@ -855,22 +855,30 @@ func (c *conductor) publishPlay(ctx context.Context, club string, pb *condClub, 
 
 // publish signs an event with the relay key and writes it straight to the store (+ broadcast),
 // bypassing the RejectEvent chain — the relay's own events are trusted.
+// Retries up to 3× on badger transaction conflicts (transient, safe to retry immediately).
 func (c *conductor) publish(ctx context.Context, ev *nostr.Event, replace bool) {
 	if err := ev.Sign(c.sk); err != nil {
 		log.Printf("conductor sign kind %d: %v", ev.Kind, err)
 		return
 	}
-	var err error
-	if replace {
-		err = c.db.ReplaceEvent(ctx, ev)
-	} else {
-		err = c.db.SaveEvent(ctx, ev)
-	}
-	if err != nil {
+	for attempt := 0; attempt < 3; attempt++ {
+		var err error
+		if replace {
+			err = c.db.ReplaceEvent(ctx, ev)
+		} else {
+			err = c.db.SaveEvent(ctx, ev)
+		}
+		if err == nil {
+			c.relay.BroadcastEvent(ev)
+			return
+		}
+		if attempt < 2 && strings.Contains(err.Error(), "Conflict") {
+			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+			continue
+		}
 		log.Printf("conductor store kind %d: %v", ev.Kind, err)
 		return
 	}
-	c.relay.BroadcastEvent(ev)
 }
 
 // ── cold-start resume ─────────────────────────────────────────────────────────
@@ -1240,6 +1248,8 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	}
 
 	// Count active DJs on stage (excluding the sender — heartbeat is allowed).
+	// Use newest-event-per-pubkey so a DJ with multiple old events isn't double-counted,
+	// and apply the kick filter so a kicked DJ doesn't hold a slot open.
 	ch, err := g.db.QueryEvents(ctx, nostr.Filter{
 		Kinds: []int{kindStage},
 		Tags:  nostr.TagMap{"h": []string{club}},
@@ -1247,20 +1257,52 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	if err != nil {
 		return false, ""
 	}
+	newestByPk := map[string]*nostr.Event{}
+	for ev := range ch {
+		if ex, ok := newestByPk[ev.PubKey]; !ok || ev.CreatedAt > ex.CreatedAt {
+			cp := *ev
+			newestByPk[ev.PubKey] = &cp
+		}
+	}
+	// Fetch newest kick per target so kicked DJs don't occupy a slot.
+	kickMs := map[string]int64{}
+	if kch, err2 := g.db.QueryEvents(ctx, nostr.Filter{
+		Kinds: []int{kindStageKick},
+		Tags:  nostr.TagMap{"h": []string{club}},
+	}); err2 == nil {
+		for ev := range kch {
+			target := tagVal(ev, "p")
+			if target == "" {
+				target = tagVal(ev, "d")
+			}
+			if target == "" {
+				continue
+			}
+			ms := int64(ev.CreatedAt) * 1000
+			if ms > kickMs[target] {
+				kickMs[target] = ms
+			}
+		}
+	}
 	staleThreshold := time.Now().UnixMilli() - condStageStaleMS
 	active := 0
 	alreadyOnStage := false
-	for ev := range ch {
-		if ev.PubKey == evt.PubKey {
+	for pk, ev := range newestByPk {
+		if pk == evt.PubKey {
 			alreadyOnStage = true
 			continue
 		}
 		if ev.Content == "off" {
 			continue
 		}
-		if int64(ev.CreatedAt)*1000 >= staleThreshold {
-			active++
+		evMs := int64(ev.CreatedAt) * 1000
+		if evMs < staleThreshold {
+			continue
 		}
+		if km := kickMs[pk]; km > 0 && evMs <= km {
+			continue // kicked after their last heartbeat
+		}
+		active++
 	}
 	if alreadyOnStage {
 		return false, "" // heartbeat from existing DJ
