@@ -109,8 +109,8 @@ export async function connectLivekit(groupId: string): Promise<LivekitClient> {
       if (audio) {
         try {
           await room.localParticipant.setMicrophoneEnabled(true)
-        } catch {
-          // Mic unavailable → continue video-only, don't fail the whole go-live.
+        } catch (e) {
+          console.warn('[zapclub] mic unavailable, video-only:', e)
         }
       }
     },

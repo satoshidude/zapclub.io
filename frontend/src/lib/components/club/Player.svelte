@@ -80,8 +80,10 @@
             client.onRemoteTrack(({ track }) => {
               if (track.kind === Track.Kind.Video && liveVideoEl) {
                 attachTrack(track, liveVideoEl)
+                void liveVideoEl.play().catch(() => {})
               } else if (track.kind === Track.Kind.Audio && liveAudioEl) {
                 attachTrack(track, liveAudioEl)
+                void liveAudioEl.play().catch(() => {})
                 // LiveKit audio is live — mute YT to avoid double audio.
                 if (player) player.mute()
               }
