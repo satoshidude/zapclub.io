@@ -57,10 +57,17 @@
   let lkConnectedGroup = $state<string | null>(null) // which group we're connected to
   let liveVideoEl = $state<HTMLVideoElement | null>(null)
   let liveAudioEl = $state<HTMLAudioElement | null>(null)
+  let liveAudioMuted = $state(false)
   let lkError = $state('')
   let isTakeover = $derived(liveSession.current?.mode === 'takeover')
   let isTalkover = $derived(liveSession.current?.mode === 'talkover')
   const TALKOVER_DUCK_VOLUME = 15
+
+  function toggleLiveAudio() {
+    if (!liveAudioEl) return
+    liveAudioMuted = !liveAudioMuted
+    liveAudioEl.muted = liveAudioMuted
+  }
 
   // React to live session changes.
   $effect(() => {
@@ -334,6 +341,14 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <audio bind:this={liveAudioEl} autoplay></audio>
         <div class="live-badge" aria-hidden="true">● LIVE</div>
+        <div class="live-controls">
+          <button class="live-ctrl" onclick={toggleLiveAudio} title={liveAudioMuted ? 'Unmute' : 'Mute'}>
+            {liveAudioMuted ? '🔇' : '🔊'}
+          </button>
+          <button class="live-ctrl" onclick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+            {isFullscreen ? '🡻' : '⛶'}
+          </button>
+        </div>
       </div>
     {:else}
       <!-- Talkover: keep the YT frame, add an invisible audio overlay + a small badge. -->
@@ -638,5 +653,36 @@
     max-width: 90%;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .live-controls {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    z-index: 5;
+    display: flex;
+    gap: 0.25rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .live-frame:hover .live-controls {
+    opacity: 1;
+  }
+  .live-ctrl {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    background: rgba(0, 0, 0, 0.55);
+    border: none;
+    border-radius: var(--radius-sm, 4px);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    line-height: 1;
+    backdrop-filter: blur(4px);
+  }
+  .live-ctrl:hover {
+    background: rgba(0, 0, 0, 0.8);
   }
 </style>
