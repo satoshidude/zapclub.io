@@ -48,23 +48,8 @@
         {/each}
       </div>
     {/if}
-    {#if entries.length > 3}
-      <div class="board-rows">
-        {#each entries.slice(3, 5) as e (e.pubkey)}
-          {@const p = useProfile(e.pubkey)}
-          {@const npub = npubEncode(e.pubkey)}
-          <button class="board-row" onclick={() => goUser(npub)}>
-            <span class="b-rank">#{e.rank}</span>
-            <img class="b-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-            <span class="b-name">{displayName(e.pubkey, p)}</span>
-            <span class="b-from">{e.zappers} {e.zappers === 1 ? 'zapper' : 'zappers'}</span>
-            <span class="b-sats">⚡ {e.sats.toLocaleString()}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
     <ol class="board">
-      {#each entries.slice(5) as e (e.pubkey)}
+      {#each entries.slice(3) as e (e.pubkey)}
         {@const p = useProfile(e.pubkey)}
         {@const npub = npubEncode(e.pubkey)}
         <li>
@@ -165,67 +150,6 @@
     font-variant-numeric: tabular-nums;
   }
   .pod-first .pod-sats { font-size: 0.88rem; }
-  /* Compact rows #4–#5 */
-  .board-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .board-row {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.45rem 0.9rem 0.45rem 0.6rem;
-    cursor: pointer;
-    color: var(--text);
-    transition: border-color 0.15s ease, transform 0.08s ease;
-  }
-  .board-row:hover { border-color: var(--accent-2); }
-  .board-row:active { transform: translateY(1px); }
-  .b-rank {
-    flex: 0 0 auto;
-    min-width: 1.8rem;
-    text-align: center;
-    font-size: 0.9rem;
-    font-weight: 800;
-    color: var(--text-dim);
-  }
-  .b-av {
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-  }
-  .b-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 700;
-    font-size: 0.88rem;
-  }
-  .b-from {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    font-size: 0.74rem;
-  }
-  .b-sats {
-    flex: 0 0 auto;
-    color: var(--amber);
-    font-weight: 800;
-    font-size: 0.85rem;
-    font-variant-numeric: tabular-nums;
-    min-width: 4.5rem;
-    text-align: right;
-  }
-  @media (max-width: 460px) { .b-from { display: none; } }
   .board {
     list-style: none;
     margin: 0;

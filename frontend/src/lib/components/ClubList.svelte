@@ -156,18 +156,23 @@
       {/if}
 
       {#if lbEntries.length > 3}
-        <div class="lb-rows">
+        <ol class="lb-list">
           {#each lbEntries.slice(3, 5) as e (e.pubkey)}
             {@const p = useProfile(e.pubkey)}
             {@const npub = npubEncode(e.pubkey)}
-            <button class="lb-row" onclick={() => goUser(npub)}>
-              <span class="lb-rank">#{e.rank}</span>
-              <img class="lb-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-              <span class="lb-name">{displayName(e.pubkey, p)}</span>
-              <span class="lb-sats">⚡ {e.sats.toLocaleString()}</span>
-            </button>
+            <li>
+              <a class="lb-row" href={`/user/${npub}`} onclick={(ev) => { ev.preventDefault(); goUser(npub) }}>
+                <span class="lb-rank"><span class="lb-num">#{e.rank}</span></span>
+                <img class="lb-av" src={avatarUrl(e.pubkey, p)} alt="" width="40" height="40" />
+                <span class="lb-name">{displayName(e.pubkey, p)}</span>
+                <span class="lb-stats">
+                  <span class="lb-sats">⚡ {e.sats.toLocaleString()}</span>
+                  <span class="lb-from">from {e.zappers.toLocaleString()} {e.zappers === 1 ? 'person' : 'people'}</span>
+                </span>
+              </a>
+            </li>
           {/each}
-        </div>
+        </ol>
       {/if}
     </section>
   {/if}
@@ -473,42 +478,49 @@
     font-variant-numeric: tabular-nums;
   }
   .lb-pod-first .lb-pod-sats { font-size: 0.88rem; }
-  /* Compact rows #4–5 */
-  .lb-rows {
+  /* List rows #4–5 (same style as leaderboard full list) */
+  .lb-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.5rem;
   }
   .lb-row {
     display: flex;
     align-items: center;
-    gap: 0.7rem;
+    gap: 0.8rem;
     background: var(--bg-elev);
     border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.4rem 0.9rem 0.4rem 0.6rem;
+    border-radius: var(--radius);
+    padding: 0.7rem 0.9rem;
     cursor: pointer;
     color: var(--text);
+    text-decoration: none;
     transition: border-color 0.15s ease, transform 0.08s ease;
-    text-align: left;
   }
   .lb-row:hover { border-color: var(--accent-2); }
   .lb-row:active { transform: translateY(1px); }
   .lb-rank {
     flex: 0 0 auto;
-    min-width: 1.8rem;
-    font-size: 0.9rem;
+    min-width: 3.2rem;
+    font-size: 1.1rem;
+  }
+  .lb-num {
     font-weight: 800;
+    font-variant-numeric: tabular-nums;
     color: var(--text-dim);
-    text-align: center;
+    font-size: 0.95rem;
   }
   .lb-av {
     flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
+    border: 1px solid var(--border);
   }
   .lb-name {
     flex: 1;
@@ -517,13 +529,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 700;
-    font-size: 0.88rem;
+  }
+  .lb-stats {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
   }
   .lb-sats {
-    flex: 0 0 auto;
     color: var(--amber);
     font-weight: 800;
-    font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
+  }
+  .lb-from {
+    color: var(--text-dim);
+    font-size: 0.72rem;
   }
 </style>
