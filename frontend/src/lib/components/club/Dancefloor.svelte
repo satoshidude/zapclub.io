@@ -5,7 +5,6 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { goUser } from '../../router.svelte'
   import type { ClubMember } from '../../nostr/types'
-  import Chat from './Chat.svelte'
   import { chat } from '../../nostr/chat.svelte'
   import { emotes, sendEmote } from '../../nostr/emotes.svelte'
   import { zaps } from '../../nostr/zaps.svelte'
@@ -183,8 +182,6 @@
     selected = null
     goUser(npubEncode(pk))
   }
-
-  let chatOpen = $state(false)
 
   // Auto DJ (owner-only, premium).
   let selectedPlaylistId = $state('')
@@ -380,11 +377,6 @@
     </div>
   {/if}
 
-  <!-- Chat, kept subtle: collapsed by default. -->
-  <details class="chat-acc" bind:open={chatOpen}>
-    <summary><span>💬 Chat</span><span class="chev" aria-hidden="true">▾</span></summary>
-    <Chat {groupId} {canChat} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} {ondelete} />
-  </details>
 </section>
 
 <style>
@@ -838,24 +830,6 @@
   .mini.amber:hover {
     border-color: var(--amber, #f59e0b);
   }
-
-  .chat-acc {
-    margin-top: 0.7rem;
-    border-top: 1px solid var(--border);
-    padding-top: 0.5rem;
-  }
-  .chat-acc summary {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-    list-style: none;
-  }
-  .chat-acc summary::-webkit-details-marker { display: none; }
-  .chat-acc[open] .chev { transform: rotate(180deg); }
-  .chev { transition: transform 0.15s; }
 
   @media (prefers-reduced-motion: reduce) {
     .floor.playing .bob,

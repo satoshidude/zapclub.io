@@ -45,8 +45,7 @@
   }
 </script>
 
-<section class="chat card">
-  <h3>Chat</h3>
+<section class="chat">
   <div class="messages" bind:this={listEl}>
     {#if chat.messages.length === 0}
       <p class="empty">No messages yet. Say hi 👋</p>
@@ -82,26 +81,19 @@
 
 <style>
   .chat {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1rem;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
-  }
-  h3 {
-    margin: 0 0 0.7rem;
-    font-size: 0.95rem;
+    padding: 0.8rem;
   }
   .messages {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    min-height: 160px;
-    max-height: 420px;
   }
   .empty {
     color: var(--text-dim);

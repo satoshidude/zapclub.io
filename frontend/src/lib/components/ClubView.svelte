@@ -50,6 +50,7 @@
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
+  import Chat from './club/Chat.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -343,6 +344,8 @@
       error = String((e as Error)?.message ?? e)
     }
   }
+
+  let chatOpen = $state(typeof window !== 'undefined' && window.innerWidth >= 700)
 
   // Share this club: copy the link, share via the OS sheet, post to a social network, or — with
   // an explicit extra confirm, since it publishes a public note — post it to Nostr.
@@ -693,38 +696,198 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <!-- The floor: DJs up front, crowd behind, chat. -->
-  <Dancefloor
-    {groupId}
-    {members}
-    canChat={isMember}
-    {canModerate}
-    {isOwner}
-    {isMember}
-    {owner}
-    currentDj={sync.live?.dj ?? ''}
-    onkick={kick}
-    onpromote={promote}
-    ondelete={(id) => void deleteEvent(groupId, id)}
-  />
+  <div class="club-body" class:panel-open={chatOpen}>
+    <div class="main-col">
+      <!-- The floor: DJs up front, crowd behind. -->
+      <Dancefloor
+        {groupId}
+        {members}
+        canChat={isMember}
+        {canModerate}
+        {isOwner}
+        {isMember}
+        {owner}
+        currentDj={sync.live?.dj ?? ''}
+        onkick={kick}
+        onpromote={promote}
+        ondelete={(id) => void deleteEvent(groupId, id)}
+      />
+      <!-- The user's own live playlist — feeds the round-robin. -->
+      {#if isMember}
+        <Queue {groupId} {canModerate} />
+      {:else}
+        <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+      {/if}
+    </div>
 
-  <!-- The user's own live playlist for this club — feeds the round-robin. -->
-  {#if isMember}
-    <Queue {groupId} {canModerate} />
-  {:else}
-    <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+    <!-- Chat: side panel (desktop) / bottom sheet (mobile) -->
+    <aside class="chat-panel" class:open={chatOpen}>
+      <div class="panel-head">
+        <span class="panel-title">💬 Chat</span>
+        <button class="panel-close" onclick={() => (chatOpen = false)} aria-label="Close chat">✕</button>
+      </div>
+      <Chat {groupId} canChat={isMember} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} ondelete={(id) => void deleteEvent(groupId, id)} />
+    </aside>
+  </div>
+
+  <!-- Chat toggle: FAB to open on mobile; reopen button on desktop when panel is closed -->
+  {#if !chatOpen}
+    <button class="chat-fab" onclick={() => (chatOpen = true)} title="Open chat">💬</button>
+  {/if}
+  {#if chatOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="chat-backdrop" role="presentation" onclick={() => (chatOpen = false)}></div>
   {/if}
 
 </div>
 
 <style>
   .wrap {
-    max-width: 680px;
+    max-width: 960px;
     margin: 0 auto;
-    padding: 1.2rem 1rem 4rem;
+    padding: 1.2rem 1rem 5rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  /* Club body: main column (floor + queue) + optional chat panel */
+  .club-body {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  .main-col {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+  }
+
+  /* Chat side panel (desktop) */
+  .chat-panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .panel-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .panel-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 0.2rem 0.35rem;
+    border-radius: 4px;
+  }
+  .panel-close:hover { color: var(--text); background: var(--bg-elev-2); }
+
+  /* Chat FAB — reopen button */
+  .chat-fab {
+    position: fixed;
+    bottom: 1.3rem;
+    right: 1.1rem;
+    z-index: 50;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    width: 44px;
+    height: 44px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    display: grid;
+    place-items: center;
+  }
+  .chat-fab:hover { border-color: var(--accent-2); }
+
+  /* Backdrop: only on mobile */
+  .chat-backdrop {
+    display: none;
+  }
+
+  /* Desktop (≥700px): two-column grid when panel is open */
+  @media (min-width: 700px) {
+    .club-body.panel-open {
+      grid-template-columns: 1fr 280px;
+    }
+    .chat-panel {
+      display: none; /* overridden by .open below */
+      position: sticky;
+      top: 1rem;
+      max-height: calc(100vh - 2rem);
+    }
+    .chat-panel.open {
+      display: flex;
+    }
+    /* Desktop FAB: smaller, top-right near the floor, not fixed */
+    .chat-fab {
+      position: static;
+      width: auto;
+      height: auto;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.82rem;
+      box-shadow: none;
+      align-self: flex-start;
+      border-radius: var(--radius-sm);
+    }
+  }
+
+  /* Mobile (<700px): bottom sheet */
+  @media (max-width: 699px) {
+    .chat-panel {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      top: auto;
+      z-index: 100;
+      max-height: 65vh;
+      border-radius: var(--radius) var(--radius) 0 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+      /* Add a swipe handle */
+    }
+    .chat-panel::before {
+      content: '';
+      display: block;
+      width: 36px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin: 8px auto 0;
+      flex: 0 0 auto;
+    }
+    .chat-panel.open {
+      transform: translateY(0);
+    }
+    .chat-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 99;
+    }
   }
   .hero {
     background: var(--bg-elev);
