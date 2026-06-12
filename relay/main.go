@@ -325,6 +325,8 @@ func main() {
 	cond := newConductor(db, relay, state, sk)
 	rtmpMgr := newRtmpManager(cond)
 	cond.rtmpMgr = rtmpMgr
+	radioMgr := newRadioManager(cond)
+	cond.radioMgr = radioMgr
 	// SQLite for persistent conductor state (played-set + track state survive restarts)
 	// and premium status cache (eliminates per-check BadgerDB scans).
 	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
@@ -357,6 +359,11 @@ func main() {
 	rtmpH := &rtmpHandler{mgr: rtmpMgr, cond: cond}
 	relay.Router().HandleFunc("/rtmp/start", rtmpH.handle)
 	relay.Router().HandleFunc("/rtmp/stop", rtmpH.handle)
+
+	radioH := &radioHandler{mgr: radioMgr, cond: cond}
+	relay.Router().Handle("/radio/", radioH)
+	relay.Router().Handle("/radio/start", radioH)
+	relay.Router().Handle("/radio/stop", radioH)
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)

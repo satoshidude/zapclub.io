@@ -10,7 +10,6 @@
   import type { QueueTrack, Playlist } from '../../nostr/types'
   import TrackPreview from '../TrackPreview.svelte'
   import { marquee } from '../../actions/marquee'
-  import RtmpStreamButton from './RtmpStreamButton.svelte'
 
   let { groupId, clubName = '', canModerate = false }: { groupId: string; clubName?: string; canModerate?: boolean } = $props()
 
@@ -177,12 +176,6 @@
     </div>
   </div>
 
-  {#if onStage}
-    <div class="rtmp-row">
-      <RtmpStreamButton {groupId} {clubName} />
-    </div>
-  {/if}
-
   <!-- Save / load playlists. Free: 1 playlist. Premium: unlimited. -->
   <div class="lib">
     {#if saving}
@@ -301,9 +294,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.9rem 1rem;
-  }
-  .rtmp-row {
-    margin-bottom: 0.5rem;
   }
   .head {
     display: flex;

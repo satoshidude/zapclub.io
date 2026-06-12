@@ -35,6 +35,7 @@ export const KIND_FLOOR_REACTION = 20103 // ephemeral floor emote (content = emo
 export const KIND_LIVE_SESSION = 30109 // replaceable per DJ/club: live A/V session state
 export const KIND_AUTODJ = 30105      // replaceable per club (d=club): owner-armed auto-dj playlist
 export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-signed disarm marker
+export const KIND_STREAM = 30110      // replaceable per author/club: RTMP or radio stream status
 
 const RELAYS = [CLUB_RELAY]
 
@@ -672,6 +673,7 @@ export interface ClubSubHandlers {
   onEmote?: (ev: Event) => void
   onAutoDJ?: (ev: Event) => void
   onAutoDJCtrl?: (ev: Event) => void
+  onStream?: (ev: Event) => void
 }
 
 /**
@@ -697,6 +699,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_PLAY,
       KIND_AUTODJ,
       KIND_AUTODJ_CTRL,
+      KIND_STREAM,
     ],
     '#h': [groupId],
   }
@@ -727,6 +730,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
       else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
       else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
+      else if (ev.kind === KIND_STREAM) h.onStream?.(ev)
     },
   })
 

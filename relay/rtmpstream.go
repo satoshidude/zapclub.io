@@ -149,12 +149,12 @@ func (m *rtmpManager) runStream(ctx context.Context, clubID, clubName, videoID s
 	resolveCtx, resolveCancel := context.WithTimeout(ctx, 40*time.Second)
 	defer resolveCancel()
 	log.Printf("rtmp [%.8s] yt-dlp resolving vid=%s", clubID, videoID)
-	ytCmd := exec.CommandContext(resolveCtx, "yt-dlp",
-		"--get-url",
-		"-f", "bestaudio",
-		"--no-warnings",
-		"--", "https://www.youtube.com/watch?v="+videoID,
-	)
+	ytArgs := []string{"--get-url", "-f", "bestaudio", "--no-warnings"}
+	if ytdlpCookies != "" {
+		ytArgs = append(ytArgs, "--cookies", ytdlpCookies)
+	}
+	ytArgs = append(ytArgs, "--", "https://www.youtube.com/watch?v="+videoID)
+	ytCmd := exec.CommandContext(resolveCtx, "yt-dlp", ytArgs...)
 	out, err := ytCmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
@@ -199,6 +199,10 @@ func (m *rtmpManager) runStream(ctx context.Context, clubID, clubName, videoID s
 	log.Printf("rtmp [%.8s] ffmpeg finished vid=%s", clubID, videoID)
 	return nil
 }
+
+// ytdlpCookies is the path to a Netscape-format cookies file for yt-dlp.
+// Set YTDLP_COOKIES=/path/to/cookies.txt in relay.env to bypass YouTube bot checks.
+var ytdlpCookies = os.Getenv("YTDLP_COOKIES")
 
 // rtmpFontPath is used by ffmpeg drawtext. Overridable via RTMP_FONT_PATH.
 var rtmpFontPath = func() string {
@@ -358,11 +362,6 @@ func (h *rtmpHandler) handleStart(w http.ResponseWriter, pubkey string, body []b
 	if err := json.Unmarshal(body, &req); err != nil ||
 		req.Club == "" || req.Server == "" || req.Key == "" {
 		http.Error(w, "bad request: need club, server, key", http.StatusBadRequest)
-		return
-	}
-
-	if !h.cond.isOnStage(req.Club, pubkey) {
-		http.Error(w, "forbidden: not on stage", http.StatusForbidden)
 		return
 	}
 

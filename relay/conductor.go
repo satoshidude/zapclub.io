@@ -116,7 +116,8 @@ type conductor struct {
 	pub   string
 	mu    sync.Mutex
 	clubs map[string]*condClub
-	rtmpMgr *rtmpManager // nil until wired in main.go
+	rtmpMgr  *rtmpManager  // nil until wired in main.go
+	radioMgr *radioManager // nil until wired in main.go
 	// played tracks per (club, dj, videoID); guarded by mu. Applied only to offline DJs so
 	// their queue drains to the lobby instead of replaying infinitely when they can't sign.
 	played map[string]map[string]map[string]bool
@@ -931,10 +932,14 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
-	// Restart any active RTMP streams for this club with the new track.
+	// Restart any active RTMP or radio streams for this club with the new track.
 	if c.rtmpMgr != nil && pb.videoID != "" {
 		vid := pb.videoID
 		go c.rtmpMgr.restartForClub(club, vid)
+	}
+	if c.radioMgr != nil && pb.videoID != "" {
+		vid := pb.videoID
+		go c.radioMgr.restartForClub(club, vid)
 	}
 }
 

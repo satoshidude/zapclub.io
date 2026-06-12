@@ -51,6 +51,8 @@
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
+  import RtmpStreamButton from './club/RtmpStreamButton.svelte'
+  import { startRadioStream, stopRadioStream } from '../nostr/rtmpstream'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -142,6 +144,7 @@
       onEmote: ingestEmote,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
+      onStream: ingestStream,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
         const target = ev.tags.find((t) => t[0] === 'e')?.[1]
@@ -175,6 +178,7 @@
       resetZaps()
       resetPresence()
       resetAutoDJ()
+      activeStreams = new Map()
     }
   })
 
@@ -508,6 +512,53 @@
       busy = false
     }
   }
+
+  // ── Streams (kind 30110) ─────────────────────────────────────────────────────
+  // Active streams visible in the club hero. Keyed by pubkey, one per author.
+  type StreamInfo = { pubkey: string; type: 'rtmp' | 'radio'; watchURL: string }
+  let activeStreams = $state<Map<string, StreamInfo>>(new Map())
+
+  function ingestStream(ev: Event): void {
+    const status = ev.tags.find((t) => t[0] === 'status')?.[1]
+    const type = (ev.tags.find((t) => t[0] === 'type')?.[1] ?? 'rtmp') as 'rtmp' | 'radio'
+    const watchURL = ev.tags.find((t) => t[0] === 'watch')?.[1] ?? ''
+    const m = new Map(activeStreams)
+    if (status === 'live' && watchURL) {
+      m.set(ev.pubkey, { pubkey: ev.pubkey, type, watchURL })
+    } else {
+      m.delete(ev.pubkey)
+    }
+    activeStreams = m
+  }
+
+  // Webradio toggle (owner only)
+  let radioActive = $state(false)
+  let radioBusy = $state(false)
+  let radioErr = $state('')
+
+  async function toggleRadio() {
+    radioBusy = true
+    radioErr = ''
+    try {
+      if (radioActive) {
+        await stopRadioStream(groupId)
+        radioActive = false
+      } else {
+        await startRadioStream(groupId)
+        radioActive = true
+      }
+    } catch (e) {
+      radioErr = String((e as Error)?.message ?? e)
+    } finally {
+      radioBusy = false
+    }
+  }
+
+  // Sync radioActive from stream events (owner's own stream)
+  $effect(() => {
+    const own = activeStreams.get(ownerPk)
+    radioActive = own?.type === 'radio' && own.watchURL !== ''
+  })
 </script>
 
 <div class="wrap">
@@ -674,6 +725,45 @@
         {#if inviteError}<p class="invite-err">{inviteError}</p>{/if}
       </div>
     {/if}
+    <!-- Active streams (kind 30110): show watch links to all members. -->
+    {#if activeStreams.size > 0}
+      <div class="stream-banner">
+        {#each [...activeStreams.values()] as s (s.pubkey)}
+          {#if s.type === 'radio'}
+            <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
+              📻 Webradio — Listen live
+            </a>
+          {:else}
+            {@const sp = useProfile(s.pubkey)}
+            <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
+              📡 {displayName(s.pubkey, sp)} is live — Watch
+            </a>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+
+    <!-- Stream controls: RTMP for any signed-in user; Webradio for club owner only. -->
+    {#if auth.canSign && isMember}
+      <div class="stream-controls">
+        <RtmpStreamButton {groupId} clubName={club?.name ?? ''} />
+        {#if isOwner}
+          <div class="radio-wrap">
+            <button
+              class="btn-stream"
+              class:btn-on={radioActive}
+              onclick={toggleRadio}
+              disabled={radioBusy}
+              title={radioActive ? 'Stop webradio stream' : 'Start webradio stream for this club'}
+            >
+              {radioActive ? '● Webradio — Stop' : '📻 Start Webradio'}
+            </button>
+            {#if radioErr}<span class="stream-err">{radioErr}</span>{/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Player lives inside the hero: no separate card, just a section divider. -->
     <div class="player-section">
       <NowPlaying
@@ -1236,6 +1326,74 @@
     font-size: 0.85rem;
   }
   /* Player inside the hero — divider separates it from club info. */
+  .stream-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+  }
+  .stream-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.75rem;
+    background: color-mix(in srgb, var(--accent, #7c3aed) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+    border-radius: 999px;
+    color: var(--accent, #a78bfa);
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .stream-link:hover {
+    background: color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
+  }
+
+  .stream-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .radio-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .btn-stream {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.65rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-stream:hover:not(:disabled) {
+    border-color: var(--accent, #7c3aed);
+    color: var(--text);
+  }
+  .btn-stream.btn-on {
+    border-color: #7c3aed;
+    color: #a78bfa;
+  }
+  .btn-stream:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .stream-err {
+    font-size: 0.72rem;
+    color: var(--danger, #ef4444);
+  }
+
   .player-section {
     margin-top: 0.9rem;
     padding-top: 0.9rem;

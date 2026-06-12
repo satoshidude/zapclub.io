@@ -1,28 +1,25 @@
 <script lang="ts">
-  import { stage } from '../../nostr/stage.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import { startRtmpStream, stopRtmpStream, loadRtmpConfig, saveRtmpConfig } from '../../nostr/rtmpstream'
 
   let { groupId, clubName = '' }: { groupId: string; clubName?: string } = $props()
 
-  const onStage = $derived(stage.isOnStage(auth.pubkey))
-
   type Step = 'idle' | 'open' | 'connecting' | 'streaming' | 'error'
   let step = $state<Step>('idle')
   let err = $state('')
 
-  // Config persisted to localStorage — never sent to Nostr.
   const saved = loadRtmpConfig(groupId)
   let server = $state(saved.server)
   let key = $state(saved.key)
+  let watchURL = $state(saved.watchURL)
 
   async function start() {
     if (!server.trim() || !key.trim()) return
-    saveRtmpConfig(groupId, server.trim(), key.trim())
+    saveRtmpConfig(groupId, server.trim(), key.trim(), watchURL.trim())
     step = 'connecting'
     err = ''
     try {
-      await startRtmpStream(groupId, clubName, server.trim(), key.trim())
+      await startRtmpStream(groupId, clubName, server.trim(), key.trim(), watchURL.trim())
       step = 'streaming'
     } catch (e) {
       err = String((e as Error)?.message ?? e)
@@ -43,15 +40,15 @@
   }
 </script>
 
-{#if onStage}
+{#if auth.canSign}
   <div class="rtmp-wrap">
     {#if step === 'idle' || step === 'open'}
-      <button class="btn-rtmp" onclick={toggle} title="Stream club audio to RTMP">
-        {step === 'open' ? '▲' : '⬆'} Stream
+      <button class="btn-stream" onclick={toggle} title="Stream club audio to RTMP">
+        {step === 'open' ? '▲' : '⬆'} Stream to RTMP
       </button>
 
       {#if step === 'open'}
-        <div class="rtmp-panel">
+        <div class="panel">
           <label class="lbl">
             RTMP Server
             <input
@@ -73,6 +70,17 @@
               autocomplete="off"
             />
           </label>
+          <label class="lbl">
+            Watch URL <span class="opt">(optional — shown to club members)</span>
+            <input
+              class="inp"
+              type="url"
+              bind:value={watchURL}
+              placeholder="https://www.twitch.tv/yourchannel"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
           <button
             class="btn-start"
             onclick={start}
@@ -87,12 +95,12 @@
       <span class="status dim">Connecting…</span>
 
     {:else if step === 'streaming'}
-      <button class="btn-rtmp btn-on" onclick={stop} title="Stop RTMP stream">
+      <button class="btn-stream btn-on" onclick={stop} title="Stop RTMP stream">
         ● Streaming — Stop
       </button>
 
     {:else if step === 'error'}
-      <div class="rtmp-err-row">
+      <div class="err-row">
         <span class="err-msg">{err}</span>
         <button class="mini" onclick={() => { step = 'open'; err = '' }}>↩</button>
       </div>
@@ -107,7 +115,7 @@
     gap: 0.4rem;
   }
 
-  .btn-rtmp {
+  .btn-stream {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
@@ -122,7 +130,7 @@
     white-space: nowrap;
     transition: border-color 0.15s, color 0.15s;
   }
-  .btn-rtmp:hover {
+  .btn-stream:hover {
     border-color: var(--accent, #7c3aed);
     color: var(--text);
   }
@@ -131,7 +139,7 @@
     color: #a78bfa;
   }
 
-  .rtmp-panel {
+  .panel {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -147,6 +155,11 @@
     gap: 0.2rem;
     font-size: 0.72rem;
     color: var(--text-dim);
+  }
+  .opt {
+    font-weight: 400;
+    color: var(--text-muted, var(--text-dim));
+    opacity: 0.7;
   }
 
   .inp {
@@ -175,20 +188,15 @@
     cursor: pointer;
     transition: opacity 0.15s;
   }
-  .btn-start:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .btn-start:not(:disabled):hover {
-    opacity: 0.85;
-  }
+  .btn-start:disabled { opacity: 0.4; cursor: default; }
+  .btn-start:not(:disabled):hover { opacity: 0.85; }
 
   .status {
     font-size: 0.75rem;
     color: var(--text-dim);
   }
 
-  .rtmp-err-row {
+  .err-row {
     display: flex;
     align-items: center;
     gap: 0.4rem;
