@@ -856,10 +856,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	// Rate-limited to once per heartbeat so a fully-broken queue drains slowly (giving the DJ
 	// time to react) rather than flushing all tracks in seconds.
 	if c.brokenSkip(club, pb, now) {
-		sinceLastSkip := now - c.brokenSkipAt[club]
-		if sinceLastSkip < condHeartbeatMS {
-			log.Printf("conductor [%.8s] broken-skip throttled vid=%s sinceMs=%d", club, pb.videoID, sinceLastSkip)
-		} else {
+		if now-c.brokenSkipAt[club] >= condHeartbeatMS {
 			c.brokenSkipAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
 			c.advance(ctx, club, djPks, queues, pb, now)
@@ -1353,7 +1350,14 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		return
 	}
 
-	if c.skipRequested(ctx, club, pb) || c.brokenSkip(club, pb, now) {
+	if c.skipRequested(ctx, club, pb) {
+		nextTrack()
+		startTrack()
+		return
+	}
+	if c.brokenSkip(club, pb, now) && now-c.brokenSkipAt[club] >= condHeartbeatMS {
+		c.brokenSkipAt[club] = now
+		log.Printf("conductor [%.8s] advance reason=broken-auto vid=%s", club, pb.videoID)
 		nextTrack()
 		startTrack()
 		return
