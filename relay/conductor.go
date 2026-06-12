@@ -77,8 +77,9 @@ type condClub struct {
 	title      string
 	duration   int
 	startedAt  int64 // ms (relay clock)
-	lastBeat   int64 // ms of the last now_playing publish
-	playing    bool
+	lastBeat      int64 // ms of the last now_playing publish
+	lastBootstrap int64 // ms of the last bootstrap attempt (throttle when queue empty)
+	playing       bool
 	inTakeover bool // true while a live-session (kind 30109, mode=takeover) is active
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
 	autoOrder []int
@@ -811,9 +812,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	}
 
 	// Not playing yet → bootstrap from the round-robin.
+	// Throttled to once per heartbeat interval to avoid busy-spinning when all queues are empty.
 	if !pb.playing {
-		log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
-		c.advance(ctx, club, djPks, queues, pb, now)
+		if now-pb.lastBootstrap >= condHeartbeatMS {
+			pb.lastBootstrap = now
+			log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
+			c.advance(ctx, club, djPks, queues, pb, now)
+		}
 		return
 	}
 	// Orphan guard: the playing DJ left the stage → move on.
