@@ -137,18 +137,38 @@
         <h2>⚡ Top DJs</h2>
         <button class="lb-all" onclick={goLeaderboard}>Full leaderboard →</button>
       </div>
-      <div class="lb-list">
-        {#each lbEntries as e (e.pubkey)}
-          {@const p = useProfile(e.pubkey)}
-          {@const npub = npubEncode(e.pubkey)}
-          <button class="lb-row" onclick={() => goUser(npub)}>
-            <span class="lb-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
-            <img class="lb-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
-            <span class="lb-name">{displayName(e.pubkey, p)}</span>
-            <span class="lb-sats">⚡ {e.sats.toLocaleString()}</span>
-          </button>
-        {/each}
-      </div>
+
+      {#if lbEntries.length >= 3}
+        <div class="lb-podium">
+          {#each [lbEntries[1], lbEntries[0], lbEntries[2]] as e (e.pubkey)}
+            {@const p = useProfile(e.pubkey)}
+            {@const npub = npubEncode(e.pubkey)}
+            {@const isFirst = e.rank === 1}
+            <button class="lb-pod" class:lb-pod-first={isFirst} onclick={() => goUser(npub)}>
+              <span class="lb-pod-medal">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : '🥉'}</span>
+              <img class="lb-pod-av" src={avatarUrl(e.pubkey, p)} alt=""
+                width={isFirst ? 52 : 40} height={isFirst ? 52 : 40} />
+              <span class="lb-pod-name">{displayName(e.pubkey, p)}</span>
+              <span class="lb-pod-sats">⚡ {e.sats.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if lbEntries.length > 3}
+        <div class="lb-rows">
+          {#each lbEntries.slice(3, 5) as e (e.pubkey)}
+            {@const p = useProfile(e.pubkey)}
+            {@const npub = npubEncode(e.pubkey)}
+            <button class="lb-row" onclick={() => goUser(npub)}>
+              <span class="lb-rank">#{e.rank}</span>
+              <img class="lb-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
+              <span class="lb-name">{displayName(e.pubkey, p)}</span>
+              <span class="lb-sats">⚡ {e.sats.toLocaleString()}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </section>
   {/if}
 </div>
@@ -398,7 +418,63 @@
     padding: 0;
   }
   .lb-all:hover { text-decoration: underline; }
-  .lb-list {
+  /* Podium */
+  .lb-podium {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: end;
+  }
+  .lb-pod {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.8rem 0.5rem 0.7rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.15s ease, transform 0.08s ease;
+    text-align: center;
+  }
+  .lb-pod:hover { border-color: var(--accent-2); }
+  .lb-pod:active { transform: translateY(1px); }
+  .lb-pod.lb-pod-first {
+    border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+    background: radial-gradient(120% 140% at 50% 0%, rgba(245,166,35,0.13) 0%, transparent 65%), var(--bg-elev);
+    padding-top: 1.1rem;
+    padding-bottom: 0.9rem;
+  }
+  .lb-pod-medal { font-size: 1.2rem; line-height: 1; }
+  .lb-pod-first .lb-pod-medal { font-size: 1.5rem; }
+  .lb-pod-av {
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+    border: 2px solid var(--border);
+  }
+  .lb-pod-first .lb-pod-av { border-color: var(--amber); }
+  .lb-pod-name {
+    font-weight: 700;
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .lb-pod-first .lb-pod-name { font-size: 0.95rem; }
+  .lb-pod-sats {
+    color: var(--amber);
+    font-weight: 800;
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .lb-pod-first .lb-pod-sats { font-size: 0.88rem; }
+  /* Compact rows #4–5 */
+  .lb-rows {
     display: flex;
     flex-direction: column;
     gap: 0.45rem;
@@ -421,10 +497,10 @@
   .lb-rank {
     flex: 0 0 auto;
     min-width: 1.8rem;
-    font-size: 0.95rem;
-    text-align: center;
+    font-size: 0.9rem;
     font-weight: 800;
     color: var(--text-dim);
+    text-align: center;
   }
   .lb-av {
     flex: 0 0 auto;
