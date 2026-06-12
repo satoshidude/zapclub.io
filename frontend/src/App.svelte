@@ -75,7 +75,6 @@
     <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <div class="top-actions">
-    <button class="icon-btn" onclick={goLeaderboard} title="Zap leaderboard" aria-label="Zap leaderboard">🏆</button>
     <button class="icon-btn" onclick={goHowto} title="How it works" aria-label="How it works">?</button>
     {#if isSuperadmin()}
       <button class="icon-btn" onclick={goAdmin} title="Admin" aria-label="Admin">⚙️</button>

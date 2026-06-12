@@ -16,11 +16,25 @@
 
   const name = $derived(displayName(pubkey, profile))
   const avatar = $derived(avatarUrl(pubkey, profile))
+
+  let nameEl = $state<HTMLSpanElement | null>(null)
+  let scrolling = $state(false)
+
+  $effect(() => {
+    if (!nameEl) return
+    const check = () => { scrolling = nameEl!.scrollWidth > nameEl!.offsetWidth }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(nameEl)
+    return () => ro.disconnect()
+  })
 </script>
 
 <span class="badge">
   <img class="avatar" src={avatar} alt="" width={size} height={size} style:width="{size}px" style:height="{size}px" />
-  <span class="name">{name}</span>
+  <span class="name-clip">
+    <span class="name" class:scrolling bind:this={nameEl}>{name}</span>
+  </span>
 </span>
 
 <style>
@@ -35,15 +49,25 @@
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
   }
+  .name-clip {
+    max-width: 12ch;
+    overflow: hidden;
+    display: inline-block;
+  }
   .name {
-    /* Same look as the logo wordmark (App.svelte .brand .word). */
+    display: inline-block;
     font-size: 1rem;
     font-weight: 800;
     letter-spacing: -0.02em;
     color: #fff;
-    max-width: 12ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .name.scrolling {
+    animation: name-scroll 5s ease-in-out infinite;
+  }
+  @keyframes name-scroll {
+    0%, 15%  { transform: translateX(0); }
+    70%, 85% { transform: translateX(calc(-100% + 12ch)); }
+    95%, 100% { transform: translateX(0); }
   }
 </style>

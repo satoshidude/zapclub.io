@@ -1,7 +1,7 @@
 <script lang="ts">
   import { listClubs, joinClub, fetchLiveClubIds, type MyClub } from '../nostr/groups'
   import { fetchMyClubs } from '../nostr/groups'
-  import { goClub, goUser } from '../router.svelte'
+  import { goClub, goUser, goLeaderboard } from '../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
   import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
@@ -9,12 +9,14 @@
   import { clubAvatar } from '../avatar'
   import type { Club } from '../nostr/types'
   import { ownPremium } from '../nostr/premium.svelte'
+  import { fetchLeaderboard, type LeaderboardEntry } from '../nostr/leaderboard'
 
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
   let liveClubIds = $state<Set<string>>(new Set())
   let loading = $state(true)
   let error = $state('')
+  let lbEntries = $state<LeaderboardEntry[]>([])
 
   const myIds = $derived(new Set(myClubs.map((c) => c.id)))
   let showAllClubs = $state(false)
@@ -56,6 +58,10 @@
 
   $effect(() => {
     load()
+  })
+
+  $effect(() => {
+    void fetchLeaderboard().then((r) => (lbEntries = r.top.slice(0, 5)))
   })
 </script>
 
@@ -123,6 +129,27 @@
         {showAllClubs ? '↑ Show less' : `All clubs (${clubs.length}) →`}
       </button>
     {/if}
+  {/if}
+
+  {#if lbEntries.length > 0}
+    <section class="lb-preview">
+      <div class="lb-head">
+        <h2>⚡ Top DJs</h2>
+        <button class="lb-all" onclick={goLeaderboard}>Full leaderboard →</button>
+      </div>
+      <div class="lb-list">
+        {#each lbEntries as e (e.pubkey)}
+          {@const p = useProfile(e.pubkey)}
+          {@const npub = npubEncode(e.pubkey)}
+          <button class="lb-row" onclick={() => goUser(npub)}>
+            <span class="lb-rank">{e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : `#${e.rank}`}</span>
+            <img class="lb-av" src={avatarUrl(e.pubkey, p)} alt="" width="28" height="28" />
+            <span class="lb-name">{displayName(e.pubkey, p)}</span>
+            <span class="lb-sats">⚡ {e.sats.toLocaleString()}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
   {/if}
 </div>
 
@@ -346,5 +373,81 @@
   .err {
     color: var(--danger);
     font-size: 0.85rem;
+  }
+  /* ── Top DJs leaderboard preview ───────────────────────────────────────── */
+  .lb-preview {
+    margin-top: 2rem;
+  }
+  .lb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+  }
+  .lb-head h2 {
+    margin: 0;
+    font-size: 1.3rem;
+  }
+  .lb-all {
+    background: none;
+    border: none;
+    color: var(--accent-2);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+  }
+  .lb-all:hover { text-decoration: underline; }
+  .lb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .lb-row {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.4rem 0.9rem 0.4rem 0.6rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.15s ease, transform 0.08s ease;
+    text-align: left;
+  }
+  .lb-row:hover { border-color: var(--accent-2); }
+  .lb-row:active { transform: translateY(1px); }
+  .lb-rank {
+    flex: 0 0 auto;
+    min-width: 1.8rem;
+    font-size: 0.95rem;
+    text-align: center;
+    font-weight: 800;
+    color: var(--text-dim);
+  }
+  .lb-av {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--bg-elev-2);
+  }
+  .lb-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+    font-size: 0.88rem;
+  }
+  .lb-sats {
+    flex: 0 0 auto;
+    color: var(--amber);
+    font-weight: 800;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
 </style>
