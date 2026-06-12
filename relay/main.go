@@ -205,6 +205,7 @@ func main() {
 
 	// Per-IP-Spamschutz (schließt die Sybil-Lücke des Per-Pubkey-Limits): Per-IP-Event- +
 	// Per-IP-Connection-Limiter. Direkt nach dem Ban-Check (billige Rejects zuerst).
+	initWhitelist()
 	ipEventLim, ipConnLim := setupSpamProtection(relay)
 
 	// NIP-13 Proof-of-Work: per-kind, env-tunable, 0 = off. Join (9021) requires difficulty 15
@@ -324,9 +325,7 @@ func main() {
 
 	cond := newConductor(db, relay, state, sk)
 	rtmpMgr := newRtmpManager(cond)
-	cond.rtmpMgr = rtmpMgr
 	radioMgr := newRadioManager(cond)
-	cond.radioMgr = radioMgr
 	// SQLite for persistent conductor state (played-set + track state survive restarts)
 	// and premium status cache (eliminates per-check BadgerDB scans).
 	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
@@ -357,13 +356,11 @@ func main() {
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
 
 	rtmpH := &rtmpHandler{mgr: rtmpMgr, cond: cond}
-	relay.Router().HandleFunc("/rtmp/start", rtmpH.handle)
-	relay.Router().HandleFunc("/rtmp/stop", rtmpH.handle)
+	relay.Router().Handle("/rtmp/push/", rtmpH) // WebSocket: browser audio → ffmpeg → RTMP
 
 	radioH := &radioHandler{mgr: radioMgr, cond: cond}
-	relay.Router().Handle("/radio/", radioH)
-	relay.Router().Handle("/radio/start", radioH)
-	relay.Router().Handle("/radio/stop", radioH)
+	relay.Router().Handle("/radio/push/", radioH) // WebSocket: browser audio → fan-out
+	relay.Router().Handle("/radio/", radioH)       // GET: HTTP audio stream listener
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)

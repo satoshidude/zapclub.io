@@ -4,10 +4,24 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/fiatjaf/khatru"
 	"github.com/nbd-wtf/go-nostr"
 )
+
+// ipWhitelist holds IPs from RELAY_IP_WHITELIST (comma-separated) that bypass all rate limits.
+var ipWhitelist map[string]bool
+
+func initWhitelist() {
+	ipWhitelist = map[string]bool{}
+	for _, ip := range strings.Split(env("RELAY_IP_WHITELIST", ""), ",") {
+		ip = strings.TrimSpace(ip)
+		if ip != "" {
+			ipWhitelist[ip] = true
+		}
+	}
+}
 
 // Per-IP-Spamschutz + NIP-13 Join-PoW.
 //
@@ -65,7 +79,11 @@ func setupSpamProtection(relay *khatru.Relay) (eventLim, connLim *ipLimiter) {
 		eventLim = newIPLimiter(burst, envFloat("RELAY_IP_EVENT_REFILL", 10))
 		relay.RejectEvent = append(relay.RejectEvent,
 			func(ctx context.Context, _ *nostr.Event) (bool, string) {
-				if !eventLim.allow(connIP(ctx)) {
+				ip := connIP(ctx)
+				if ipWhitelist[ip] {
+					return false, ""
+				}
+				if !eventLim.allow(ip) {
 					return true, "rate-limited: too many events from your network"
 				}
 				return false, ""
@@ -80,7 +98,11 @@ func setupSpamProtection(relay *khatru.Relay) (eventLim, connLim *ipLimiter) {
 		connLim = newIPLimiter(burst, envFloat("RELAY_IP_CONN_REFILL", 1))
 		relay.RejectConnection = append(relay.RejectConnection,
 			func(r *http.Request) bool {
-				return !connLim.allow(clientIP(r))
+				ip := clientIP(r)
+				if ipWhitelist[ip] {
+					return false
+				}
+				return !connLim.allow(ip)
 			},
 		)
 	}
