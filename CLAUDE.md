@@ -126,6 +126,25 @@ driften DJ-Sortierung und `pos`-Mapping zwischen Clients auseinander.
 **leer** ist, stoppt der Stream und der **Platzhalter (Lobby-Track)** läuft. `live` zählt
 nur bei aktiven DJs mit nicht-leerer Queue, sonst `null`.
 
+**SQLite-Persistenz (`conductor.db`):** Der Conductor hält eine SQLite-Datei neben der
+BadgerDB. BadgerDB ist der Event-Store (Nostr-nativ, append-mostly), hat aber keine
+SQL-Indizes — Tag-Queries erfordern Full-Kind-Scans. SQLite übernimmt vier abgeleitete
+Hot-Path-Tabellen, die sich nicht natürlich in einem Key-Value-Store abbilden lassen:
+
+| Tabelle | Inhalt | Warum SQLite |
+|---|---|---|
+| `conductor_state` | pos, videoID, DJ, started_at pro Club | Überlebt Restart — kein 30100/1313-Replay nötig |
+| `played` | Offline-DJ Played-Set (club/dj/videoID) | Guard bleibt nach Relay-Crash aktiv |
+| `club_owners` | club → Creator-pubkey (immutable) | Einmalig gespeichert, nie wieder 9007 scannen |
+| `premium_cache` | pubkey → valid+expires (1 h TTL) | Alle Gates lesen premium-Status O(1) ohne 30108-Scan |
+
+SQLite ist *ergänzend*, nicht ersetzend. Der Event-Store bleibt die Quelle der Wahrheit;
+SQLite hält nur abgeleiteten Zustand, der aus BadgerDB neu aufgebaut werden kann, falls
+`conductor.db` verloren geht (kostet einen einmaligen Cold-Start-Scan).
+
+Library: `modernc.org/sqlite` (pure Go, kein CGO → statisches Binary bleibt statisch).
+WAL-Modus, ein Writer (Conductor-Tick-Goroutine ist seriell), `_busy_timeout=5000`.
+
 ### Stage / Bühne (parameterized-replaceable, kind 30102)
 „Ich bin DJ in diesem Club" — Heartbeat-Event pro DJ (`h`=club). Trägt den Bühnen-Beitritt
 (`since`) → Quelle für die Conductor-Reihenfolge. Bis zu 5 DJs (`MAX_DJS`, nach `since`
@@ -143,12 +162,13 @@ bereits gespielt/inaktiv). Gespeicherte User-Playlisten („Playlistenverwaltung
 ### Round-Robin
 Über einen **globalen Integer `pos`** im `now_playing`: `djIndex = pos % n`,
 `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0, …, dj0.t1, …`. `playable(djs)`-Matrix
-filtert `off`-Tracks und den laufenden Track. **Offline-DJ-Guard** (neu): für DJs ohne
-frischen 20100-Presence-Beat (condOnlineMS=50 s) wendet das Relay zusätzlich ein
-**Played-Set** (aus 1313-Play-Log + in-memory advance()-Records) an, das jeden bereits
-gespielten Track sperrt — die Queue leert sich so natürlich zur Lobby statt ewig zu
-rotieren. Online-DJs sind davon nicht betroffen (ihr Browser markiert Tracks als `off`).
-`advance()` sucht den nächsten spielbaren Slot. Skaliert O(1), die 5 ist nur eine UI-/Slot-Grenze.
+filtert `off`-Tracks und den laufenden Track. **Offline-DJ-Guard**: für DJs ohne frischen
+20100-Presence-Beat (condOnlineMS=50 s) wendet das Relay ein **Played-Set** an —
+in-memory (advance()-Records) + SQLite `played`-Tabelle (survives Restart). Jeder bereits
+gespielte Track wird gesperrt; die Queue leert sich natürlich zur Lobby statt ewig zu
+rotieren. Online-DJs sind nicht betroffen (ihr Browser markiert Tracks als `off`, das
+ist die einzige Wahrheit für anwesende DJs). `advance()` sucht den nächsten spielbaren
+Slot. Skaliert O(1), die 5 ist nur eine UI-/Slot-Grenze.
 
 ### now_playing (parameterized-replaceable, kind 30100)
 Genau 1 aktuelle Version pro Club (`d`=club). **Nur der Conductor** überschreibt bei
@@ -193,6 +213,9 @@ eine zusätzliche Relay-Prüfung davor, ohne das Datenmodell zu ändern.
 - **Zaps:** `@getalby/sdk` + bitcoin-connect (NWC/NIP-47) für NIP-57-Flows. Live.
 - **Realtime:** eigenes **NIP-29-Relay** (khatru + relay29, Go, badger),
   `wss://relay.zapclub.io`. Quelle in `relay/`. Details → §7.
+- **SQLite** (`modernc.org/sqlite`, pure Go, kein CGO): Hot-Path-Cache neben BadgerDB —
+  Conductor-State, Played-Set, Club-Owner-Cache, Premium-Status-Cache (1 h TTL). Datei:
+  `conductor.db` (via `SQLITE_PATH`). Details → §4 „SQLite-Persistenz".
 - **Audio:** YouTube IFrame API; Relay ist Zeitbehörde (`conductor.go`); Client lädt an
   kalibrierter Position und korrigiert >3 s Drift alle 5 s (Threshold-Seek).
 - **Hosting:** statisches Frontend auf `zapclub.io` (Caddy), Relay daneben.
@@ -222,14 +245,20 @@ Die Limits sind **relay-seitig** erzwungen (RejectEvent-Hooks in Go), nicht nur 
 ### Relay-Enforcement (Go)
 
 - **`relay/clubcap.go`** — kind 9007 (create-group): zählt bestehende 9007-Events je pubkey.
-  Free ≤ 1, Premium ≤ 3. Bestehende Clubs über dem Limit bleiben (Grandfathering).
-- **`relay/playlistgate.go`** — kind 30104: zählt distinct d-Tags je pubkey.
+  Free ≤ 1, Premium ≤ 3. Grandfathering. **In-Memory `countIdx`** (warmCount + OnEventSaved)
+  → O(1)-Lookup, kein BadgerDB-Scan per Anfrage.
+- **`relay/playlistgate.go`** — kind 30104: distinct d-Tags je pubkey.
   Free ≤ 1, Premium = unbegrenzt. Update desselben d-Tags immer erlaubt.
+  **In-Memory `listIdx`** (warmList + OnEventSaved) → O(1), kein 30104-Scan.
 - **`relay/conductor.go` `stageGate`** — kind 30102 (stage heartbeat): zählt aktive DJs
-  (< 1h alt, nicht `off`). Cap basiert auf dem Premium-Status des **Club-Besitzers** (nicht des DJs).
-  Free-Club ≤ 2 DJs, Premium-Club ≤ 5 DJs.
-- **`relay/premium.go` `premiumStore`** — verifiziert NIP-57-9735-Receipts auf die zapclub-
-  Lightning-Adresse, 30-Tage-Fenster. Kein externer API-Aufruf, nur Relay-eigene Events.
+  via `conductor.countActiveOtherDJs()` (In-Memory stageIdx + kickIdx, zero DB). Cap basiert
+  auf Premium-Status des **Club-Besitzers** via `conductor.isPremiumOwner()` (in-memory
+  premCache 60 s → SQLite premium_cache 1 h → BadgerDB). Free-Club ≤ 2, Premium-Club ≤ 5.
+- **`relay/premium.go` `premiumStore`** — verifiziert kind-30108 Relay-Events (relay-signed
+  Subscription-Status). `valid()` nutzt **SQLite `premium_cache`** (1 h TTL) als ersten
+  Layer; BadgerDB-30108-Scan nur auf Cache-Miss. `grant()` invalidiert den Cache sofort.
+  Kein externer API-Aufruf. Alle Gates (clubcap, playlistgate, autodjgate, privategate)
+  teilen denselben `premiumStore` und profitieren automatisch vom Cache.
 - **`relay/entryfee.go`** — Entry-fee-Gate für bezahlte Clubs (Premium-Feature).
 - **`SUPERADMIN` env** — pubkey ist von allen Limits ausgenommen (Superadmin-Override).
 
@@ -288,6 +317,11 @@ für alle User laufen. Es trägt alle Club-Events (NIP-29), `now_playing`, Chat,
 - **Deploy-Disziplin:** `go.mod`/`go.sum` eingecheckt; **nie** `go get`/`go mod tidy` auf
   dem Server (bricht `git pull`, stille No-Op-Deploys). Nach Deploy verifizieren, dass das
   neue Feature wirklich im Binary ist (`grep <feature> <binary>`), nicht nur „build ok".
+- **SQLite (`conductor.db`) über Deploys erhalten:** Die Datei liegt unter dem Arbeitsverzeichnis
+  des Service (`/var/lib/zapclub-relay/conductor.db`). Sie überlebt normale Deploys (nur das
+  Binary wird ersetzt). Wenn sie verloren geht: kein Datenverlust, aber ein einmaliger
+  Cold-Start-Scan (BadgerDB 30108/1313/9007) und fehlende Drift-Korrektur für laufende Clubs.
+  Pfad per `SQLITE_PATH` konfigurierbar.
 - Server: gehärteter Ubuntu-24.04-VPS (UFW/fail2ban/SSH) — Zugang & Setup-Status nur im
   Memory, nicht in dieser eingecheckten Datei.
 
@@ -298,7 +332,7 @@ für alle User laufen. Es trägt alle Club-Events (NIP-29), `now_playing`, Chat,
 **✅ MVP + P1 + Monetarisierung — alles live (Stand Juni 2026):**
 - Nostr-Login (NIP-07/46/Read-Only), Club erstellen/betreten (offene Clubs)
 - Club-Verzeichnis (Top-3 + All), Bühne (Free: 2 / Premium: 5 DJs), Round-Robin, synchroner YT-Playback
-- Relay-Conductor (`conductor.go`, immer-an), Stop→Platzhalter; Offline-DJ-Guard (1313 Played-Set + 20100 Presence-Gate); Drift-Correction (Client Threshold-Seek)
+- Relay-Conductor (`conductor.go`, immer-an), Stop→Platzhalter; Offline-DJ-Guard (Played-Set in-memory + SQLite `played` + 20100 Presence-Gate); Drift-Correction (Client Threshold-Seek); SQLite Hot-Path-Cache (`conductor_state`, `played`, `club_owners`, `premium_cache`)
 - Moderation: Skip, DJ werfen, Ban (relay), Mods ernennen
 - Chat (kind 9), Avatare (npub/NIP-05)
 - Zaps (NIP-57/NWC) — Track-Voting + Score + Leaderboard, NWC-Zahlung via bitcoin-connect

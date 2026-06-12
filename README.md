@@ -120,6 +120,23 @@ Moving the single writer to the always-on relay **deletes an entire class of
 problems** the old client-conductor had — leader election, failover, rescue,
 sticky-conductor handoff, and the round-robin divergence bugs they caused.
 
+**Persistence (SQLite)** — the conductor keeps a small SQLite file (`conductor.db`)
+alongside the BadgerDB event store. BadgerDB is great for Nostr events but its
+tag-indexed queries require a full kind-scan; SQLite provides O(1) point-lookups
+for four derived/hot-path summaries that don't fit naturally in a key-value store:
+
+| Table | What | Survives restart |
+|---|---|---|
+| `conductor_state` | current pos, videoID, DJ, started_at per club | ✓ resumes mid-track |
+| `played` | offline-DJ played-set (which tracks were already played this session) | ✓ guard intact after crash |
+| `club_owners` | club → creator pubkey (immutable, looked up once) | ✓ no re-scan of 9007 events |
+| `premium_cache` | per-pubkey premium status (1 h TTL) | ✓ no 30108 scan on cold start |
+
+SQLite is used **alongside** BadgerDB (not replacing it). The event store remains
+the source of truth; SQLite holds only derived state that can be rebuilt from events
+if the file is lost. The library is pure-Go (`modernc.org/sqlite`, no CGO) so the
+relay's static binary stays static.
+
 ### Synced playback (drift correction)
 
 The relay republishes `now_playing` on every track change and as a **~15 s
@@ -138,10 +155,12 @@ A single integer `pos` on `now_playing` indexes the whole club set across `n`
 staged DJs: `djIndex = pos % n`, `trackIndex = floor(pos / n)` → `dj0.t0, dj1.t0,
 … dj0.t1, …`. A "playable" matrix masks out tracks marked `off` and the currently-playing
 track; `advance()` walks to the next playable slot. For **offline DJs** (no recent
-`20100` presence beat), the relay also applies a **played-set guard** backed by the
-`1313` play-log: each played track is blocked so an offline DJ's queue drains to
-the lobby instead of replaying infinitely. Online DJs are unaffected — their
-browser marks tracks `off` directly. It's O(1) and the 5-DJ cap is purely a UI limit.
+`20100` presence beat within 50 s), the relay applies a **played-set guard**: each
+track the conductor already played for that DJ is blocked, so their queue drains to
+the lobby instead of replaying infinitely. The played-set is recorded in the SQLite
+`played` table (survives relay restarts) and also backed by `1313` play-log events.
+Online DJs are unaffected — their browser marks tracks `off` directly, which is the
+sole truth for present DJs. It's O(1) and the 5-DJ cap is purely a UI limit.
 DJ order is deterministic across all clients because it's sorted by the persisted
 `since` from each `30102`; a stage slot stays **sticky for ~1 h** after the last
 heartbeat so a reload or brief drop doesn't bump a DJ. (When the owner is on stage
@@ -191,7 +210,9 @@ tallied from verified receipts.
 
 - **Frontend** — Svelte 5 (Runes) + Vite + TS. `nostr-tools` (events/signing/
   pool), `applesauce-*` (accounts/signers), `qrcode-generator`, `@dicebear/*`.
-- **Relay** — Go: `khatru` + `relay29` (pinned to `master`) + `eventstore/badger`.
+- **Relay** — Go: `khatru` + `relay29` (pinned to `master`) + `eventstore/badger`
+  (LSM-tree event store) + `modernc.org/sqlite` (pure-Go, no CGO — hot-path cache,
+  see *Persistence* above).
 - **Audio** — YouTube IFrame API; relay is the time authority (`sent_at` heartbeats); clients load at the calibrated position and seek to correct >3 s drift every 5 s.
 - **Lightning** — NIP-57 zaps via LNURL; WebLN / Alby Go / any wallet.
 - **Hosting** — static frontend + relay behind Caddy on one box.
@@ -221,6 +242,9 @@ go run .                                        # serves on 127.0.0.1:3334
 Local → prod (no staging). Frontend built and served statically via Caddy on
 `zapclub.io`; relay as a hardened systemd service behind Caddy on
 `wss://relay.zapclub.io`. The relay is cross-compiled (`GOOS=linux GOARCH=amd64
-CGO_ENABLED=0`) and shipped as a static binary. Deploy discipline: `go.mod` /
-`go.sum` committed, **never** `go get` on the server, verify the feature is in
-the binary after deploy.
+CGO_ENABLED=0`) and shipped as a static binary — `modernc.org/sqlite` is pure Go
+so CGO stays off. Deploy discipline: `go.mod` / `go.sum` committed, **never**
+`go get` on the server, verify the feature is in the binary after deploy.
+`conductor.db` (SQLite, configured via `SQLITE_PATH`) must be kept across deploys
+(it holds conductor state and the premium cache); it is rebuilt from BadgerDB on
+first boot if lost, but that causes one cold-start 30108/1313 scan.
