@@ -323,6 +323,12 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
+	// SQLite for persistent conductor state (played-set + track state survive restarts).
+	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
+		log.Printf("sqlite: open failed (%v) — degraded mode (no persistence)", err)
+	} else {
+		cond.sq = sq
+	}
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
 		log.Printf("startup: purged %d foreign now_playing event(s)", n)
@@ -332,6 +338,9 @@ func main() {
 	cond.warmIndexes(context.Background())
 	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
+	// Wire stageGate into the conductor's in-memory indexes so reject() needs zero DB reads.
+	stageG.countFn = cond.countActiveOtherDJs
+	stageG.isPremOwnerFn = cond.isPremiumOwner
 	go cond.run()
 
 	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"math/rand"
 	"sort"
@@ -108,6 +109,7 @@ const premCacheTTL = 60_000 // ms
 
 type conductor struct {
 	db    *badger.BadgerBackend
+	sq    *sql.DB // SQLite for persistent state; nil = disabled (graceful degradation)
 	relay *khatru.Relay
 	state *relay29.State // group membership/roles (skip authorization)
 	sk    string
@@ -320,7 +322,7 @@ func (c *conductor) isPremiumOwner(ctx context.Context, club string, now int64) 
 }
 
 // clubOwner returns the pubkey of the club's creator (author of its 9007 create-group event).
-// Result is cached permanently (club creator never changes).
+// Lookup order: in-memory cache → SQLite → BadgerDB. Result is cached permanently.
 func (c *conductor) clubOwner(ctx context.Context, club string) string {
 	c.idxMu.Lock()
 	if owner, ok := c.ownerCache[club]; ok {
@@ -328,6 +330,14 @@ func (c *conductor) clubOwner(ctx context.Context, club string) string {
 		return owner
 	}
 	c.idxMu.Unlock()
+	// SQLite cache (survives restarts, avoids BadgerDB scan on subsequent lookups).
+	if owner := c.sqLoadOwner(club); owner != "" {
+		c.idxMu.Lock()
+		c.ownerCache[club] = owner
+		c.idxMu.Unlock()
+		return owner
+	}
+	// Fall back to BadgerDB (first lookup or SQLite disabled).
 	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
 		Kinds: []int{kindCreateGroup},
 		Tags:  nostr.TagMap{"h": []string{club}},
@@ -344,10 +354,151 @@ func (c *conductor) clubOwner(ctx context.Context, club string) string {
 	if newest == nil {
 		return ""
 	}
+	c.sqSaveOwner(club, newest.PubKey)
 	c.idxMu.Lock()
 	c.ownerCache[club] = newest.PubKey
 	c.idxMu.Unlock()
 	return newest.PubKey
+}
+
+// ── SQLite persistence helpers ────────────────────────────────────────────────
+// All called from the single conductor tick goroutine → no extra locking needed.
+// c.sq == nil is a safe no-op (graceful degradation without SQLite).
+
+func (c *conductor) sqSaveState(club string, pb *condClub) {
+	if c.sq == nil {
+		return
+	}
+	playing := 0
+	if pb.playing {
+		playing = 1
+	}
+	if _, err := c.sq.Exec(
+		`INSERT OR REPLACE INTO conductor_state(club,pos,video_id,dj,title,duration,started_at,playing) VALUES(?,?,?,?,?,?,?,?)`,
+		club, pb.pos, pb.videoID, pb.dj, pb.title, pb.duration, pb.startedAt, playing,
+	); err != nil {
+		log.Printf("sqlite save_state [%.8s]: %v", club, err)
+	}
+}
+
+func (c *conductor) sqClearState(club string) {
+	if c.sq == nil {
+		return
+	}
+	if _, err := c.sq.Exec(`DELETE FROM conductor_state WHERE club=?`, club); err != nil {
+		log.Printf("sqlite clear_state [%.8s]: %v", club, err)
+	}
+	if _, err := c.sq.Exec(`DELETE FROM played WHERE club=?`, club); err != nil {
+		log.Printf("sqlite clear_played [%.8s]: %v", club, err)
+	}
+}
+
+func (c *conductor) sqRecordPlayed(club, dj, videoID string) {
+	if c.sq == nil {
+		return
+	}
+	if _, err := c.sq.Exec(`INSERT OR IGNORE INTO played(club,dj,video_id) VALUES(?,?,?)`, club, dj, videoID); err != nil {
+		log.Printf("sqlite record_played [%.8s]: %v", club, err)
+	}
+}
+
+// sqLoadState reads persisted conductor state for a club. Returns nil if none found.
+func (c *conductor) sqLoadState(club string) *condClub {
+	if c.sq == nil {
+		return nil
+	}
+	row := c.sq.QueryRow(
+		`SELECT pos,video_id,dj,title,duration,started_at,playing FROM conductor_state WHERE club=?`, club,
+	)
+	var pb condClub
+	var playing int
+	if err := row.Scan(&pb.pos, &pb.videoID, &pb.dj, &pb.title, &pb.duration, &pb.startedAt, &playing); err != nil {
+		return nil
+	}
+	pb.playing = playing != 0
+	return &pb
+}
+
+// sqLoadPlayed reads the persisted played-set for a club. Returns nil if empty or SQLite disabled.
+func (c *conductor) sqLoadPlayed(club string) map[string]map[string]bool {
+	if c.sq == nil {
+		return nil
+	}
+	rows, err := c.sq.Query(`SELECT dj, video_id FROM played WHERE club=?`, club)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string]map[string]bool{}
+	for rows.Next() {
+		var dj, vid string
+		if err := rows.Scan(&dj, &vid); err != nil {
+			continue
+		}
+		if out[dj] == nil {
+			out[dj] = map[string]bool{}
+		}
+		out[dj][vid] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// sqSaveOwner persists a club→owner mapping (immutable once written, INSERT OR IGNORE).
+func (c *conductor) sqSaveOwner(club, owner string) {
+	if c.sq == nil {
+		return
+	}
+	if _, err := c.sq.Exec(`INSERT OR IGNORE INTO club_owners(club,owner) VALUES(?,?)`, club, owner); err != nil {
+		log.Printf("sqlite save_owner [%.8s]: %v", club, err)
+	}
+}
+
+// sqLoadOwner returns the persisted owner for a club, or "" if not found.
+func (c *conductor) sqLoadOwner(club string) string {
+	if c.sq == nil {
+		return ""
+	}
+	var owner string
+	if err := c.sq.QueryRow(`SELECT owner FROM club_owners WHERE club=?`, club).Scan(&owner); err != nil {
+		return ""
+	}
+	return owner
+}
+
+// ── stageGate in-memory helpers ───────────────────────────────────────────────
+
+// countActiveOtherDJs counts DJs currently on stage in `club` (excluding `senderPubkey`),
+// and reports whether `senderPubkey` is already on stage (= heartbeat, always allowed).
+// Reads from the in-memory stageIdx + kickIdx — no DB access.
+func (c *conductor) countActiveOtherDJs(club, senderPubkey string) (active int, alreadyOnStage bool) {
+	now := time.Now().UnixMilli()
+	staleThreshold := now - condStageStaleMS
+	c.idxMu.Lock()
+	stageMap := c.stageIdx[club]
+	kickMap := c.kickIdx[club]
+	c.idxMu.Unlock()
+	for pk, entry := range stageMap {
+		if pk == senderPubkey {
+			alreadyOnStage = entry.on &&
+				entry.lastSeen >= staleThreshold &&
+				(kickMap[pk] == 0 || entry.lastSeen > kickMap[pk])
+			continue
+		}
+		if !entry.on {
+			continue
+		}
+		if entry.lastSeen < staleThreshold {
+			continue
+		}
+		if km := kickMap[pk]; km > 0 && entry.lastSeen <= km {
+			continue
+		}
+		active++
+	}
+	return
 }
 
 // observeBroken records an ephemeral "I can't play this track" report (kind 20102, content =
@@ -719,6 +870,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) {
 	if len(djPks) == 0 {
 		c.stop(pb)
+		c.sqClearState(club)
 		return
 	}
 	mat := c.matrix(djPks, queues, pb, club, now)
@@ -728,12 +880,15 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		// plays through once, then the lobby runs until a DJ adds / re-activates tracks.
 		log.Printf("conductor [%.8s] stop: no playable track djs=%d", club, len(djPks))
 		c.stop(pb)
+		delete(c.played, club) // clear in-memory played-set — session boundary
+		c.sqClearState(club)   // clear SQLite state + played rows
 		return
 	}
 	tracks := queues[djPks[di]]
 	if ti >= len(tracks) {
 		log.Printf("conductor [%.8s] stop: track index out of range di=%d ti=%d", club, di, ti)
 		c.stop(pb)
+		c.sqClearState(club)
 		return
 	}
 	t := tracks[ti]
@@ -754,8 +909,10 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.played[club][pb.dj] = map[string]bool{}
 	}
 	c.played[club][pb.dj][t.videoID] = true
+	c.sqRecordPlayed(club, pb.dj, t.videoID)
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
+	c.sqSaveState(club, pb)
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
@@ -888,6 +1045,16 @@ func (c *conductor) publish(ctx context.Context, ev *nostr.Event, replace bool) 
 // so offline DJs' queues don't replay tracks from before the restart.
 // Best-effort: if no relay now_playing exists, returns an empty state (the next tick bootstraps).
 func (c *conductor) resume(ctx context.Context, club string) *condClub {
+	// Fast path: SQLite has the last persisted state (survives restarts without event replay).
+	if sq := c.sqLoadState(club); sq != nil {
+		log.Printf("conductor [%.8s] resume: sqlite pos=%d playing=%v", club, sq.pos, sq.playing)
+		if played := c.sqLoadPlayed(club); played != nil {
+			c.played[club] = played
+		}
+		return sq
+	}
+
+	// Fallback: no SQLite data (first boot or SQLite disabled) → replay BadgerDB events.
 	pb := &condClub{}
 	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindNowPlaying}, Tags: nostr.TagMap{"h": []string{club}}})
 	if err != nil {
@@ -912,6 +1079,7 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 		pb.startedAt = v
 	}
 	pb.playing = pb.videoID != ""
+	log.Printf("conductor [%.8s] resume: badger pos=%d playing=%v (sqlite empty)", club, pb.pos, pb.playing)
 
 	// Seed played-set from 1313 play-log so offline DJs don't replay after a restart.
 	// Only applies while their browser hasn't sent presence yet (online() = false).
@@ -930,6 +1098,13 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 				c.played[club][dj] = map[string]bool{}
 			}
 			c.played[club][dj][vid] = true
+		}
+	}
+	// Persist to SQLite so the next restart uses the fast path.
+	c.sqSaveState(club, pb)
+	for dj, vids := range c.played[club] {
+		for vid := range vids {
+			c.sqRecordPlayed(club, dj, vid)
 		}
 	}
 	return pb
@@ -1227,6 +1402,10 @@ type stageGate struct {
 	db         *badger.BadgerBackend
 	prem       *premiumStore
 	superadmin string
+	// Set after the conductor is initialized (main.go) so reject() reads
+	// the conductor's in-memory indexes instead of querying BadgerDB.
+	countFn      func(club, sender string) (active int, alreadyOnStage bool)
+	isPremOwnerFn func(ctx context.Context, club string, now int64) bool
 }
 
 // reject blocks a stage-join (kind 30102, content != "off") if the club is
@@ -1247,69 +1426,77 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 		return false, ""
 	}
 
-	// Count active DJs on stage (excluding the sender — heartbeat is allowed).
-	// Use newest-event-per-pubkey so a DJ with multiple old events isn't double-counted,
-	// and apply the kick filter so a kicked DJ doesn't hold a slot open.
-	ch, err := g.db.QueryEvents(ctx, nostr.Filter{
-		Kinds: []int{kindStage},
-		Tags:  nostr.TagMap{"h": []string{club}},
-	})
-	if err != nil {
-		return false, ""
-	}
-	newestByPk := map[string]*nostr.Event{}
-	for ev := range ch {
-		if ex, ok := newestByPk[ev.PubKey]; !ok || ev.CreatedAt > ex.CreatedAt {
-			cp := *ev
-			newestByPk[ev.PubKey] = &cp
-		}
-	}
-	// Fetch newest kick per target so kicked DJs don't occupy a slot.
-	kickMs := map[string]int64{}
-	if kch, err2 := g.db.QueryEvents(ctx, nostr.Filter{
-		Kinds: []int{kindStageKick},
-		Tags:  nostr.TagMap{"h": []string{club}},
-	}); err2 == nil {
-		for ev := range kch {
-			target := tagVal(ev, "p")
-			if target == "" {
-				target = tagVal(ev, "d")
-			}
-			if target == "" {
-				continue
-			}
-			ms := int64(ev.CreatedAt) * 1000
-			if ms > kickMs[target] {
-				kickMs[target] = ms
-			}
-		}
-	}
-	staleThreshold := time.Now().UnixMilli() - condStageStaleMS
+	// Count active DJs via the conductor's in-memory index (zero DB access).
+	// Falls back to a full BadgerDB scan if the conductor isn't wired in yet (startup race).
 	active := 0
 	alreadyOnStage := false
-	for pk, ev := range newestByPk {
-		if pk == evt.PubKey {
-			alreadyOnStage = true
-			continue
+	if g.countFn != nil {
+		active, alreadyOnStage = g.countFn(club, evt.PubKey)
+	} else {
+		// Fallback: query BadgerDB (used only during the brief startup window before
+		// main.go wires g.countFn, or in tests).
+		ch, err := g.db.QueryEvents(ctx, nostr.Filter{
+			Kinds: []int{kindStage},
+			Tags:  nostr.TagMap{"h": []string{club}},
+		})
+		if err != nil {
+			return false, ""
 		}
-		if ev.Content == "off" {
-			continue
+		newestByPk := map[string]*nostr.Event{}
+		for ev := range ch {
+			if ex, ok := newestByPk[ev.PubKey]; !ok || ev.CreatedAt > ex.CreatedAt {
+				cp := *ev
+				newestByPk[ev.PubKey] = &cp
+			}
 		}
-		evMs := int64(ev.CreatedAt) * 1000
-		if evMs < staleThreshold {
-			continue
+		kickMs := map[string]int64{}
+		if kch, err2 := g.db.QueryEvents(ctx, nostr.Filter{
+			Kinds: []int{kindStageKick},
+			Tags:  nostr.TagMap{"h": []string{club}},
+		}); err2 == nil {
+			for ev := range kch {
+				target := tagVal(ev, "p")
+				if target == "" {
+					target = tagVal(ev, "d")
+				}
+				if target == "" {
+					continue
+				}
+				ms := int64(ev.CreatedAt) * 1000
+				if ms > kickMs[target] {
+					kickMs[target] = ms
+				}
+			}
 		}
-		if km := kickMs[pk]; km > 0 && evMs <= km {
-			continue // kicked after their last heartbeat
+		staleThreshold := time.Now().UnixMilli() - condStageStaleMS
+		for pk, ev := range newestByPk {
+			if pk == evt.PubKey {
+				alreadyOnStage = true
+				continue
+			}
+			if ev.Content == "off" {
+				continue
+			}
+			evMs := int64(ev.CreatedAt) * 1000
+			if evMs < staleThreshold {
+				continue
+			}
+			if km := kickMs[pk]; km > 0 && evMs <= km {
+				continue
+			}
+			active++
 		}
-		active++
 	}
 	if alreadyOnStage {
 		return false, "" // heartbeat from existing DJ
 	}
 
 	cap := condMaxDJsFree
-	if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" {
+	if g.isPremOwnerFn != nil {
+		if g.isPremOwnerFn(ctx, club, time.Now().UnixMilli()) {
+			cap = condMaxDJs
+		}
+	} else if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" {
 		if (g.superadmin != "" && owner == g.superadmin) || (g.prem != nil && g.prem.valid(ctx, owner)) {
 			cap = condMaxDJs
 		}
