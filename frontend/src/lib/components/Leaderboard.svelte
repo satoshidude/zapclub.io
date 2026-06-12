@@ -63,9 +63,6 @@
         {/each}
       </div>
     {/if}
-    {#if entries.length > 5}
-      <h2 class="rest-head">Full ranking</h2>
-    {/if}
     <ol class="board">
       {#each entries.slice(5) as e (e.pubkey)}
         {@const p = useProfile(e.pubkey)}
@@ -173,7 +170,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.5rem;
   }
   .board-row {
     display: flex;
@@ -229,12 +226,6 @@
     text-align: right;
   }
   @media (max-width: 460px) { .b-from { display: none; } }
-  .rest-head {
-    margin: 1.2rem 0 0.6rem;
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text-dim);
-  }
   .board {
     list-style: none;
     margin: 0;
