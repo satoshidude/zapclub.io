@@ -1,7 +1,9 @@
 import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
+import { minePow } from 'nostr-tools/nip13'
 import { pool, CLUB_RELAY, PROFILE_RELAYS } from './pool'
 import { signEvent } from './nostrLogin'
+import { auth } from './auth.svelte'
 import { resolveZapper } from './zaps.svelte'
 import type { Club, ClubMember, ClubConfig } from './types'
 
@@ -166,14 +168,28 @@ export function parseClubConfig(ev: Event): ClubConfig {
   }
 }
 
+const JOIN_POW_DIFFICULTY = 15
+
 /**
  * Join request (NIP-29 kind 9021). Open clubs auto-add the member on the relay. For a PAID
  * club, pass the 9735 entry receipt as `proof` — the relay verifies it before admitting.
+ * Mines NIP-13 PoW (difficulty 15, ~100–500 ms) before signing so the relay accepts the event.
  */
 export async function joinClub(groupId: string, proof?: Event): Promise<void> {
   const tags: string[][] = [['h', groupId]]
   if (proof) tags.push(['proof', JSON.stringify(proof)])
-  await publishClub({ kind: KIND_JOIN_REQUEST, created_at: now(), tags, content: '' })
+  const template: EventTemplate = { kind: KIND_JOIN_REQUEST, created_at: now(), tags, content: '' }
+  const pk = auth.pubkey
+  if (!pk) {
+    await publishClub(template)
+    return
+  }
+  // Mine PoW synchronously — yield first so any loading indicator the caller set can render.
+  await new Promise<void>((r) => setTimeout(r, 0))
+  const mined = minePow({ ...template, pubkey: pk }, JOIN_POW_DIFFICULTY)
+  // Strip pubkey+id (signEvent adds pubkey back and recomputes id from the nonce-bearing tags).
+  const { pubkey: _pk, id: _id, ...minedTemplate } = mined
+  await publishClub(minedTemplate as EventTemplate)
 }
 
 export async function leaveClub(groupId: string): Promise<void> {

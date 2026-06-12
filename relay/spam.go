@@ -9,15 +9,15 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Per-IP-Spamschutz. Schließt die Sybil-Lücke, die das Per-Pubkey-Limiting (ratelimit.go)
-// offen lässt: Ein einzelner Host erzeugt N Wegwerf-Keypairs, tritt offenen Clubs gratis bei
-// (9021) und postet je UNTER dem Per-Pubkey-Limit. Pro-Pubkey greift dann nicht — pro-IP schon,
-// weil all diese Keypairs hinter derselben Quell-IP sitzen.
+// Per-IP-Spamschutz + NIP-13 Join-PoW.
 //
-// Bewusst NICHT enthalten: NIP-13 Proof-of-Work. PoW würde jeden Client bei jedem Chat/Join
-// rechnen lassen (Akku/Latenz auf Mobil) — eine UX-/Produktentscheidung, die nur sinnvoll ist,
-// wenn der Client gleichzeitig minen kann. Serverseitig allein aktiviert bräche jeden Write.
-// Per-IP kostet keine UX und ist die richtige MVP-Stufe; PoW bleibt offen.
+// Per-IP schließt die Sybil-Lücke: ein einzelner Host erzeugt N Wegwerf-Keypairs, tritt
+// offenen Clubs gratis bei (9021) und postet je UNTER dem Per-Pubkey-Limit — pro-IP stoppt das.
+//
+// Join-PoW (kind 9021): NIP-13 Proof-of-Work mit konfigurierbarer Schwierigkeit (Standard 15).
+// Der Client minet vor dem Senden; ~100–500 ms im Browser. Relay prüft CommittedDifficulty
+// (nonce-Tag + tatsächliche Leading-Zero-Bits der ID). Schützt vor Massen-Join-Spam auch hinter
+// wechselnden IPs/VPNs. Schwierigkeit 0 = deaktiviert (JOIN_POW_DIFFICULTY=0).
 
 // envFloat liest einen Float aus der Umgebung, sonst der Default.
 func envFloat(key string, def float64) float64 {

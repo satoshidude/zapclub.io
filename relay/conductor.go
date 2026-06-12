@@ -1309,8 +1309,8 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	}
 
 	cap := condMaxDJsFree
-	if g.prem != nil {
-		if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" && g.prem.valid(ctx, owner) {
+	if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" {
+		if (g.superadmin != "" && owner == g.superadmin) || (g.prem != nil && g.prem.valid(ctx, owner)) {
 			cap = condMaxDJs
 		}
 	}
