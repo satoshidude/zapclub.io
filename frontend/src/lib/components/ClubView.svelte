@@ -714,7 +714,7 @@
       />
       <!-- The user's own live playlist — feeds the round-robin. -->
       {#if isMember}
-        <Queue {groupId} {canModerate} />
+        <Queue {groupId} {canModerate} clubName={club?.name ?? ''} />
       {:else}
         <section class="join-hint">Join the club to step on stage and queue tracks.</section>
       {/if}

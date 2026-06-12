@@ -77,9 +77,8 @@ type condClub struct {
 	title      string
 	duration   int
 	startedAt  int64 // ms (relay clock)
-	lastBeat      int64 // ms of the last now_playing publish
-	lastBootstrap int64 // ms of the last bootstrap attempt (throttle when queue empty)
-	playing       bool
+	lastBeat int64 // ms of the last now_playing publish
+	playing  bool
 	inTakeover bool // true while a live-session (kind 30109, mode=takeover) is active
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
 	autoOrder []int
@@ -117,6 +116,7 @@ type conductor struct {
 	pub   string
 	mu    sync.Mutex
 	clubs map[string]*condClub
+	rtmpMgr *rtmpManager // nil until wired in main.go
 	// played tracks per (club, dj, videoID); guarded by mu. Applied only to offline DJs so
 	// their queue drains to the lobby instead of replaying infinitely when they can't sign.
 	played map[string]map[string]map[string]bool
@@ -124,8 +124,13 @@ type conductor struct {
 	presMu sync.Mutex
 	pres   map[string]map[string]int64 // club → pubkey → last presence beat (ms)
 
-	brokenMu sync.Mutex
-	broken   map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
+	brokenMu    sync.Mutex
+	broken      map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
+	// Per-club throttle timestamps; guarded by mu.
+	// Stored at conductor level (not inside condClub) so they survive condClub being
+	// deleted and recreated by the tick cleanup loop.
+	bootstrapAt  map[string]int64 // club → last bootstrap attempt ms
+	brokenSkipAt map[string]int64 // club → last broken-skip ms
 
 	// Event-driven in-memory indexes (populated by warmIndexes + observeEvent). Replacing
 	// per-tick full-table DB scans with O(1) lookups. Guarded by idxMu.
@@ -148,6 +153,8 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 		played:        map[string]map[string]map[string]bool{},
 		pres:          map[string]map[string]int64{},
 		broken:        map[string]map[string]map[string]int64{},
+		bootstrapAt:  map[string]int64{},
+		brokenSkipAt: map[string]int64{},
 		stageIdx:      map[string]map[string]stageEntry{},
 		kickIdx:       map[string]map[string]int64{},
 		queueIdx:      map[string]map[string]*nostr.Event{},
@@ -812,10 +819,11 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	}
 
 	// Not playing yet → bootstrap from the round-robin.
-	// Throttled to once per heartbeat interval to avoid busy-spinning when all queues are empty.
+	// Throttled via a conductor-level map (survives condClub deletion/recreation by the
+	// tick cleanup loop) to avoid busy-spinning when all queues are empty.
 	if !pb.playing {
-		if now-pb.lastBootstrap >= condHeartbeatMS {
-			pb.lastBootstrap = now
+		if now-c.bootstrapAt[club] >= condHeartbeatMS {
+			c.bootstrapAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
 			c.advance(ctx, club, djPks, queues, pb, now)
 		}
@@ -845,10 +853,18 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 		return
 	}
 	// Track reported unplayable (kind 20102) by an authorized user or a quorum of members.
+	// Rate-limited to once per heartbeat so a fully-broken queue drains slowly (giving the DJ
+	// time to react) rather than flushing all tracks in seconds.
 	if c.brokenSkip(club, pb, now) {
-		log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
-		c.advance(ctx, club, djPks, queues, pb, now)
-		return
+		sinceLastSkip := now - c.brokenSkipAt[club]
+		if sinceLastSkip < condHeartbeatMS {
+			log.Printf("conductor [%.8s] broken-skip throttled vid=%s sinceMs=%d", club, pb.videoID, sinceLastSkip)
+		} else {
+			c.brokenSkipAt[club] = now
+			log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
+			c.advance(ctx, club, djPks, queues, pb, now)
+			return
+		}
 	}
 	// Track finished (fallback cap when duration unknown)?
 	dur := pb.duration
@@ -918,6 +934,11 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
+	// Restart any active RTMP streams for this club with the new track.
+	if c.rtmpMgr != nil && pb.videoID != "" {
+		vid := pb.videoID
+		go c.rtmpMgr.restartForClub(club, vid)
+	}
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
@@ -1530,4 +1551,37 @@ func clubOwnerFromDB(ctx context.Context, db *badger.BadgerBackend, club string)
 		return ""
 	}
 	return newest.PubKey
+}
+
+// isOnStage reports whether pk currently holds an active stage slot in club.
+// Reads from the in-memory indexes (no DB). Used by the RTMP HTTP handler.
+func (c *conductor) isOnStage(club, pk string) bool {
+	now := time.Now().UnixMilli()
+	c.idxMu.Lock()
+	entry, ok := c.stageIdx[club][pk]
+	kickMs := c.kickIdx[club][pk]
+	c.idxMu.Unlock()
+	if !ok || !entry.on {
+		return false
+	}
+	if entry.lastSeen < now-condStageStaleMS {
+		return false
+	}
+	if kickMs > 0 && entry.lastSeen <= kickMs {
+		return false
+	}
+	return true
+}
+
+// currentTrack returns the currently playing videoID and the elapsed seconds for club.
+// Returns ("", 0) when nothing is playing. Used by the RTMP HTTP handler.
+func (c *conductor) currentTrack(club string) (videoID string, seekSec int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pb := c.clubs[club]
+	if pb == nil || !pb.playing || pb.videoID == "" {
+		return "", 0
+	}
+	elapsed := (time.Now().UnixMilli() - pb.startedAt) / 1000
+	return pb.videoID, int(elapsed)
 }

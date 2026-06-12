@@ -323,6 +323,8 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
+	rtmpMgr := newRtmpManager(cond)
+	cond.rtmpMgr = rtmpMgr
 	// SQLite for persistent conductor state (played-set + track state survive restarts)
 	// and premium status cache (eliminates per-check BadgerDB scans).
 	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
@@ -351,6 +353,10 @@ func main() {
 	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).
 	board := newZapBoard(env("RELAY_LEADERBOARD", "./leaderboard.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
+
+	rtmpH := &rtmpHandler{mgr: rtmpMgr, cond: cond}
+	relay.Router().HandleFunc("/rtmp/start", rtmpH.handle)
+	relay.Router().HandleFunc("/rtmp/stop", rtmpH.handle)
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
