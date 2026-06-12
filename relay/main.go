@@ -323,24 +323,29 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
-	// SQLite for persistent conductor state (played-set + track state survive restarts).
+	// SQLite for persistent conductor state (played-set + track state survive restarts)
+	// and premium status cache (eliminates per-check BadgerDB scans).
 	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
 		log.Printf("sqlite: open failed (%v) — degraded mode (no persistence)", err)
 	} else {
 		cond.sq = sq
+		prem.sq = sq // share the same DB for premium_cache
 	}
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
 		log.Printf("startup: purged %d foreign now_playing event(s)", n)
 	}
-	// Warm the in-memory event indexes from the DB (replaces per-tick full-table scans).
-	// After this, observeEvent keeps the indexes current via OnEventSaved.
+	// Warm all in-memory indexes from BadgerDB (one-time startup scans).
+	// After this, the OnEventSaved observers keep everything current — no per-tick DB reads.
 	cond.warmIndexes(context.Background())
-	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent)
+	cap.warmCount(context.Background())
+	playlistG.warmList(context.Background())
+	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent, playlistG.observeEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
-	// Wire stageGate into the conductor's in-memory indexes so reject() needs zero DB reads.
+	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
 	stageG.isPremOwnerFn = cond.isPremiumOwner
+	autoDJG.ownerFn = cond.clubOwner
 	go cond.run()
 
 	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).

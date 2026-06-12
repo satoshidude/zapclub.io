@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"strconv"
 	"time"
@@ -18,18 +19,69 @@ const kindPremium = 30108 // relay-authored, d=<subscriber-pubkey>, premium_unti
 type premiumStore struct {
 	db    *badger.BadgerBackend
 	relay *khatru.Relay
-	sk    string // relay secret key
-	pub   string // relay pubkey
+	sk    string   // relay secret key
+	pub   string   // relay pubkey
+	sq    *sql.DB  // SQLite cache; nil = disabled (graceful degradation)
 }
 
 func newPremiumStore(db *badger.BadgerBackend, relay *khatru.Relay, sk, pub string) *premiumStore {
 	return &premiumStore{db: db, relay: relay, sk: sk, pub: pub}
 }
 
+// sqPremGet returns (valid, found) from the SQLite cache. found=false on miss or TTL expiry.
+func (p *premiumStore) sqPremGet(pubkey string) (bool, bool) {
+	if p.sq == nil {
+		return false, false
+	}
+	var valid int
+	var expires int64
+	err := p.sq.QueryRow(`SELECT valid, expires FROM premium_cache WHERE pubkey=?`, pubkey).Scan(&valid, &expires)
+	if err != nil {
+		return false, false
+	}
+	if expires <= time.Now().Unix() {
+		return false, false
+	}
+	return valid != 0, true
+}
+
+// sqPremSet writes a premium status into the SQLite cache with the given TTL in seconds.
+func (p *premiumStore) sqPremSet(pubkey string, isValid bool, ttlSec int64) {
+	if p.sq == nil {
+		return
+	}
+	v := 0
+	if isValid {
+		v = 1
+	}
+	expires := time.Now().Unix() + ttlSec
+	if _, err := p.sq.Exec(
+		`INSERT OR REPLACE INTO premium_cache(pubkey,valid,expires) VALUES(?,?,?)`,
+		pubkey, v, expires,
+	); err != nil {
+		log.Printf("premium_cache set [%.8s]: %v", pubkey, err)
+	}
+}
+
+// sqPremInvalidate removes the SQLite cache entry for pubkey so the next valid() call
+// re-queries BadgerDB (used immediately after grant()).
+func (p *premiumStore) sqPremInvalidate(pubkey string) {
+	if p.sq == nil {
+		return
+	}
+	p.sq.Exec(`DELETE FROM premium_cache WHERE pubkey=?`, pubkey)
+}
+
 // valid reports whether the user currently has an active premium subscription.
+// Check order: SQLite cache (1 h TTL) → BadgerDB scan → write SQLite cache.
 func (p *premiumStore) valid(ctx context.Context, pubkey string) bool {
+	if v, ok := p.sqPremGet(pubkey); ok {
+		return v
+	}
 	until := p.until(ctx, pubkey)
-	return until > time.Now().Unix()
+	result := until > time.Now().Unix()
+	p.sqPremSet(pubkey, result, 3600)
+	return result
 }
 
 // until returns the unix-second timestamp of subscription expiry for pubkey, or 0 if none.
@@ -88,6 +140,7 @@ func (p *premiumStore) grant(ctx context.Context, pubkey string, months int) {
 		log.Printf("premium store: %v", err)
 		return
 	}
+	p.sqPremInvalidate(pubkey)
 	p.relay.BroadcastEvent(ev)
 }
 

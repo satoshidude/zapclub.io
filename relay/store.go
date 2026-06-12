@@ -47,6 +47,12 @@ func sqlInitSchema(db *sql.DB) error {
 			club  TEXT PRIMARY KEY,
 			owner TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS premium_cache (
+			pubkey  TEXT PRIMARY KEY,
+			valid   INTEGER NOT NULL DEFAULT 0,
+			expires INTEGER NOT NULL DEFAULT 0
+		);
 	`)
 	return err
 }

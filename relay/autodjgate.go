@@ -11,6 +11,9 @@ type autoDJGate struct {
 	db         *badger.BadgerBackend
 	prem       *premiumStore
 	superadmin string
+	// ownerFn is wired from the conductor after init so reject() uses the cached
+	// owner lookup (in-memory → SQLite → BadgerDB) instead of a raw DB scan.
+	ownerFn func(ctx context.Context, club string) string
 }
 
 func newAutoDJGate(db *badger.BadgerBackend, prem *premiumStore, superadmin string) *autoDJGate {
@@ -30,7 +33,12 @@ func (g *autoDJGate) reject(ctx context.Context, evt *nostr.Event) (bool, string
 	if club == "" {
 		return true, "restricted: auto-dj event missing h-tag"
 	}
-	owner := clubOwnerFromDB(ctx, g.db, club)
+	var owner string
+	if g.ownerFn != nil {
+		owner = g.ownerFn(ctx, club)
+	} else {
+		owner = clubOwnerFromDB(ctx, g.db, club)
+	}
 	if owner == "" || evt.PubKey != owner {
 		return true, "restricted: auto-dj may only be set by the club owner"
 	}

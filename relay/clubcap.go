@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 
 	"github.com/fiatjaf/eventstore/badger"
 	"github.com/nbd-wtf/go-nostr"
@@ -19,10 +20,35 @@ type clubCap struct {
 	db         *badger.BadgerBackend
 	prem       *premiumStore
 	superadmin string
+	mu         sync.Mutex
+	countIdx   map[string]int // pubkey → number of created clubs (9007)
 }
 
 func newClubCap(db *badger.BadgerBackend, superadmin string) *clubCap {
-	return &clubCap{db: db, superadmin: superadmin}
+	return &clubCap{db: db, superadmin: superadmin, countIdx: map[string]int{}}
+}
+
+// warmCount seeds countIdx from BadgerDB on startup (one-time scan).
+func (c *clubCap) warmCount(ctx context.Context) {
+	ch, err := c.db.QueryEvents(ctx, nostr.Filter{Kinds: []int{kindCreateGroup}})
+	if err != nil {
+		return
+	}
+	c.mu.Lock()
+	for ev := range ch {
+		c.countIdx[ev.PubKey]++
+	}
+	c.mu.Unlock()
+}
+
+// observeEvent keeps countIdx current via OnEventSaved.
+func (c *clubCap) observeEvent(_ context.Context, ev *nostr.Event) {
+	if ev.Kind != kindCreateGroup {
+		return
+	}
+	c.mu.Lock()
+	c.countIdx[ev.PubKey]++
+	c.mu.Unlock()
 }
 
 func (c *clubCap) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
@@ -32,17 +58,9 @@ func (c *clubCap) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
 	if c.superadmin != "" && evt.PubKey == c.superadmin {
 		return false, ""
 	}
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
-		Kinds:   []int{kindCreateGroup},
-		Authors: []string{evt.PubKey},
-	})
-	if err != nil {
-		return false, ""
-	}
-	count := 0
-	for range ch {
-		count++
-	}
+	c.mu.Lock()
+	count := c.countIdx[evt.PubKey]
+	c.mu.Unlock()
 	cap := maxClubsFree
 	if c.prem != nil && c.prem.valid(ctx, evt.PubKey) {
 		cap = maxClubsPremium
