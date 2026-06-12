@@ -52,7 +52,7 @@
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
   import RtmpStreamButton from './club/RtmpStreamButton.svelte'
-  import { startRadioStream, stopRadioStream } from '../nostr/rtmpstream'
+  import { startRadioStream, type RadioSession } from '../nostr/rtmpstream'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -535,20 +535,24 @@
   let radioActive = $state(false)
   let radioBusy = $state(false)
   let radioErr = $state('')
+  let radioSession = $state<RadioSession | null>(null)
 
   async function toggleRadio() {
     radioBusy = true
     radioErr = ''
     try {
-      if (radioActive) {
-        await stopRadioStream(groupId)
+      if (radioActive && radioSession) {
+        await radioSession.stop()
+        radioSession = null
         radioActive = false
       } else {
-        await startRadioStream(groupId)
+        radioSession = await startRadioStream(groupId)
         radioActive = true
       }
     } catch (e) {
       radioErr = String((e as Error)?.message ?? e)
+      radioSession = null
+      radioActive = false
     } finally {
       radioBusy = false
     }
@@ -730,9 +734,17 @@
       <div class="stream-banner">
         {#each [...activeStreams.values()] as s (s.pubkey)}
           {#if s.type === 'radio'}
-            <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
-              📻 Webradio — Listen live
-            </a>
+            <div class="stream-radio-row">
+              <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
+                📻 Webradio — Live
+              </a>
+              <span class="stream-url">{s.watchURL}</span>
+              <button
+                class="btn-copy"
+                title="Copy stream URL"
+                onclick={() => navigator.clipboard.writeText(s.watchURL)}
+              >⎘</button>
+            </div>
           {:else}
             {@const sp = useProfile(s.pubkey)}
             <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
@@ -743,24 +755,22 @@
       </div>
     {/if}
 
-    <!-- Stream controls: RTMP for any signed-in user; Webradio for club owner only. -->
-    {#if auth.canSign && isMember}
+    <!-- Stream controls: owner only -->
+    {#if isOwner}
       <div class="stream-controls">
         <RtmpStreamButton {groupId} clubName={club?.name ?? ''} />
-        {#if isOwner}
-          <div class="radio-wrap">
-            <button
-              class="btn-stream"
-              class:btn-on={radioActive}
-              onclick={toggleRadio}
-              disabled={radioBusy}
-              title={radioActive ? 'Stop webradio stream' : 'Start webradio stream for this club'}
-            >
-              {radioActive ? '● Webradio — Stop' : '📻 Start Webradio'}
-            </button>
-            {#if radioErr}<span class="stream-err">{radioErr}</span>{/if}
-          </div>
-        {/if}
+        <div class="radio-wrap">
+          <button
+            class="btn-stream"
+            class:btn-on={radioActive}
+            onclick={toggleRadio}
+            disabled={radioBusy}
+            title={radioActive ? 'Stop webradio stream' : 'Start webradio stream for this club'}
+          >
+            {radioActive ? '● Webradio — Stop' : '📻 Start Webradio'}
+          </button>
+          {#if radioErr}<span class="stream-err">{radioErr}</span>{/if}
+        </div>
       </div>
     {/if}
 
@@ -1348,6 +1358,35 @@
   }
   .stream-link:hover {
     background: color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
+  }
+
+  .stream-radio-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .stream-url {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-family: var(--font-mono, monospace);
+    opacity: 0.75;
+    word-break: break-all;
+  }
+  .btn-copy {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    padding: 0.1rem 0.35rem;
+    cursor: pointer;
+    line-height: 1;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-copy:hover {
+    border-color: var(--accent, #7c3aed);
+    color: var(--accent, #a78bfa);
   }
 
   .stream-controls {

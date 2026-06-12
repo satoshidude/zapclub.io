@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,29 +12,26 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/coder/websocket"
 	"github.com/skip2/go-qrcode"
 )
 
-// rtmpStream holds one active ffmpeg push for a (club, dj) pair.
+// rtmpStream holds one active ffmpeg process that receives WebM/Opus audio from a
+// browser WebSocket and pushes it as FLV/AAC to an RTMP endpoint (e.g. Twitch).
 type rtmpStream struct {
-	cancel   context.CancelFunc
-	rtmpURL  string
+	stdinW   io.WriteCloser // connected to ffmpeg's stdin
 	clubName string
 }
 
-// rtmpManager drives ffmpeg processes that push the current club audio + a QR overlay
-// to external RTMP endpoints. Multiple DJs in one club may stream to different platforms
-// simultaneously — one ffmpeg process per (club, dj). The conductor calls restartForClub
-// on every track advance; HTTP handlers /rtmp/start and /rtmp/stop control sessions.
+// rtmpManager manages per-(club, pusher) ffmpeg RTMP sessions.
 type rtmpManager struct {
 	mu      sync.Mutex
 	cond    *conductor
-	streams map[string]map[string]*rtmpStream // club → dj → stream
+	streams map[string]map[string]*rtmpStream // club → pusher_pubkey → stream
 
 	qrMu    sync.Mutex
-	qrPaths map[string]string // clubID → overlay PNG path (generated once, reused)
+	qrPaths map[string]string // clubID → overlay PNG path
 }
 
 func newRtmpManager(cond *conductor) *rtmpManager {
@@ -46,72 +42,154 @@ func newRtmpManager(cond *conductor) *rtmpManager {
 	}
 }
 
-// start begins pushing videoID to rtmpURL for (club, dj). Cancels any prior process.
-func (m *rtmpManager) start(club, clubName, dj, rtmpURL, videoID string, seekSec int) {
-	ctx, cancel := context.WithCancel(context.Background())
+// ── HTTP / WebSocket handlers ─────────────────────────────────────────────────
 
-	m.mu.Lock()
-	if m.streams[club] == nil {
-		m.streams[club] = map[string]*rtmpStream{}
-	}
-	if old := m.streams[club][dj]; old != nil {
-		old.cancel()
-	}
-	s := &rtmpStream{cancel: cancel, rtmpURL: rtmpURL, clubName: clubName}
-	m.streams[club][dj] = s
-	m.mu.Unlock()
+type rtmpHandler struct {
+	mgr  *rtmpManager
+	cond *conductor
+}
 
-	go func() {
-		defer func() {
-			cancel()
-			m.mu.Lock()
-			if cur := m.streams[club][dj]; cur == s {
-				delete(m.streams[club], dj)
-				if len(m.streams[club]) == 0 {
-					delete(m.streams, club)
-				}
+func (h *rtmpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/rtmp/push/") {
+		clubID := strings.TrimPrefix(r.URL.Path, "/rtmp/push/")
+		h.handlePush(w, r, clubID)
+		return
+	}
+	// Legacy CORS pre-flight from old endpoints — just return OK.
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+// handlePush upgrades the request to a WebSocket. The browser sends:
+//   - first message (text/JSON): {"server":"rtmp://...","key":"...","clubName":"..."}
+//   - subsequent messages (binary): WebM/Opus audio chunks from MediaRecorder
+//
+// The relay starts ffmpeg with stdin connected to the audio pipe and pushes RTMP.
+// Auth: NIP-98 via ?auth=<base64 event> (browsers cannot set headers on WS upgrades).
+func (h *rtmpHandler) handlePush(w http.ResponseWriter, r *http.Request, clubID string) {
+	if clubID == "" {
+		http.Error(w, "missing club id", http.StatusBadRequest)
+		return
+	}
+
+	pubkey, ok := verifyNIP98QueryParam(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{"zapclub.io", "www.zapclub.io"},
+	})
+	if err != nil {
+		log.Printf("rtmp [%.8s] ws accept: %v", clubID, err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	ctx := r.Context()
+
+	// First message: JSON config.
+	_, configData, err := conn.Read(ctx)
+	if err != nil {
+		return
+	}
+	var cfg struct {
+		Server   string `json:"server"`
+		Key      string `json:"key"`
+		ClubName string `json:"clubName"`
+	}
+	if err := json.Unmarshal(configData, &cfg); err != nil || cfg.Server == "" || cfg.Key == "" {
+		conn.Close(websocket.StatusUnsupportedData, "bad config: need server and key")
+		return
+	}
+
+	rtmpURL := strings.TrimRight(cfg.Server, "/") + "/" + cfg.Key
+	clubName := cfg.ClubName
+	if clubName == "" {
+		if len(clubID) > 8 {
+			clubName = clubID[:8]
+		} else {
+			clubName = clubID
+		}
+	}
+	log.Printf("rtmp [%.8s/%.8s] start → %s", clubID, pubkey, cfg.Server)
+
+	// Build ffmpeg command.
+	qrPath, err := h.mgr.overlayPath(clubID)
+	if err != nil {
+		log.Printf("rtmp [%.8s] overlay gen failed (continuing without): %v", clubID, err)
+		qrPath = ""
+	}
+	args := h.mgr.buildFFmpegArgs(clubID, clubName, qrPath, rtmpURL)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+
+	stdinW, err := cmd.StdinPipe()
+	if err != nil {
+		conn.Close(websocket.StatusInternalError, "stdin pipe failed")
+		return
+	}
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		conn.Close(websocket.StatusInternalError, "ffmpeg start failed")
+		return
+	}
+	if stderr != nil {
+		go func() {
+			sc := bufio.NewScanner(stderr)
+			for sc.Scan() {
+				log.Printf("rtmp [%.8s] ffmpeg: %s", clubID, sc.Text())
 			}
-			m.mu.Unlock()
 		}()
-		if err := m.runStream(ctx, club, clubName, videoID, seekSec, rtmpURL); err != nil && ctx.Err() == nil {
-			log.Printf("rtmp [%.8s/%.8s] error: %v", club, dj, err)
+	}
+
+	// Register in active streams map.
+	h.mgr.mu.Lock()
+	if h.mgr.streams[clubID] == nil {
+		h.mgr.streams[clubID] = map[string]*rtmpStream{}
+	}
+	if old := h.mgr.streams[clubID][pubkey]; old != nil {
+		old.stdinW.Close() // kills the old ffmpeg by closing its stdin
+	}
+	s := &rtmpStream{stdinW: stdinW, clubName: clubName}
+	h.mgr.streams[clubID][pubkey] = s
+	h.mgr.mu.Unlock()
+
+	defer func() {
+		stdinW.Close()
+		_ = cmd.Wait()
+		h.mgr.mu.Lock()
+		if cur := h.mgr.streams[clubID][pubkey]; cur == s {
+			delete(h.mgr.streams[clubID], pubkey)
+			if len(h.mgr.streams[clubID]) == 0 {
+				delete(h.mgr.streams, clubID)
+			}
 		}
+		h.mgr.mu.Unlock()
+		log.Printf("rtmp [%.8s/%.8s] stopped", clubID, pubkey)
 	}()
-}
 
-// stop cancels the RTMP stream for (club, dj).
-func (m *rtmpManager) stop(club, dj string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if s := m.streams[club][dj]; s != nil {
-		s.cancel()
-		delete(m.streams[club], dj)
-		if len(m.streams[club]) == 0 {
-			delete(m.streams, club)
+	// Pump binary WebSocket messages → ffmpeg stdin.
+	for {
+		msgType, data, err := conn.Read(ctx)
+		if err != nil {
+			break
+		}
+		if msgType == websocket.MessageBinary && len(data) > 0 {
+			if _, err := stdinW.Write(data); err != nil {
+				break // ffmpeg exited
+			}
 		}
 	}
 }
 
-// restartForClub is called by the conductor on every track advance. All active streams
-// for this club get a fresh process for the new track (seek=0, fresh track).
-func (m *rtmpManager) restartForClub(club, videoID string) {
-	type entry struct{ dj, rtmpURL, clubName string }
-	m.mu.Lock()
-	var active []entry
-	for dj, s := range m.streams[club] {
-		s.cancel()
-		active = append(active, entry{dj: dj, rtmpURL: s.rtmpURL, clubName: s.clubName})
-	}
-	delete(m.streams, club)
-	m.mu.Unlock()
-
-	for _, e := range active {
-		m.start(club, e.clubName, e.dj, e.rtmpURL, videoID, 0)
-	}
-}
-
-// overlayPath returns the overlay PNG for the club, generating it if needed.
-// The image contains a QR code linking to the club join URL.
+// overlayPath returns the QR overlay PNG for the club, generating it if needed.
 func (m *rtmpManager) overlayPath(clubID string) (string, error) {
 	m.qrMu.Lock()
 	defer m.qrMu.Unlock()
@@ -123,7 +201,6 @@ func (m *rtmpManager) overlayPath(clubID string) (string, error) {
 	}
 
 	joinURL := "https://zapclub.io/club/" + clubID
-	// Use first 16 chars of clubID to keep filename short but unique.
 	slug := clubID
 	if len(slug) > 16 {
 		slug = slug[:16]
@@ -134,146 +211,51 @@ func (m *rtmpManager) overlayPath(clubID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("qrcode: %w", err)
 	}
-	// Light QR (dark modules on white bg) — overlaid on dark frame it looks clean.
 	if err := q.WriteFile(400, path); err != nil {
 		return "", fmt.Errorf("qrcode write: %w", err)
 	}
-
 	m.qrPaths[clubID] = path
 	return path, nil
 }
 
-// runStream resolves the YouTube CDN URL, generates the overlay, then runs ffmpeg.
-func (m *rtmpManager) runStream(ctx context.Context, clubID, clubName, videoID string, seekSec int, rtmpURL string) error {
-	// Resolve CDN URL via yt-dlp (best audio, single URL line).
-	resolveCtx, resolveCancel := context.WithTimeout(ctx, 40*time.Second)
-	defer resolveCancel()
-	log.Printf("rtmp [%.8s] yt-dlp resolving vid=%s", clubID, videoID)
-	ytArgs := []string{"--get-url", "-f", "bestaudio", "--no-warnings"}
-	if ytdlpCookies != "" {
-		ytArgs = append(ytArgs, "--cookies", ytdlpCookies)
-	}
-	ytArgs = append(ytArgs, "--", "https://www.youtube.com/watch?v="+videoID)
-	ytCmd := exec.CommandContext(resolveCtx, "yt-dlp", ytArgs...)
-	out, err := ytCmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			log.Printf("rtmp [%.8s] yt-dlp stderr: %s", clubID, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return fmt.Errorf("yt-dlp resolve: %w", err)
-	}
-	log.Printf("rtmp [%.8s] yt-dlp resolved ok", clubID)
-	// yt-dlp may return multiple lines for adaptive streams; take the first.
-	audioURL := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
-	if audioURL == "" {
-		return fmt.Errorf("yt-dlp: no URL for %s", videoID)
-	}
-
-	qrPath, err := m.overlayPath(clubID)
-	if err != nil {
-		log.Printf("rtmp [%.8s] overlay gen failed (continuing without): %v", clubID, err)
-		qrPath = ""
-	}
-
-	args := m.buildFFmpegArgs(clubID, clubName, audioURL, qrPath, seekSec, rtmpURL)
-	log.Printf("rtmp [%.8s] ffmpeg start: seek=%ds vid=%s dst=%s", clubID, seekSec, videoID, rtmpURL)
-	log.Printf("rtmp [%.8s] ffmpeg args: %s", clubID, strings.Join(append([]string{"ffmpeg"}, args...), " "))
-
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	// Pipe ffmpeg stderr line-by-line into the relay log for debugging.
-	stderr, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("ffmpeg start: %w", err)
-	}
-	if stderr != nil {
-		go func() {
-			sc := bufio.NewScanner(stderr)
-			for sc.Scan() {
-				log.Printf("rtmp [%.8s] ffmpeg: %s", clubID, sc.Text())
-			}
-		}()
-	}
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-		return fmt.Errorf("ffmpeg exit: %w", err)
-	}
-	log.Printf("rtmp [%.8s] ffmpeg finished vid=%s", clubID, videoID)
-	return nil
-}
-
-// ytdlpCookies is the path to a Netscape-format cookies file for yt-dlp.
-// Set YTDLP_COOKIES=/path/to/cookies.txt in relay.env to bypass YouTube bot checks.
-var ytdlpCookies = os.Getenv("YTDLP_COOKIES")
-
-// rtmpFontPath is used by ffmpeg drawtext. Overridable via RTMP_FONT_PATH.
-var rtmpFontPath = func() string {
-	if p := os.Getenv("RTMP_FONT_PATH"); p != "" {
-		return p
-	}
-	// Ubuntu/Debian default — always available on a standard install.
-	return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-}()
-
-// buildFFmpegArgs composes the ffmpeg argument list. With a QR overlay:
-//
-//	input 0: dark background (lavfi color source, infinite)
-//	input 1: QR code PNG (loop 1 → infinite)
-//	input 2: YouTube CDN audio URL
-//	filter: overlay QR centred + drawtext for club name and join URL
-//
-// Without overlay (qrPath=""): skips inputs 0+1 and just transcodes the audio.
-func (m *rtmpManager) buildFFmpegArgs(clubID, clubName, audioURL, qrPath string, seekSec int, rtmpURL string) []string {
-	var args []string
-
+// buildFFmpegArgs builds the ffmpeg argument list for browser-sourced WebM/Opus input.
+// With a QR overlay: background + QR image + drawtext → libx264 video + AAC audio → FLV/RTMP.
+// Without overlay: audio-only FLV (some platforms require video, but this at least doesn't crash).
+func (m *rtmpManager) buildFFmpegArgs(clubID, clubName, qrPath, rtmpURL string) []string {
 	if qrPath != "" {
 		filter := m.buildFilterComplex(clubID, clubName)
-		args = []string{
+		return []string{
 			"-loglevel", "warning",
+			"-f", "webm", "-i", "pipe:0",
 			"-f", "lavfi", "-i", "color=c=0x0d1117:size=1280x720:rate=1",
 			"-loop", "1", "-i", qrPath,
-			"-i", audioURL,
 			"-filter_complex", filter,
 			"-map", "[vout]",
-			"-map", "2:a",
+			"-map", "0:a",
 			"-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
 			"-b:v", "800k", "-g", "2", "-r", "1",
 			"-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-			"-shortest",
 			"-f", "flv", rtmpURL,
-		}
-		if seekSec > 0 {
-			// Seek on the audio input (index 2).
-			args = insertBefore(args, "-i", audioURL, "-ss", fmt.Sprintf("%d", seekSec))
-		}
-	} else {
-		// Fallback: audio-only (no video — some platforms require video, but this at least doesn't crash).
-		args = []string{
-			"-loglevel", "warning",
-			"-i", audioURL,
-			"-vn",
-			"-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-			"-f", "flv", rtmpURL,
-		}
-		if seekSec > 0 {
-			args = append([]string{"-ss", fmt.Sprintf("%d", seekSec)}, args...)
 		}
 	}
-
-	return args
+	return []string{
+		"-loglevel", "warning",
+		"-f", "webm", "-i", "pipe:0",
+		"-vn",
+		"-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+		"-f", "flv", rtmpURL,
+	}
 }
 
-// buildFilterComplex builds the ffmpeg filter_complex string.
-// The QR is centred slightly above the middle; drawtext renders club name (top) and join URL (bottom).
 func (m *rtmpManager) buildFilterComplex(clubID, clubName string) string {
 	name := sanitizeDrawtext(clubName)
 	joinURL := sanitizeDrawtext("zapclub.io/club/" + clubID)
-
 	fontParam := ""
 	if rtmpFontPath != "" {
 		fontParam = "fontfile=" + rtmpFontPath + ":"
 	}
-
 	return fmt.Sprintf(
-		"[0:v][1:v]overlay=(W-w)/2:(H-h)/2-30,"+
+		"[1:v][2:v]overlay=(W-w)/2:(H-h)/2-30,"+
 			"drawtext=%stext='%s':x=(w-text_w)/2:y=30:fontcolor=white:fontsize=36:box=1:boxcolor=0x0d1117@0.85:boxborderw=15,"+
 			"drawtext=%stext='%s':x=(w-text_w)/2:y=H-70:fontcolor=#aaaaaa:fontsize=26:box=1:boxcolor=0x0d1117@0.85:boxborderw=12"+
 			"[vout]",
@@ -282,7 +264,6 @@ func (m *rtmpManager) buildFilterComplex(clubID, clubName string) string {
 	)
 }
 
-// sanitizeDrawtext removes ffmpeg drawtext special characters from user-supplied strings.
 func sanitizeDrawtext(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -296,102 +277,10 @@ func sanitizeDrawtext(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// insertBefore inserts extra args immediately before the first occurrence of target in args.
-func insertBefore(args []string, target, value string, extra ...string) []string {
-	for i, a := range args {
-		if a == target && i+1 < len(args) && args[i+1] == value {
-			out := make([]string, 0, len(args)+len(extra))
-			out = append(out, args[:i]...)
-			out = append(out, extra...)
-			out = append(out, args[i:]...)
-			return out
-		}
+// rtmpFontPath is used by ffmpeg drawtext. Overridable via RTMP_FONT_PATH.
+var rtmpFontPath = func() string {
+	if p := os.Getenv("RTMP_FONT_PATH"); p != "" {
+		return p
 	}
-	return args
-}
-
-// ── HTTP handlers ─────────────────────────────────────────────────────────────
-
-type rtmpHandler struct {
-	mgr  *rtmpManager
-	cond *conductor
-}
-
-func (h *rtmpHandler) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	pubkey, ok := verifyNIP98Pubkey(r)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
-	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	switch r.URL.Path {
-	case "/rtmp/start":
-		h.handleStart(w, pubkey, body)
-	case "/rtmp/stop":
-		h.handleStop(w, pubkey, body)
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-func (h *rtmpHandler) handleStart(w http.ResponseWriter, pubkey string, body []byte) {
-	var req struct {
-		Club     string `json:"club"`
-		ClubName string `json:"clubName"`
-		Server   string `json:"server"` // e.g. rtmp://in.core.zap.stream:1935/good
-		Key      string `json:"key"`    // stream key
-	}
-	if err := json.Unmarshal(body, &req); err != nil ||
-		req.Club == "" || req.Server == "" || req.Key == "" {
-		http.Error(w, "bad request: need club, server, key", http.StatusBadRequest)
-		return
-	}
-
-	videoID, seekSec := h.cond.currentTrack(req.Club)
-	if videoID == "" {
-		http.Error(w, "no track playing", http.StatusConflict)
-		return
-	}
-
-	rtmpURL := strings.TrimRight(req.Server, "/") + "/" + req.Key
-	clubName := req.ClubName
-	if clubName == "" {
-		clubName = req.Club[:min(len(req.Club), 8)]
-	}
-
-	h.mgr.start(req.Club, clubName, pubkey, rtmpURL, videoID, seekSec)
-	log.Printf("rtmp start [%.8s/%.8s] → %s seek=%ds", req.Club, pubkey, req.Server, seekSec)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *rtmpHandler) handleStop(w http.ResponseWriter, pubkey string, body []byte) {
-	var req struct {
-		Club string `json:"club"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil || req.Club == "" {
-		http.Error(w, "bad request: need club", http.StatusBadRequest)
-		return
-	}
-	h.mgr.stop(req.Club, pubkey)
-	log.Printf("rtmp stop [%.8s/%.8s]", req.Club, pubkey)
-	w.WriteHeader(http.StatusNoContent)
-}
-
+	return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+}()

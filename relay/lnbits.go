@@ -293,7 +293,7 @@ func (g *premiumGate) isPaid(hash string) (bool, error) {
 	return r.Paid, nil
 }
 
-// ── NIP-98 helper (caller auth, any pubkey) ───────────────────────────────────
+// ── NIP-98 helpers (caller auth, any pubkey) ──────────────────────────────────
 
 // verifyNIP98Pubkey extracts and validates a NIP-98 kind-27235 Authorization header.
 // Unlike verifyAdmin it accepts any pubkey (not just superadmin).
@@ -322,6 +322,52 @@ func verifyNIP98Pubkey(r *http.Request) (pubkey string, ok bool) {
 		return "", false
 	}
 	if m := ev.Tags.GetFirst([]string{"method"}); m == nil || !strings.EqualFold(m.Value(), r.Method) {
+		return "", false
+	}
+	u := ev.Tags.GetFirst([]string{"u"})
+	if u == nil {
+		return "", false
+	}
+	parsed, err := url.Parse(u.Value())
+	if err != nil || parsed.Path != r.URL.Path {
+		return "", false
+	}
+	return ev.PubKey, true
+}
+
+// verifyNIP98QueryParam is like verifyNIP98Pubkey but reads the auth token from the
+// ?auth= query parameter instead of the Authorization header. Used for WebSocket
+// endpoints where browsers cannot set custom headers on the upgrade request.
+// The event must use method=GET (WebSocket upgrades are GET requests).
+func verifyNIP98QueryParam(r *http.Request) (pubkey string, ok bool) {
+	b64 := r.URL.Query().Get("auth")
+	if b64 == "" {
+		return "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		// Fall back to URL-safe base64 in case the caller used encodeURIComponent.
+		raw, err = base64.URLEncoding.DecodeString(b64)
+		if err != nil {
+			return "", false
+		}
+	}
+	var ev nostr.Event
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return "", false
+	}
+	if ev.Kind != 27235 {
+		return "", false
+	}
+	if sigOk, err := ev.CheckSignature(); !sigOk || err != nil {
+		return "", false
+	}
+	t := ev.CreatedAt.Time()
+	now := time.Now()
+	if t.Before(now.Add(-60*time.Second)) || t.After(now.Add(60*time.Second)) {
+		return "", false
+	}
+	if m := ev.Tags.GetFirst([]string{"method"}); m == nil || !strings.EqualFold(m.Value(), "GET") {
 		return "", false
 	}
 	u := ev.Tags.GetFirst([]string{"u"})
