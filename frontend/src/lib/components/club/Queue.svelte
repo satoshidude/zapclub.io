@@ -122,6 +122,39 @@
     const sec = Math.floor(s % 60)
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
+
+  // Pointer-based drag-to-reorder — works with touch AND mouse (HTML5 drag has no touch events).
+  let drag = $state<{ from: number } | null>(null)
+  let dropIndex = $state<number | null>(null)
+
+  function dragStart(e: PointerEvent, from: number) {
+    drag = { from }
+    dropIndex = from
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    window.addEventListener('pointermove', dragMove)
+    window.addEventListener('pointerup', dragEnd)
+  }
+  function dragMove(e: PointerEvent) {
+    if (!drag) return
+    const li = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)
+      ?.closest('li[data-i]') as HTMLElement | null
+    if (li?.dataset.i != null && li.closest('ul[data-queue]')) {
+      const i = Number(li.dataset.i)
+      if (!Number.isNaN(i)) dropIndex = i
+    }
+  }
+  function dragEnd() {
+    window.removeEventListener('pointermove', dragMove)
+    window.removeEventListener('pointerup', dragEnd)
+    if (drag && dropIndex !== null && drag.from !== dropIndex) {
+      const ts = [...tracks]
+      const [item] = ts.splice(drag.from, 1)
+      ts.splice(dropIndex, 0, item)
+      void setMyQueue(groupId, ts)
+    }
+    drag = null
+    dropIndex = null
+  }
 </script>
 
 <div class="queue card">
@@ -178,12 +211,15 @@
   {#if showPremModal}<PremiumModal onClose={() => (showPremModal = false)} />{/if}
 
   {#if tracks.length > 0}
-    <ul class="tracks">
+    <ul class="tracks" data-queue>
       {#each tracks as track, i (track.videoId + i)}
         <li
           data-i={i}
           class:played={track.active === false}
+          class:dragging={drag?.from === i}
+          class:drop={dropIndex === i && drag?.from !== i}
         >
+          <span class="grip" onpointerdown={(e) => dragStart(e, i)} title="Drag to reorder">⠿</span>
           <button class="play" onclick={() => (preview = { track, context: 'queue' })} title="Preview / edit details">▶</button>
           <span class="t-idx">{i + 1}</span>
           <span class="t-title" use:marquee><span class="mq-inner">{track.title}</span></span>
@@ -395,6 +431,26 @@
   .tracks li.played .t-title {
     color: var(--text-dim);
     text-decoration: line-through;
+  }
+  .grip {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    font-size: 1rem;
+    cursor: grab;
+    line-height: 1;
+    touch-action: none;
+    user-select: none;
+    padding: 0 2px;
+  }
+  .grip:active {
+    cursor: grabbing;
+  }
+  .tracks li.dragging {
+    opacity: 0.4;
+  }
+  .tracks li.drop {
+    outline: 2px solid var(--accent-2);
+    border-radius: var(--radius-sm);
   }
   .t-idx {
     flex: 0 0 1.4rem;
