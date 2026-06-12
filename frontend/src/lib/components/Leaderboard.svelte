@@ -67,7 +67,7 @@
       <h2 class="rest-head">Full ranking</h2>
     {/if}
     <ol class="board">
-      {#each entries as e (e.pubkey)}
+      {#each entries.slice(5) as e (e.pubkey)}
         {@const p = useProfile(e.pubkey)}
         {@const npub = npubEncode(e.pubkey)}
         <li>
