@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,7 +22,7 @@ const (
 
 // Shared turntable SVG and brand CSS used by both radio page templates.
 // The vinyl group animates at 2.4 s per rotation, matching the Svelte Turntable component.
-const radioBrandSVG = `<svg class="turntable" viewBox="0 0 36 36" width="120" height="120" role="img" aria-label="zapclub.io">
+const radioBrandSVG = `<svg class="turntable" viewBox="0 0 36 36" width="240" height="240" role="img" aria-label="zapclub.io">
   <g class="vinyl">
     <circle cx="16" cy="20" r="13" fill="#1b0b33" stroke="#8e30eb" stroke-width="1.6"/>
     <circle cx="16" cy="20" r="9.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4"/>
@@ -216,14 +217,16 @@ type radioClub struct {
 	cancel  context.CancelFunc
 	videoID string
 	title   string
+	enabled bool // owner-controlled; persisted in radio_enabled SQLite table
 }
 
 // radioManager manages server-side audio streaming per club.
-// Streams start and stop automatically whenever the conductor advances or stops a club.
-// No manual activation required — every club with active playback gets its own stream.
+// Streams are owner-toggled (start/stop via NIP-98 POST).
+// When enabled but nothing is playing, a silent placeholder keeps the stream alive.
 type radioManager struct {
 	mu    sync.Mutex
 	clubs map[string]*radioClub
+	sq    *sql.DB // SQLite for radio_enabled persistence; may be nil (graceful degradation)
 }
 
 func newRadioManager() *radioManager {
@@ -234,43 +237,129 @@ func (m *radioManager) getOrCreate(clubID string) *radioClub {
 	if rc, ok := m.clubs[clubID]; ok {
 		return rc
 	}
-	rc := &radioClub{station: newRadioStation()}
+	rc := &radioClub{station: newRadioStation(), enabled: m.loadEnabled(clubID)}
 	m.clubs[clubID] = rc
 	return rc
 }
 
+// loadEnabled reads the persisted enabled flag from SQLite (false if no record or sq==nil).
+func (m *radioManager) loadEnabled(clubID string) bool {
+	if m.sq == nil {
+		return false
+	}
+	var v int
+	if err := m.sq.QueryRow(`SELECT enabled FROM radio_enabled WHERE club=?`, clubID).Scan(&v); err != nil {
+		return false
+	}
+	return v != 0
+}
+
+// saveEnabled persists the enabled flag to SQLite (no-op if sq==nil).
+func (m *radioManager) saveEnabled(clubID string, enabled bool) {
+	if m.sq == nil {
+		return
+	}
+	v := 0
+	if enabled {
+		v = 1
+	}
+	m.sq.Exec(`INSERT OR REPLACE INTO radio_enabled(club,enabled) VALUES(?,?)`, clubID, v) //nolint:errcheck
+}
+
 // onTrackChange is called by the conductor on every track advance or stop.
-// videoID="" means playback stopped (lobby) — stream pauses until next advance.
+// videoID="" means lobby mode — if enabled, the silent placeholder keeps the stream alive.
+// A real track auto-enables a previously-disabled club's stream.
 func (m *radioManager) onTrackChange(clubID, videoID, title string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rc := m.getOrCreate(clubID)
 	rc.title = title
 	rc.station.setTitle(title)
+	if videoID != "" && !rc.enabled {
+		rc.enabled = true
+		m.saveEnabled(clubID, true)
+	}
 	m.startStream(rc, clubID, videoID)
 }
 
-// isActive returns true when a track is currently streaming for the club.
+// isActive returns true when the club's stream is enabled (real track or placeholder).
 func (m *radioManager) isActive(clubID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rc := m.clubs[clubID]
-	return rc != nil && rc.videoID != ""
+	return rc != nil && rc.enabled
 }
 
-// startStream starts a yt-dlp→ffmpeg pipeline for videoID. Caller must hold m.mu.
+// startStream starts or switches the stream for a club. Caller must hold m.mu.
+// If disabled → cancel any running stream.
+// If enabled + videoID="" → start silent placeholder (keeps listeners connected).
+// If enabled + videoID!="" → start real yt-dlp→ffmpeg pipeline.
 func (m *radioManager) startStream(rc *radioClub, clubID, videoID string) {
 	if rc.cancel != nil {
 		rc.cancel()
 		rc.cancel = nil
 	}
 	rc.videoID = videoID
-	if videoID == "" {
+	if !rc.enabled {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rc.cancel = cancel
-	go streamVideo(ctx, rc.station, clubID, videoID)
+	if videoID == "" {
+		go streamPlaceholder(ctx, rc.station, clubID)
+	} else {
+		go streamVideo(ctx, rc.station, clubID, videoID)
+	}
+}
+
+// streamPlaceholder generates a silent MP3 stream via ffmpeg to keep listeners connected
+// when the club is enabled but no track is playing (lobby mode).
+func streamPlaceholder(ctx context.Context, station *radioStation, clubID string) {
+	log.Printf("radio [%.8s] placeholder start", clubID)
+	defer log.Printf("radio [%.8s] placeholder stop", clubID)
+	for {
+		ffCmd := exec.CommandContext(ctx, "ffmpeg",
+			"-loglevel", "quiet",
+			"-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+			"-f", "mp3", "-b:a", "64k",
+			"pipe:1",
+		)
+		stdout, err := ffCmd.StdoutPipe()
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+		if err := ffCmd.Start(); err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stdout.Read(buf)
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				station.broadcast(chunk)
+			}
+			if readErr != nil {
+				break
+			}
+		}
+		ffCmd.Wait() //nolint:errcheck
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
 }
 
 // streamVideo pipes yt-dlp → ffmpeg for a YouTube video ID.
@@ -378,12 +467,66 @@ func (h *radioHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, ".m3u") && strings.HasPrefix(path, "/radio/"):
 		clubID := strings.TrimSuffix(strings.TrimPrefix(path, "/radio/"), ".m3u")
 		h.handleM3U(w, r, clubID)
+	case strings.HasSuffix(path, "/start") && strings.HasPrefix(path, "/radio/"):
+		clubID := strings.TrimSuffix(strings.TrimPrefix(path, "/radio/"), "/start")
+		h.handleToggle(w, r, clubID, true)
+	case strings.HasSuffix(path, "/stop") && strings.HasPrefix(path, "/radio/"):
+		clubID := strings.TrimSuffix(strings.TrimPrefix(path, "/radio/"), "/stop")
+		h.handleToggle(w, r, clubID, false)
 	case strings.HasPrefix(path, "/radio/") && len(path) > len("/radio/"):
 		clubID := strings.TrimPrefix(path, "/radio/")
 		h.handleListen(w, r, clubID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleToggle starts or stops a club's radio stream.
+// Requires NIP-98 Authorization from the club owner (or SUPERADMIN).
+func (h *radioHandler) handleToggle(w http.ResponseWriter, r *http.Request, clubID string, enable bool) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pubkey, ok := verifyNIP98Pubkey(r)
+	if !ok {
+		http.Error(w, "unauthorized: valid NIP-98 Authorization required", http.StatusUnauthorized)
+		return
+	}
+	owner := h.cond.clubOwner(r.Context(), clubID)
+	sa := os.Getenv("SUPERADMIN")
+	if pubkey != owner && (sa == "" || pubkey != sa) {
+		http.Error(w, "forbidden: club owner only", http.StatusForbidden)
+		return
+	}
+
+	h.mgr.mu.Lock()
+	rc := h.mgr.getOrCreate(clubID)
+	rc.enabled = enable
+	h.mgr.saveEnabled(clubID, enable)
+	if enable {
+		h.mgr.startStream(rc, clubID, rc.videoID)
+	} else {
+		if rc.cancel != nil {
+			rc.cancel()
+			rc.cancel = nil
+		}
+	}
+	h.mgr.mu.Unlock()
+
+	action := "stopped"
+	if enable {
+		action = "started"
+	}
+	log.Printf("radio [%.8s] %s by %s", clubID, action, pubkey[:8])
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *radioHandler) handleListen(w http.ResponseWriter, r *http.Request, clubID string) {

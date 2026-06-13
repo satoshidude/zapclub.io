@@ -332,7 +332,8 @@ func main() {
 		log.Printf("sqlite: open failed (%v) — degraded mode (no persistence)", err)
 	} else {
 		cond.sq = sq
-		prem.sq = sq // share the same DB for premium_cache
+		prem.sq = sq      // share the same DB for premium_cache
+		radioMgr.sq = sq  // radio_enabled persistence
 	}
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {

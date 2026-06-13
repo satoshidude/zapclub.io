@@ -107,6 +107,8 @@
     admins = []
     configEvs = {}
     stageResumed = false
+    latestStreamEv = null
+    radioErr = ''
     const me = auth.pubkey
     untrack(() => seedStageFromCache(id))
     const stop = subscribeClub(id, {
@@ -142,6 +144,11 @@
       onEmote: ingestEmote,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
+      onStream: (ev) => {
+        const type = ev.tags.find((t) => t[0] === 'type')?.[1]
+        if (type !== 'radio') return
+        if (!latestStreamEv || ev.created_at >= latestStreamEv.created_at) latestStreamEv = ev
+      },
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
         const target = ev.tags.find((t) => t[0] === 'e')?.[1]
@@ -509,8 +516,39 @@
     }
   }
 
+  import { startRadioStream, stopRadioStream } from '../nostr/radiostream'
+
   const RELAY_HTTP = 'https://relay.zapclub.io'
   const radioURL = $derived(`${RELAY_HTTP}/radio/${groupId}`)
+
+  // Radio stream state: track the latest KIND_STREAM radio event from the club owner.
+  let latestStreamEv = $state<Event | null>(null)
+  const radioActive = $derived.by(() => {
+    if (!latestStreamEv || !owner) return false
+    if (latestStreamEv.pubkey !== owner) return false
+    const type = latestStreamEv.tags.find((t) => t[0] === 'type')?.[1]
+    const status = latestStreamEv.tags.find((t) => t[0] === 'status')?.[1]
+    return type === 'radio' && status === 'live'
+  })
+  let radioBusy = $state(false)
+  let radioErr = $state('')
+
+  async function toggleRadio() {
+    if (radioBusy) return
+    radioBusy = true
+    radioErr = ''
+    try {
+      if (radioActive) {
+        await stopRadioStream(groupId)
+      } else {
+        await startRadioStream(groupId)
+      }
+    } catch (e) {
+      radioErr = String((e as Error)?.message ?? e)
+    } finally {
+      radioBusy = false
+    }
+  }
 </script>
 
 <div class="wrap">
@@ -595,11 +633,21 @@
         </div>
       </div>
     </div>
-    {#if sync.live}
-      <div class="radio-bar">
-        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Webradio">📻 Webradio Live</a>
-      </div>
-    {/if}
+    <div class="radio-bar">
+      {#if radioActive && sync.live}
+        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Webradio stream">📻 Webradio Live</a>
+      {:else if radioActive}
+        <a class="btn btn-radio-on" href={radioURL} target="_blank" rel="noopener" title="Stream online — no DJ active">📻 Webradio</a>
+      {:else}
+        <span class="btn-radio-off">📻 Webradio Offline</span>
+      {/if}
+      {#if isOwner}
+        <button class="btn btn-ghost btn-sm radio-toggle" onclick={toggleRadio} disabled={radioBusy} title={radioActive ? 'Stop stream' : 'Start stream'}>
+          {radioBusy ? '…' : radioActive ? '⏹ Stop' : '▶ Start'}
+        </button>
+      {/if}
+      {#if radioErr}<span class="radio-err">{radioErr}</span>{/if}
+    </div>
 
     {#if editing}
       <div class="edit-form">
@@ -1253,18 +1301,20 @@
   }
   .radio-bar {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: 0.5rem;
+    flex-wrap: wrap;
     padding: 0.4rem 0 0;
   }
-  .btn-live {
+  .btn-live,
+  .btn-radio-on,
+  .btn-radio-off {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
     padding: 0.25rem 0.65rem;
-    background: color-mix(in srgb, #22c55e 15%, transparent);
-    border: 1px solid color-mix(in srgb, #22c55e 50%, transparent);
     border-radius: 999px;
-    color: #86efac;
     font-size: 0.78rem;
     font-weight: 500;
     text-decoration: none;
@@ -1273,8 +1323,35 @@
     max-width: 100%;
     transition: background 0.15s;
   }
+  .btn-live {
+    background: color-mix(in srgb, #22c55e 15%, transparent);
+    border: 1px solid color-mix(in srgb, #22c55e 50%, transparent);
+    color: #86efac;
+  }
   .btn-live:hover {
     background: color-mix(in srgb, #22c55e 25%, transparent);
+  }
+  .btn-radio-on {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--accent);
+  }
+  .btn-radio-on:hover {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .btn-radio-off {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: default;
+  }
+  .radio-toggle {
+    flex: 0 0 auto;
+  }
+  .radio-err {
+    font-size: 0.75rem;
+    color: var(--danger);
+    flex: 1 1 100%;
   }
   .btn-copy {
     background: none;
