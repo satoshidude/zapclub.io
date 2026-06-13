@@ -78,8 +78,10 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 .offline-msg{color:#ef4444;font-size:.82rem;margin-top:-.5rem}
 .zap-dj{background:transparent;border:1px solid #d97706;border-radius:.45rem;
         color:#fbbf24;font-size:.9rem;font-weight:700;padding:.5rem 1rem;
-        cursor:pointer;text-decoration:none;display:none;align-items:center;
-        gap:.4rem;font-family:inherit;letter-spacing:.01em}
+        cursor:pointer;display:none;align-items:center;
+        gap:.4rem;font-family:inherit;letter-spacing:.01em;border:none;
+        background:transparent}
+.zap-dj{border:1px solid #d97706;border-radius:.45rem;background:transparent}
 .zap-dj:hover{background:#1a1505;color:#fde68a;border-color:#f59e0b}
 .zap-dj .bolt{font-size:1rem}
 .zap-dj .lbl{font-size:.88rem}
@@ -96,6 +98,46 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
        padding:.65rem 1.5rem;border-radius:.5rem;text-decoration:none;
        letter-spacing:.01em;display:inline-flex;align-items:center;gap:.35rem}
 .enter:hover{background:#a855f7}
+dialog{background:#0d0d0f;border:1px solid #1e293b;border-radius:.75rem;
+       color:#e2e8f0;padding:0;max-width:320px;width:90vw;font-family:system-ui,sans-serif}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.modal-inner{padding:1.25rem;display:flex;flex-direction:column;gap:.9rem}
+.modal-head{display:flex;align-items:center;justify-content:space-between}
+.modal-head span{font-weight:700;font-size:1rem}
+.modal-close{background:none;border:none;color:#64748b;font-size:1.1rem;cursor:pointer;padding:.1rem .3rem}
+.modal-close:hover{color:#e2e8f0}
+.zap-amounts{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
+.zap-amt{background:#1e293b;border:1px solid #334155;border-radius:.35rem;
+         color:#94a3b8;font-size:.85rem;font-weight:600;padding:.35rem .7rem;
+         cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s}
+.zap-amt:hover,.zap-amt.sel{border-color:#d97706;color:#fbbf24}
+.sats-lbl{font-size:.78rem;color:#475569;margin-left:.2rem}
+.zap-err{color:#ef4444;font-size:.8rem;margin:0}
+.zap-btns{display:flex;flex-direction:column;gap:.45rem}
+.btn-alby{background:#d97706;border:none;border-radius:.4rem;color:#0d0d0f;
+          font-size:.95rem;font-weight:700;padding:.6rem 1.2rem;cursor:pointer;
+          font-family:inherit;transition:opacity .15s;width:100%;display:flex;
+          align-items:center;justify-content:center;gap:.4rem}
+.btn-alby:hover:not(:disabled){opacity:.85}
+.btn-alby:disabled{opacity:.5;cursor:default}
+.btn-lightning{background:#1e293b;border:1px solid #334155;border-radius:.4rem;
+               color:#94a3b8;font-size:.82rem;padding:.45rem 1rem;cursor:pointer;
+               font-family:inherit;width:100%;transition:border-color .15s,color .15s}
+.btn-lightning:hover:not(:disabled){border-color:#475569;color:#e2e8f0}
+.btn-lightning:disabled{opacity:.5;cursor:default}
+.inv-row{display:flex;flex-direction:column;gap:.35rem}
+.inv-code{font-size:.6rem;word-break:break-all;color:#475569;
+          background:#0a0a0f;border:1px solid #1e293b;border-radius:.3rem;
+          padding:.4rem .5rem;max-height:3.5em;overflow:hidden;font-family:monospace}
+.copy-inv{background:#1e293b;border:1px solid #334155;border-radius:.3rem;
+          color:#94a3b8;font-size:.75rem;padding:.2rem .6rem;cursor:pointer;
+          font-family:inherit;align-self:flex-start}
+.copy-inv:hover{color:#e2e8f0}
+.tap-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;
+             flex-direction:column;align-items:center;justify-content:center;
+             gap:1rem;cursor:pointer;z-index:99}
+.tap-overlay .tap-icon{font-size:3.5rem;line-height:1}
+.tap-overlay .tap-lbl{color:#e2e8f0;font-size:1.1rem;font-weight:600;letter-spacing:.02em}
 </style>
 </head>
 <body>
@@ -110,6 +152,11 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 
 <audio id="audio" preload="none"></audio>
 
+<div class="tap-overlay" id="tap-overlay" onclick="tapStart()">
+  <span class="tap-icon">▶</span>
+  <span class="tap-lbl">Tap to start stream</span>
+</div>
+
 <div class="player-ctrl">
   <button class="btn-play" id="btn-play" onclick="userToggle()" title="Play / Pause">▶ Play</button>
   <span class="live-badge" id="live-badge">LIVE</span>
@@ -118,11 +165,11 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 </div>
 <p class="offline-msg" id="offline-msg"></p>
 
-<a class="zap-dj" id="zap-dj" href="https://zapclub.io/club/{{CLUBID}}" target="_top">
+<button class="zap-dj" id="zap-dj" onclick="openZap()">
   <span class="bolt">⚡</span>
   <span class="lbl">zap</span>
   <span class="dj-name" id="zap-dj-name">DJ</span>
-</a>
+</button>
 
 <div class="actions">
   <button class="act-btn" id="copy-btn" onclick="copyLink()">📋 Copy link</button>
@@ -131,6 +178,31 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 
 <a class="enter" href="https://zapclub.io/club/{{CLUBID}}">↗ Enter {{CLUBNAME}}</a>
 
+<dialog id="zap-modal" onclick="if(event.target===this)this.close()">
+  <div class="modal-inner">
+    <div class="modal-head">
+      <span>⚡ Zap <span id="zap-modal-name"></span></span>
+      <button class="modal-close" onclick="document.getElementById('zap-modal').close()">✕</button>
+    </div>
+    <div class="zap-amounts">
+      <button class="zap-amt" data-amt="21" onclick="selAmt(this)">21</button>
+      <button class="zap-amt sel" data-amt="100" onclick="selAmt(this)">100</button>
+      <button class="zap-amt" data-amt="1000" onclick="selAmt(this)">1k</button>
+      <button class="zap-amt" data-amt="5000" onclick="selAmt(this)">5k</button>
+      <span class="sats-lbl">sats</span>
+    </div>
+    <p id="zap-err" style="display:none" class="zap-err"></p>
+    <div class="zap-btns" id="zap-btns">
+      <button class="btn-alby" id="btn-alby" onclick="doZap('alby')">⚡ Pay with Alby Go</button>
+      <button class="btn-lightning" id="btn-lightning" onclick="doZap('lightning')">🔗 Other wallet</button>
+    </div>
+    <div id="inv-row" style="display:none" class="inv-row">
+      <code class="inv-code" id="inv-code"></code>
+      <button class="copy-inv" id="copy-inv-btn" onclick="copyInv()">📋 Copy invoice</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 var BASE = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
 var INFO = BASE + '/info';
@@ -138,6 +210,7 @@ var audio = document.getElementById('audio');
 var playing = true;
 var retryTimer = null;
 var currentPubkey = '';
+var currentAmt = 100;
 var profileCache = {};
 
 function freshSrc() { return BASE + '?_=' + Date.now(); }
@@ -151,7 +224,16 @@ function setStatus(live, msg) {
 function connect() {
   clearTimeout(retryTimer); retryTimer = null;
   audio.src = freshSrc();
-  audio.play().catch(function() { playing = false; setStatus(false, ''); });
+  audio.play().catch(function() {
+    playing = false;
+    setStatus(false, '');
+    document.getElementById('tap-overlay').style.display = 'flex';
+  });
+}
+function tapStart() {
+  document.getElementById('tap-overlay').style.display = 'none';
+  playing = true;
+  connect();
 }
 
 function retry(delayMs) {
@@ -183,17 +265,15 @@ function copyLink() {
   }).catch(function() { prompt('Copy this URL:', BASE); });
 }
 function shareLink() {
-  var d = { title: '{{CLUBNAME}} — zapclub.io Webradio', url: BASE };
+  var d = { title: '{{CLUBNAME}} — zapclub.io Livestream', url: BASE };
   if (navigator.share && navigator.canShare && navigator.canShare(d)) {
     navigator.share(d).catch(function() {});
   } else { copyLink(); }
 }
 
-function setZapName(name) {
-  document.getElementById('zap-dj-name').textContent = name;
-}
 function showZap(name) {
-  setZapName(name);
+  document.getElementById('zap-dj-name').textContent = name;
+  document.getElementById('zap-modal-name').textContent = name;
   document.getElementById('zap-dj').style.display = 'inline-flex';
 }
 function hideZap() {
@@ -201,29 +281,38 @@ function hideZap() {
   currentPubkey = '';
 }
 
-// Fetch Nostr display name for a hex pubkey from a public relay.
-function fetchName(pubkeyHex, cb) {
+// Fetch Nostr profile for a hex pubkey — tries relay.nostr.band first, falls back to nos.lol.
+function fetchProfile(pubkeyHex, cb) {
   if (profileCache[pubkeyHex]) { cb(profileCache[pubkeyHex]); return; }
-  try {
-    var ws = new WebSocket('wss://relay.nostr.band');
-    var t = setTimeout(function() { try { ws.close(); } catch(e) {} cb(null); }, 5000);
-    ws.onopen = function() {
-      ws.send(JSON.stringify(["REQ","n1",{"kinds":[0],"authors":[pubkeyHex],"limit":1}]));
-    };
-    ws.onmessage = function(e) {
+  var done = false;
+  var t = setTimeout(function() { if (!done) { done = true; cb(null); } }, 7000);
+  function tryRelay(url, delay) {
+    setTimeout(function() {
+      if (done) return;
       try {
-        var msg = JSON.parse(e.data);
-        if (msg[0]==='EVENT' && msg[2] && msg[2].kind===0) {
-          clearTimeout(t); ws.close();
-          var p = JSON.parse(msg[2].content);
-          var name = p.display_name || p.name || null;
-          if (name) profileCache[pubkeyHex] = name;
-          cb(name);
-        }
-      } catch(err) {}
-    };
-    ws.onerror = function() { clearTimeout(t); cb(null); };
-  } catch(e) { cb(null); }
+        var ws = new WebSocket(url);
+        ws.onopen = function() {
+          ws.send(JSON.stringify(["REQ","n1",{"kinds":[0],"authors":[pubkeyHex],"limit":1}]));
+        };
+        ws.onmessage = function(e) {
+          if (done) return;
+          try {
+            var msg = JSON.parse(e.data);
+            if (msg[0]==='EVENT' && msg[2] && msg[2].kind===0) {
+              clearTimeout(t); done = true;
+              try { ws.close(); } catch(x) {}
+              var p = JSON.parse(msg[2].content);
+              profileCache[pubkeyHex] = p;
+              cb(p);
+            }
+          } catch(x) {}
+        };
+        ws.onerror = function() { try { ws.close(); } catch(x) {} };
+      } catch(x) {}
+    }, delay);
+  }
+  tryRelay('wss://relay.nostr.band', 0);
+  tryRelay('wss://nos.lol', 1500);
 }
 
 function pollInfo() {
@@ -231,12 +320,14 @@ function pollInfo() {
     document.getElementById('np-title').textContent =
       d.title || (d.active ? '{{CLUBNAME}} — Live' : '— No DJ active —');
     if (d.dj_pubkey) {
+      var p = profileCache[d.dj_pubkey];
       var shortNpub = d.dj_npub ? d.dj_npub.slice(0,12) + '…' : d.dj_pubkey.slice(0,10) + '…';
-      showZap(profileCache[d.dj_pubkey] || shortNpub);
+      showZap(p ? (p.display_name || p.name || shortNpub) : shortNpub);
       if (d.dj_pubkey !== currentPubkey) {
         currentPubkey = d.dj_pubkey;
-        fetchName(d.dj_pubkey, function(name) {
-          if (name && currentPubkey === d.dj_pubkey) showZap(name);
+        fetchProfile(d.dj_pubkey, function(prof) {
+          if (prof && currentPubkey === d.dj_pubkey)
+            showZap(prof.display_name || prof.name || shortNpub);
         });
       }
     } else {
@@ -244,6 +335,85 @@ function pollInfo() {
     }
   }).catch(function() {});
 }
+
+// ── Zap modal ───────────────────────────────────────────────────────────────
+function openZap() {
+  if (!currentPubkey) return;
+  document.getElementById('zap-err').style.display = 'none';
+  document.getElementById('inv-row').style.display = 'none';
+  document.getElementById('btn-alby').disabled = false;
+  document.getElementById('btn-alby').textContent = '⚡ Pay with Alby Go';
+  document.getElementById('btn-lightning').disabled = false;
+  document.getElementById('btn-lightning').textContent = '🔗 Other wallet';
+  document.getElementById('zap-modal').showModal();
+}
+
+var currentBolt11 = '';
+function doZap(scheme) {
+  var prof = profileCache[currentPubkey];
+  var lud16 = prof && prof.lud16;
+  if (!lud16) {
+    document.getElementById('zap-err').textContent = 'No Lightning address set for this DJ.';
+    document.getElementById('zap-err').style.display = 'block';
+    return;
+  }
+  // If we already have a bolt11 for the current amount, just open it.
+  if (currentBolt11) { window.location.href = scheme + ':' + currentBolt11; return; }
+  var btnA = document.getElementById('btn-alby');
+  var btnL = document.getElementById('btn-lightning');
+  btnA.disabled = true; btnL.disabled = true;
+  btnA.textContent = 'Generating…';
+  document.getElementById('zap-err').style.display = 'none';
+  var parts = lud16.split('@');
+  if (parts.length !== 2) {
+    document.getElementById('zap-err').textContent = 'Invalid Lightning address.';
+    document.getElementById('zap-err').style.display = 'block';
+    btnA.disabled = false; btnL.disabled = false;
+    btnA.textContent = '⚡ Pay with Alby Go';
+    return;
+  }
+  var url = 'https://' + parts[1] + '/.well-known/lnurlp/' + parts[0];
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var ms = currentAmt * 1000;
+      var sep = data.callback.indexOf('?') >= 0 ? '&' : '?';
+      return fetch(data.callback + sep + 'amount=' + ms);
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(inv) {
+      currentBolt11 = inv.pr;
+      document.getElementById('inv-code').textContent = currentBolt11;
+      document.getElementById('inv-row').style.display = 'flex';
+      btnA.disabled = false; btnL.disabled = false;
+      btnA.textContent = '⚡ Pay with Alby Go';
+      window.location.href = scheme + ':' + currentBolt11;
+    })
+    .catch(function(e) {
+      document.getElementById('zap-err').textContent = 'Error: ' + (e.message || 'could not get invoice');
+      document.getElementById('zap-err').style.display = 'block';
+      btnA.disabled = false; btnL.disabled = false;
+      btnA.textContent = '⚡ Pay with Alby Go';
+    });
+}
+// Reset cached invoice when amount changes.
+function selAmt(btn) {
+  document.querySelectorAll('.zap-amt').forEach(function(b) { b.classList.remove('sel'); });
+  btn.classList.add('sel');
+  currentAmt = parseInt(btn.dataset.amt, 10);
+  currentBolt11 = '';
+  document.getElementById('inv-row').style.display = 'none';
+}
+
+function copyInv() {
+  var txt = document.getElementById('inv-code').textContent;
+  navigator.clipboard.writeText(txt).then(function() {
+    var btn = document.getElementById('copy-inv-btn');
+    btn.textContent = '✓ Copied';
+    setTimeout(function() { btn.textContent = '📋 Copy invoice'; }, 1800);
+  });
+}
+
 connect();
 pollInfo();
 setInterval(pollInfo, 12000);
@@ -662,6 +832,29 @@ func (h *radioHandler) handleToggle(w http.ResponseWriter, r *http.Request, club
 	if pubkey != owner && (sa == "" || pubkey != sa) {
 		http.Error(w, "forbidden: club owner only", http.StatusForbidden)
 		return
+	}
+
+	if enable {
+		// Premium gate — livestreaming is a premium feature (SUPERADMIN exempt).
+		if pubkey != sa && !h.cond.isPremiumOwner(r.Context(), clubID, time.Now().UnixMilli()) {
+			http.Error(w, "premium required: upgrade to start a livestream", http.StatusPaymentRequired)
+			return
+		}
+		// One-stream gate — owner may only run one active stream across all their clubs.
+		h.mgr.mu.Lock()
+		var activePeers []string
+		for cid, rc := range h.mgr.clubs {
+			if cid != clubID && rc.enabled {
+				activePeers = append(activePeers, cid)
+			}
+		}
+		h.mgr.mu.Unlock()
+		for _, cid := range activePeers {
+			if h.cond.clubOwner(r.Context(), cid) == pubkey {
+				http.Error(w, "conflict: you already have an active stream on another club — stop it first", http.StatusConflict)
+				return
+			}
+		}
 	}
 
 	h.mgr.mu.Lock()

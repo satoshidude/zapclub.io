@@ -3,9 +3,7 @@
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import { enrichMyTrackTitle, enrichMyTrackDuration, queues } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
-  import ZapButton from './ZapButton.svelte'
   import Player from './Player.svelte'
-  import ComingNext from './ComingNext.svelte'
 
   // The video lives INSIDE this card: small on the left by default to save space, with a zoom
   // toggle that expands it to full content-width. The Player instance is never remounted on
@@ -20,6 +18,7 @@
     onCta,
     onended,
     onerror,
+    streamURL = '',
   }: {
     onGoStage?: () => void
     stageLabel?: string
@@ -30,6 +29,7 @@
     onCta?: () => void
     onended?: () => void
     onerror?: (videoId: string) => void
+    streamURL?: string
   } = $props()
 
   const ZOOM_KEY = 'zapclub:videoZoom'
@@ -138,14 +138,16 @@
 <div class="np card" class:zoomed>
   {#if np}
     <div class="np-head">
-      <ZapButton club={clubId} />
+      {#if streamURL}
+        <a class="btn-live" href={streamURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>
+      {/if}
       <button
         class="like"
         class:on={liked}
         onclick={toggleLike}
         disabled={!auth.canSign}
         title={liked ? 'Liked — tap to remove' : 'Like this track'}
-      >🔥</button>
+      >🔖</button>
     </div>
   {/if}
   <div class="np-main">
@@ -201,7 +203,6 @@
       <span class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</span>
     </div>
   {/if}
-  <ComingNext />
 </div>
 
 <style>
@@ -212,14 +213,30 @@
     border: none;
     padding: 0;
   }
-  /* Actions top-right of the block: zap (left) + like (right). */
   .np-head {
     display: flex;
-    justify-content: flex-end;
     align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 0.4rem;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
   }
+  .btn-live {
+    margin-right: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    background: color-mix(in srgb, #22c55e 15%, transparent);
+    border: 1px solid color-mix(in srgb, #22c55e 50%, transparent);
+    color: #86efac;
+    transition: background 0.15s;
+  }
+  .btn-live:hover { background: color-mix(in srgb, #22c55e 25%, transparent); }
   .np-main {
     display: flex;
     gap: 0.8rem;

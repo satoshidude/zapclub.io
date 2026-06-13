@@ -52,9 +52,11 @@ const (
 	kindAutoDJ            = 30105 // owner-authored: arm/disarm auto-dj playlist for a club
 	kindAutoDJCtrl        = 30111 // relay-signed: disarm marker (real DJ took over)
 	kindBroken            = 20102 // ephemeral "I can't play this track" report (content = videoId)
+	kindMood              = 20104 // ephemeral vibe vote: tags h=club, pos=track-pos, v=banger|skip
 	kindPlay              = 1313
 	brokenWindowMS        = 120_000 // a broken-track report counts as fresh this long
 	brokenQuorum          = 2       // distinct members reporting a track broken → skip it
+	moodSkipThreshold     = 3       // distinct "skip" votes → advance to next track
 )
 
 type condDJ struct {
@@ -126,11 +128,16 @@ type conductor struct {
 
 	brokenMu    sync.Mutex
 	broken      map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
+
+	moodMu  sync.Mutex
+	moods   map[string]map[int]map[string]string // club → pos → pubkey → "banger"|"skip"
+
 	// Per-club throttle timestamps; guarded by mu.
 	// Stored at conductor level (not inside condClub) so they survive condClub being
 	// deleted and recreated by the tick cleanup loop.
 	bootstrapAt  map[string]int64 // club → last bootstrap attempt ms
 	brokenSkipAt map[string]int64 // club → last broken-skip ms
+	moodSkipAt   map[string]int64 // club → last mood-skip ms
 
 	// Event-driven in-memory indexes (populated by warmIndexes + observeEvent). Replacing
 	// per-tick full-table DB scans with O(1) lookups. Guarded by idxMu.
@@ -155,8 +162,10 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 		played:        map[string]map[string]map[string]bool{},
 		pres:          map[string]map[string]int64{},
 		broken:        map[string]map[string]map[string]int64{},
+		moods:         map[string]map[int]map[string]string{},
 		bootstrapAt:  map[string]int64{},
 		brokenSkipAt: map[string]int64{},
+		moodSkipAt:   map[string]int64{},
 		stageIdx:      map[string]map[string]stageEntry{},
 		kickIdx:       map[string]map[string]int64{},
 		queueIdx:      map[string]map[string]*nostr.Event{},
@@ -539,6 +548,56 @@ func (c *conductor) observeBroken(_ context.Context, ev *nostr.Event) {
 	c.brokenMu.Unlock()
 }
 
+// observeMood records a vibe vote (kind 20104) from a club member.
+// Tags: h=club, pos=track-pos (int), v=banger|skip. One vote per (club, pos, pubkey) counted.
+func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
+	if ev.Kind != kindMood {
+		return
+	}
+	club := tagVal(ev, "h")
+	posStr := tagVal(ev, "pos")
+	vote := tagVal(ev, "v")
+	if club == "" || posStr == "" || (vote != "banger" && vote != "skip") {
+		return
+	}
+	pos, err := strconv.Atoi(posStr)
+	if err != nil || pos < 0 {
+		return
+	}
+	c.moodMu.Lock()
+	if c.moods[club] == nil {
+		c.moods[club] = map[int]map[string]string{}
+	}
+	if c.moods[club][pos] == nil {
+		c.moods[club][pos] = map[string]string{}
+	}
+	c.moods[club][pos][ev.PubKey] = vote
+	c.moodMu.Unlock()
+}
+
+// moodCounts returns the banger and skip vote counts for club/pos (caller must NOT hold moodMu).
+func (c *conductor) moodCounts(club string, pos int) (bangers, skips int) {
+	c.moodMu.Lock()
+	for _, v := range c.moods[club][pos] {
+		if v == "banger" {
+			bangers++
+		} else if v == "skip" {
+			skips++
+		}
+	}
+	c.moodMu.Unlock()
+	return
+}
+
+// moodSkip reports whether ≥ moodSkipThreshold distinct members voted "skip" for the current track.
+func (c *conductor) moodSkip(club string, pb *condClub) bool {
+	if !pb.playing {
+		return false
+	}
+	_, skips := c.moodCounts(club, pb.pos)
+	return skips >= moodSkipThreshold
+}
+
 // brokenSkip reports whether the running track should be skipped as unplayable: an authorized
 // reporter (owner/mod or the playing DJ) reported it broken, or ≥ quorum distinct members did.
 func (c *conductor) brokenSkip(club string, pb *condClub, now int64) bool {
@@ -899,6 +958,15 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 			return
 		}
 	}
+	// Vibe vote: ≥ moodSkipThreshold distinct members voted "skip" (kind 20104).
+	if c.moodSkip(club, pb) {
+		if now-c.moodSkipAt[club] >= condHeartbeatMS {
+			c.moodSkipAt[club] = now
+			log.Printf("conductor [%.8s] advance reason=mood-skip pos=%d", club, pb.pos)
+			c.advance(ctx, club, djPks, queues, pb, now)
+			return
+		}
+	}
 	// Track finished (fallback cap when duration unknown)?
 	dur := pb.duration
 	if dur <= 0 {
@@ -971,6 +1039,16 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
 	c.notifyRadio(club, t.videoID, t.title, pb.dj)
+	// Prune mood votes older than 2 positions to keep the map bounded.
+	c.moodMu.Lock()
+	if cm := c.moods[club]; cm != nil {
+		for p := range cm {
+			if p < pb.pos-2 {
+				delete(cm, p)
+			}
+		}
+	}
+	c.moodMu.Unlock()
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
@@ -1051,6 +1129,7 @@ func (c *conductor) notifyRadio(clubID, videoID, title, dj string) {
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───
 
 func (c *conductor) publishNowPlaying(ctx context.Context, club string, pb *condClub, now int64) {
+	bangers, skips := c.moodCounts(club, pb.pos)
 	ev := &nostr.Event{
 		Kind:      kindNowPlaying,
 		CreatedAt: nostr.Timestamp(now / 1000),
@@ -1064,6 +1143,8 @@ func (c *conductor) publishNowPlaying(ctx context.Context, club string, pb *cond
 			{"sent_at", strconv.FormatInt(now, 10)},
 			{"duration", strconv.Itoa(pb.duration)},
 			{"status", "playing"},
+			{"mood_bangers", strconv.Itoa(bangers)},
+			{"mood_skips", strconv.Itoa(skips)},
 		},
 		Content: pb.title,
 	}

@@ -7,6 +7,7 @@ import { fairSequence } from './roundrobin'
 import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
+import { setMoodBaseline } from './mood.svelte'
 
 // The RELAY is the conductor — it is the sole writer of now_playing (kind 30100). This module is
 // now purely a CONSUMER: it ingests now_playing, drift-corrects the playback position, exposes
@@ -86,7 +87,7 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
 }
 
 /** Accept an incoming now_playing (newest wins) + calibrate the clock offset. */
-export function ingestNowPlaying(ev: Event): void {
+export function ingestNowPlaying(ev: Event, clubId: string): void {
   const np = parseNowPlaying(ev)
   if (!np) return
   if (state.np && np.sentAt < state.np.sentAt) {
@@ -96,6 +97,11 @@ export function ingestNowPlaying(ev: Event): void {
   if (np.sentAt > 0) state.offsetMs = np.sentAt - Date.now()
   console.log(`[zc:sync] now_playing: ${np.videoId} pos=${np.pos} status=${np.status} offset=${Math.round(state.offsetMs)}ms sentAt=${np.sentAt}`)
   state.np = np
+  // Seed mood counts from the heartbeat so late-joining users see the right gauge state.
+  const tag = (n: string) => ev.tags.find((t) => t[0] === n)?.[1]
+  const bangers = parseInt(tag('mood_bangers') ?? '0', 10) || 0
+  const skips   = parseInt(tag('mood_skips')   ?? '0', 10) || 0
+  if (clubId && np.sentAt > 0) setMoodBaseline(clubId, np.pos, bangers, skips, np.sentAt)
 }
 
 /** Current target position of the track in seconds (relay-clock calibrated). */

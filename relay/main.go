@@ -345,7 +345,7 @@ func main() {
 	cap.warmCount(context.Background())
 	playlistG.warmList(context.Background())
 	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent, playlistG.observeEvent)
-	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken)
+	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken, cond.observeMood)
 	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
 	stageG.isPremOwnerFn = cond.isPremiumOwner

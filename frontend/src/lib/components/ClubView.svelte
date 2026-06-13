@@ -40,6 +40,7 @@
   import { sync, ingestNowPlaying, onTrackEnded, onTrackError, resetSync } from '../nostr/sync.svelte'
   import { ingestChat, removeMessage, resetChat } from '../nostr/chat.svelte'
   import { ingestEmote, resetEmotes } from '../nostr/emotes.svelte'
+  import { ingestMood, resetMood } from '../nostr/mood.svelte'
   import { ingestAutoDJ, ingestAutoCtrl, resetAutoDJ } from '../nostr/autodj.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
@@ -124,13 +125,18 @@
       onNowPlaying: (ev) => {
         const ok = ev.pubkey === CLUB_RELAY_PUBKEY || stage.djs.length === 0 || stage.isOnStage(ev.pubkey)
         if (!ok) { console.log(`[zc:club] onNowPlaying: drop non-conductor ${ev.pubkey.slice(0, 8)}`); return }
-        ingestNowPlaying(ev)
+        ingestNowPlaying(ev, id)
       },
       onStage: ingestStage,
       onStageKick: (ev) => {
         if (!isModerator(ev.pubkey)) return // only honor admin/mod kicks
         const kicked = ingestStageKick(ev)
-        if (kicked && kicked === me && stage.isOnStage(me)) void leaveStage(id)
+        if (kicked && kicked === me && stage.isOnStage(me)) {
+          // Only self-eject if the kick is genuinely newer than our last stage heartbeat.
+          // On page reload, seedMyStage() sets lastSeen=Date.now(), so any replayed stale
+          // kick (created_at before this reload) won't trigger a false self-leave.
+          if (ev.created_at * 1000 > stage.rawLastSeen(me)) void leaveStage(id)
+        }
       },
       onQueue: ingestQueue,
       onConfig: (ev) => {
@@ -142,6 +148,7 @@
       onPlay: ingestPlay,
       onChat: ingestChat,
       onEmote: ingestEmote,
+      onMood: ingestMood,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
       onStream: (ev) => {
@@ -179,6 +186,7 @@
       resetPlayLog()
       resetChat()
       resetEmotes()
+      resetMood()
       resetZaps()
       resetPresence()
       resetAutoDJ()
@@ -634,15 +642,19 @@
     </div>
     <div class="radio-bar">
       {#if radioActive && sync.live}
-        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Webradio stream">📻 Webradio Live</a>
+        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>
       {:else if radioActive}
-        <a class="btn btn-radio-on" href={radioURL} target="_blank" rel="noopener" title="Stream online — no DJ active">📻 Webradio</a>
+        <a class="btn btn-radio-on" href={radioURL} target="_blank" rel="noopener" title="Stream online — no DJ active">📻 Stream</a>
       {:else}
-        <span class="btn-radio-off">📻 Webradio Offline</span>
+        <span class="btn-radio-off">📻 Stream Offline</span>
       {/if}
-      {#if isOwner}
+      {#if isOwner && ownPremium.active}
         <button class="btn btn-ghost btn-sm radio-toggle" onclick={toggleRadio} disabled={radioBusy} title={radioActive ? 'Stop stream' : 'Start stream'}>
           {radioBusy ? '…' : radioActive ? '⏹ Stop' : '▶ Start'}
+        </button>
+      {:else if isOwner}
+        <button class="btn btn-ghost btn-sm radio-toggle radio-upsell" onclick={() => (showPremModal = true)} title="Livestream — Premium feature">
+          ⚡ Livestream — Premium
         </button>
       {/if}
       {#if radioErr}<span class="radio-err">{radioErr}</span>{/if}
@@ -742,6 +754,7 @@
         onCta={doPaidJoin}
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
+        streamURL={radioActive && sync.live ? radioURL : ''}
       />
     </div>
   </header>
@@ -767,6 +780,8 @@
         onkick={kick}
         onpromote={promote}
         ondelete={(id) => void deleteEvent(groupId, id)}
+        {chatOpen}
+        onChatToggle={() => (chatOpen = !chatOpen)}
       />
       <!-- The user's own live playlist — feeds the round-robin. -->
       {#if isMember}
@@ -786,10 +801,6 @@
     </aside>
   </div>
 
-  <!-- Chat toggle: FAB to open on mobile; reopen button on desktop when panel is closed -->
-  {#if !chatOpen}
-    <button class="chat-fab" onclick={() => (chatOpen = true)} title="Open chat">💬</button>
-  {/if}
   {#if chatOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="chat-backdrop" role="presentation" onclick={() => (chatOpen = false)}></div>
@@ -1346,6 +1357,13 @@
   }
   .radio-toggle {
     flex: 0 0 auto;
+  }
+  .radio-upsell {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .radio-upsell:hover {
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
   }
   .radio-err {
     font-size: 0.75rem;

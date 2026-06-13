@@ -12,6 +12,8 @@
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
+  import VibeMeter from './VibeMeter.svelte'
+  import ComingNext from './ComingNext.svelte'
 
   let {
     groupId,
@@ -25,6 +27,8 @@
     onkick,
     onpromote,
     ondelete,
+    chatOpen = false,
+    onChatToggle,
   }: {
     groupId: string
     members: ClubMember[]
@@ -37,6 +41,8 @@
     onkick?: (pubkey: string) => void
     onpromote?: (pubkey: string) => void
     ondelete?: (eventId: string) => void
+    chatOpen?: boolean
+    onChatToggle?: () => void
   } = $props()
 
   // DJs currently on stage — the floor's front row (even if their presence beat is a little
@@ -184,8 +190,13 @@
 
 <section class="floor card" class:playing class:hyped>
   <div class="head">
-    <h3>The Floor</h3>
+    <h3>In Da Club</h3>
     <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
+    {#if onChatToggle}
+      <button class="chat-tog" onclick={onChatToggle} class:open={chatOpen} title={chatOpen ? 'Close chat' : 'Open chat'} aria-label={chatOpen ? 'Close chat' : 'Open chat'}>
+        {chatOpen ? '✕' : '💬'}
+      </button>
+    {/if}
   </div>
 
   {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
@@ -195,7 +206,7 @@
   <!-- Stage row: the on-stage DJs dance up front, right against the crowd. Open slots are
        joinable in place; the people live ONLY here (not repeated in the crowd below). -->
   <div class="stagerow">
-    <span class="stage-tag" aria-hidden="true">{stageDjs.length}/{MAX_DJS} live</span>
+    <span class="stage-tag" aria-hidden="true">{stageDjs.length}/{MAX_DJS} ON STAGE</span>
     {#if auth.canSign && isMember && onStage}
       <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
         <span class="ring">↩</span>
@@ -234,6 +245,11 @@
   </div>
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
+  <div class="reactions">
+    <VibeMeter clubId={groupId} />
+  </div>
+  <ComingNext />
+
   <!-- The dancing crowd (online members) — loose flat cluster. -->
   {#if shownOnline.length > 0}
     <div class="crowd">
@@ -261,14 +277,6 @@
           <span class="fly" style={`left:${emoteX(e.id)}%`}>{showEmote(e.emoji)}</span>
         {/each}
       </div>
-    </div>
-  {/if}
-
-  {#if canChat}
-    <div class="emote-bar">
-      {#each EMOTES as em (em.c)}
-        <button class="emo" onclick={() => emit(em.c)} title="Send to the floor">{em.e}</button>
-      {/each}
     </div>
   {/if}
 
@@ -332,7 +340,24 @@
     color: var(--text-dim);
     font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
+    margin-right: auto;
   }
+  .chat-tog {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .chat-tog:hover { border-color: var(--accent-2); color: var(--text); }
+  .chat-tog.open { border-color: var(--accent-2); color: var(--accent-2); }
   .dim {
     color: var(--text-dim);
     font-size: 0.85rem;
@@ -475,10 +500,15 @@
     100% { opacity: 0; transform: translateY(-150px) scale(1); }
   }
 
+  .reactions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-top: 0.5rem;
+  }
   .emote-bar {
     display: flex;
     gap: 0.4rem;
-    margin-top: 0.5rem;
   }
   .emo {
     background: var(--bg-elev-2);

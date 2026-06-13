@@ -158,6 +158,11 @@ export const stage = {
   isOnStage(pubkey: string | null): boolean {
     return !!pubkey && activeDjs().some((d) => d.pubkey === pubkey)
   },
+  /** Raw lastSeen timestamp (ms) for a pubkey — bypasses the active-DJ filter. Used to
+   *  distinguish a genuine live kick from a stale replayed kick event on page reload. */
+  rawLastSeen(pubkey: string): number {
+    return state.djs[pubkey]?.lastSeen ?? 0
+  },
 }
 
 /** Handles an incoming on-stage event (kind 30102). */

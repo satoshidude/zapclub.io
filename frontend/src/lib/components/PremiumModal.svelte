@@ -141,6 +141,7 @@
         <li>✓ Up to 5 DJ slots on your clubs</li>
         <li>✓ Unlimited playlists &amp; playlist management</li>
         <li>✓ Auto DJ — keep your club playing 24/7</li>
+        <li>✓ Livestream your club (one active stream)</li>
         <li>✓ Private / invite-only clubs</li>
         <li>✓ Entry-fee clubs (Sats gate)</li>
         <li>✓ Featured listing in the directory</li>
