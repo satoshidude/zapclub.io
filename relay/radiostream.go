@@ -63,11 +63,8 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
      display:flex;flex-direction:column;align-items:center;justify-content:center;
      min-height:100vh;gap:1.5rem;padding:2rem 1rem}
 ` + radioBrandCSS + `
-.now-playing{text-align:center;max-width:340px;min-height:2.8rem}
+.now-playing{text-align:center;max-width:360px;min-height:2.2rem}
 .np-title{font-size:1.05rem;font-weight:600;color:#e2e8f0;line-height:1.35}
-.np-dj{margin-top:.35rem;font-size:.82rem;color:#94a3b8}
-.np-dj a{color:#a78bfa;text-decoration:none;font-weight:600}
-.np-dj a:hover{text-decoration:underline}
 .player-ctrl{display:flex;align-items:center;gap:.9rem}
 .btn-play{height:3rem;padding:0 1.2rem;border-radius:1.5rem;border:none;
           background:#8e30eb;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;
@@ -78,7 +75,16 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
             letter-spacing:.07em;padding:.2rem .5rem;border-radius:.25rem;
             text-transform:uppercase;display:none}
 .vol{width:88px;accent-color:#8e30eb;cursor:pointer}
-.offline-msg{color:#ef4444;font-size:.82rem;display:none;margin-top:.2rem}
+.offline-msg{color:#ef4444;font-size:.82rem;margin-top:-.5rem}
+.zap-dj{background:transparent;border:1px solid #d97706;border-radius:.45rem;
+        color:#fbbf24;font-size:.9rem;font-weight:700;padding:.5rem 1rem;
+        cursor:pointer;text-decoration:none;display:none;align-items:center;
+        gap:.4rem;font-family:inherit;letter-spacing:.01em}
+.zap-dj:hover{background:#1a1505;color:#fde68a;border-color:#f59e0b}
+.zap-dj .bolt{font-size:1rem}
+.zap-dj .lbl{font-size:.88rem}
+.zap-dj .dj-name{padding-left:.55rem;margin-left:.15rem;
+                  border-left:1px solid #92400e;font-size:.88rem}
 .actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center}
 .act-btn{background:#1e1e2e;border:1px solid #334155;border-radius:.4rem;
          color:#94a3b8;font-size:.8rem;padding:.45rem .85rem;cursor:pointer;
@@ -86,11 +92,6 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
          white-space:nowrap;font-family:inherit}
 .act-btn:hover{border-color:#475569;color:#e2e8f0}
 .act-btn.copied{color:#22c55e;border-color:#22c55e}
-.zap-btn{background:#1a1505;border:1px solid #d97706;border-radius:.5rem;color:#fbbf24;
-         font-size:.95rem;font-weight:700;padding:.65rem 1.5rem;cursor:pointer;
-         text-decoration:none;display:none;align-items:center;gap:.4rem;font-family:inherit;
-         letter-spacing:.01em}
-.zap-btn:hover{background:#271f06;border-color:#f59e0b;color:#fde68a}
 .enter{background:#8e30eb;color:#fff;font-weight:600;font-size:.95rem;
        padding:.65rem 1.5rem;border-radius:.5rem;text-decoration:none;
        letter-spacing:.01em;display:inline-flex;align-items:center;gap:.35rem}
@@ -105,7 +106,6 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 
 <div class="now-playing">
   <div class="np-title" id="np-title">Connecting…</div>
-  <div class="np-dj" id="np-dj"></div>
 </div>
 
 <audio id="audio" preload="none"></audio>
@@ -118,28 +118,29 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 </div>
 <p class="offline-msg" id="offline-msg"></p>
 
+<a class="zap-dj" id="zap-dj" href="https://zapclub.io/club/{{CLUBID}}" target="_top">
+  <span class="bolt">⚡</span>
+  <span class="lbl">zap</span>
+  <span class="dj-name" id="zap-dj-name">DJ</span>
+</a>
+
 <div class="actions">
   <button class="act-btn" id="copy-btn" onclick="copyLink()">📋 Copy link</button>
-  <a class="act-btn" id="m3u-btn" href="#" download="zapclub-radio.m3u">📂 Open M3U</a>
   <button class="act-btn" onclick="shareLink()">📤 Share</button>
 </div>
 
-<a class="zap-btn" id="zap-btn" href="https://zapclub.io/club/{{CLUBID}}" target="_top">⚡ Zap the DJ</a>
-<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">↗ Enter Club</a>
+<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">↗ Enter {{CLUBNAME}}</a>
 
 <script>
 var BASE = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
-var INFO = BASE + '/info'; // works on both relay.zapclub.io/radio/<id> and stream.zapclub.io/<id>
+var INFO = BASE + '/info';
 var audio = document.getElementById('audio');
-var playing = true; // start playing immediately
+var playing = true;
 var retryTimer = null;
-var currentDjNpub = '';
+var currentPubkey = '';
+var profileCache = {};
 
-document.getElementById('m3u-btn').href = BASE + '.m3u';
-
-function freshSrc() {
-  return BASE + '?_=' + Date.now();
-}
+function freshSrc() { return BASE + '?_=' + Date.now(); }
 
 function setStatus(live, msg) {
   document.getElementById('live-badge').style.display = live ? 'inline-block' : 'none';
@@ -148,14 +149,9 @@ function setStatus(live, msg) {
 }
 
 function connect() {
-  clearTimeout(retryTimer);
-  retryTimer = null;
+  clearTimeout(retryTimer); retryTimer = null;
   audio.src = freshSrc();
-  audio.play().catch(function() {
-    // Autoplay blocked by browser policy — show play button, wait for user gesture.
-    playing = false;
-    setStatus(false, '');
-  });
+  audio.play().catch(function() { playing = false; setStatus(false, ''); });
 }
 
 function retry(delayMs) {
@@ -171,22 +167,18 @@ audio.addEventListener('error',   function() { setStatus(false, ''); retry(4000)
 
 function userToggle() {
   if (!playing || audio.paused || audio.error || audio.ended) {
-    playing = true;
-    connect();
+    playing = true; connect();
   } else {
     playing = false;
     clearTimeout(retryTimer); retryTimer = null;
-    audio.pause();
-    audio.src = '';
-    setStatus(false, '');
+    audio.pause(); audio.src = ''; setStatus(false, '');
   }
 }
 
 function copyLink() {
   navigator.clipboard.writeText(BASE).then(function() {
     var btn = document.getElementById('copy-btn');
-    btn.textContent = '✓ Copied';
-    btn.classList.add('copied');
+    btn.textContent = '✓ Copied'; btn.classList.add('copied');
     setTimeout(function() { btn.textContent = '📋 Copy link'; btn.classList.remove('copied'); }, 1800);
   }).catch(function() { prompt('Copy this URL:', BASE); });
 }
@@ -196,32 +188,62 @@ function shareLink() {
     navigator.share(d).catch(function() {});
   } else { copyLink(); }
 }
+
+function setZapName(name) {
+  document.getElementById('zap-dj-name').textContent = name;
+}
+function showZap(name) {
+  setZapName(name);
+  document.getElementById('zap-dj').style.display = 'inline-flex';
+}
+function hideZap() {
+  document.getElementById('zap-dj').style.display = 'none';
+  currentPubkey = '';
+}
+
+// Fetch Nostr display name for a hex pubkey from a public relay.
+function fetchName(pubkeyHex, cb) {
+  if (profileCache[pubkeyHex]) { cb(profileCache[pubkeyHex]); return; }
+  try {
+    var ws = new WebSocket('wss://relay.nostr.band');
+    var t = setTimeout(function() { try { ws.close(); } catch(e) {} cb(null); }, 5000);
+    ws.onopen = function() {
+      ws.send(JSON.stringify(["REQ","n1",{"kinds":[0],"authors":[pubkeyHex],"limit":1}]));
+    };
+    ws.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        if (msg[0]==='EVENT' && msg[2] && msg[2].kind===0) {
+          clearTimeout(t); ws.close();
+          var p = JSON.parse(msg[2].content);
+          var name = p.display_name || p.name || null;
+          if (name) profileCache[pubkeyHex] = name;
+          cb(name);
+        }
+      } catch(err) {}
+    };
+    ws.onerror = function() { clearTimeout(t); cb(null); };
+  } catch(e) { cb(null); }
+}
+
 function pollInfo() {
   fetch(INFO).then(function(r) { return r.json(); }).then(function(d) {
-    var titleEl = document.getElementById('np-title');
-    var djEl    = document.getElementById('np-dj');
-    var zapBtn  = document.getElementById('zap-btn');
-    titleEl.textContent = d.title || (d.active ? '{{CLUBNAME}} — Live' : '— No DJ active —');
-    if (d.dj_npub) {
-      djEl.innerHTML = 'DJ: <a href="https://zapclub.io/user/' +
-        encodeURIComponent(d.dj_npub) + '" target="_top">' +
-        d.dj_npub.slice(0,12) + '…</a>';
-      zapBtn.style.display = 'inline-flex';
-      if (d.dj_npub !== currentDjNpub && playing) {
-        // New track / new DJ: re-connect so audio picks up the new stream segment.
-        currentDjNpub = d.dj_npub;
-        connect();
-      } else {
-        currentDjNpub = d.dj_npub;
+    document.getElementById('np-title').textContent =
+      d.title || (d.active ? '{{CLUBNAME}} — Live' : '— No DJ active —');
+    if (d.dj_pubkey) {
+      var shortNpub = d.dj_npub ? d.dj_npub.slice(0,12) + '…' : d.dj_pubkey.slice(0,10) + '…';
+      showZap(profileCache[d.dj_pubkey] || shortNpub);
+      if (d.dj_pubkey !== currentPubkey) {
+        currentPubkey = d.dj_pubkey;
+        fetchName(d.dj_pubkey, function(name) {
+          if (name && currentPubkey === d.dj_pubkey) showZap(name);
+        });
       }
     } else {
-      djEl.textContent = '';
-      zapBtn.style.display = 'none';
-      currentDjNpub = '';
+      hideZap();
     }
   }).catch(function() {});
 }
-// Start playing immediately (autoplay; browser may block — handled in connect()).
 connect();
 pollInfo();
 setInterval(pollInfo, 12000);
@@ -676,16 +698,18 @@ func (h *radioHandler) handleInfo(w http.ResponseWriter, r *http.Request, clubID
 	h.mgr.mu.Unlock()
 
 	type infoResponse struct {
-		Active  bool   `json:"active"`
-		Title   string `json:"title,omitempty"`
-		DJNpub  string `json:"dj_npub,omitempty"`
-		Club    string `json:"club"`
+		Active   bool   `json:"active"`
+		Title    string `json:"title,omitempty"`
+		DJNpub   string `json:"dj_npub,omitempty"`
+		DJPubkey string `json:"dj_pubkey,omitempty"`
+		Club     string `json:"club"`
 	}
 	resp := infoResponse{Club: h.clubName(clubID)}
 	if rc != nil {
 		resp.Active = rc.enabled
 		resp.Title = rc.title
 		if rc.dj != "" {
+			resp.DJPubkey = rc.dj
 			if npub, err := nip19.EncodePublicKey(rc.dj); err == nil {
 				resp.DJNpub = npub
 			}
