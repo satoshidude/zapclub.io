@@ -7,9 +7,14 @@
   let nwcOpen   = $state(false)
   let nwcError  = $state('')
 
-  // Balance
+  // Balance + transactions
   let balance    = $state<number | null>(null)
   let balLoading = $state(false)
+
+  type Tx = { type: 'incoming' | 'outgoing'; amount: number; description: string; settled_at: number }
+  let txs        = $state<Tx[]>([])
+  let txLoading  = $state(false)
+  let txFetched  = $state(false) // prevent retry loop on effect re-run
 
   // Receive invoice
   let rxInvoice = $state('')
@@ -28,6 +33,31 @@
       balance = Math.floor(res.balance / 1000)
       client.close()
     } catch { balance = null } finally { balLoading = false }
+  }
+
+  async function fetchTxs() {
+    const connStr = loadNwcConnection()
+    if (!connStr) return
+    txLoading = true
+    try {
+      const { NWCClient } = await import('@getalby/sdk/nwc')
+      const client = new NWCClient({ nostrWalletConnectUrl: connStr })
+      const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+      const res = await Promise.race([client.listTransactions({ limit: 5 }), timeout])
+      txs = (res.transactions ?? [])
+        .filter(t => t.state === 'settled')
+        .slice(0, 5)
+        .map(t => ({ type: t.type, amount: Math.floor(t.amount / 1000), description: t.description ?? '', settled_at: t.settled_at }))
+      client.close()
+    } catch { /* wallet may not support listTransactions */ } finally { txLoading = false }
+  }
+
+  function relTime(ts: number): string {
+    const s = Math.floor(Date.now() / 1000) - ts
+    if (s < 60) return `${s}s ago`
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+    return `${Math.floor(s / 86400)}d ago`
   }
 
   async function makeReceiveInvoice() {
@@ -49,7 +79,10 @@
   }
 
   $effect(() => {
-    if (nwcOpen && nwcStored && balance === null) void fetchBalance()
+    if (nwcOpen && nwcStored) {
+      if (balance === null) void fetchBalance()
+      if (!txFetched) { txFetched = true; void fetchTxs() }
+    }
   })
 
   function saveNwc() {
@@ -59,7 +92,7 @@
   }
 
   function removeNwc() {
-    clearNwcConnection(); nwcStored = false; balance = null; rxInvoice = ''
+    clearNwcConnection(); nwcStored = false; balance = null; rxInvoice = ''; txs = []; txFetched = false
   }
 </script>
 
@@ -101,6 +134,26 @@
           {/if}
           <button class="icon-btn" onclick={() => { balance = null; void fetchBalance() }} disabled={balLoading} title="Refresh">↻</button>
         </div>
+
+        <!-- Recent transactions -->
+        {#if txLoading}
+          <p class="tx-loading">Loading transactions…</p>
+        {:else if txs.length > 0}
+          <ul class="tx-list">
+            {#each txs as tx}
+              <li class="tx-row">
+                <span class="tx-dir" class:out={tx.type === 'outgoing'} class:inc={tx.type === 'incoming'}>
+                  {tx.type === 'outgoing' ? '↑' : '↓'}
+                </span>
+                <span class="tx-desc">{tx.description || (tx.type === 'outgoing' ? 'Sent' : 'Received')}</span>
+                <span class="tx-amt" class:out={tx.type === 'outgoing'} class:inc={tx.type === 'incoming'}>
+                  {tx.type === 'outgoing' ? '−' : '+'}{tx.amount.toLocaleString()}
+                </span>
+                <span class="tx-time">{relTime(tx.settled_at)}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
 
         <!-- Receive / top up -->
         {#if rxInvoice}
@@ -235,6 +288,56 @@
   }
   .icon-btn:hover { color: var(--text); background: var(--bg-elev-2, #111118); }
   .icon-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* Transactions */
+  .tx-loading {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .tx-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.4rem;
+  }
+  .tx-row {
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.68rem;
+    min-height: 1.4rem;
+  }
+  .tx-dir {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-align: center;
+  }
+  .tx-dir.out { color: var(--amber, #f59e0b); }
+  .tx-dir.inc { color: #4ec94e; }
+  .tx-desc {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tx-amt {
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 0.67rem;
+  }
+  .tx-amt.out { color: var(--amber, #f59e0b); }
+  .tx-amt.inc { color: #4ec94e; }
+  .tx-time {
+    color: var(--text-dim);
+    font-size: 0.6rem;
+    white-space: nowrap;
+  }
 
   /* Receive row */
   .rx-row {
