@@ -126,11 +126,12 @@
     top: 8px;
     left: 50%;
     transform: translateX(-50%);
+    width: min(960px, calc(100vw - 2rem));
     height: var(--topbar-h);
     z-index: 50;
     display: flex;
     align-items: center;
-    gap: 1.25rem;
+    justify-content: space-between;
     padding: 0 1rem;
     background: rgba(7, 7, 10, 0.85);
     backdrop-filter: blur(12px);
