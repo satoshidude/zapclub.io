@@ -30,3 +30,4 @@ tasks/
 # OS / editor
 .DS_Store
 *.swp
+telegram-bot/telegram-bot
