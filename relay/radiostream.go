@@ -86,6 +86,11 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
          white-space:nowrap;font-family:inherit}
 .act-btn:hover{border-color:#475569;color:#e2e8f0}
 .act-btn.copied{color:#22c55e;border-color:#22c55e}
+.zap-btn{background:#1a1505;border:1px solid #d97706;border-radius:.5rem;color:#fbbf24;
+         font-size:.95rem;font-weight:700;padding:.65rem 1.5rem;cursor:pointer;
+         text-decoration:none;display:none;align-items:center;gap:.4rem;font-family:inherit;
+         letter-spacing:.01em}
+.zap-btn:hover{background:#271f06;border-color:#f59e0b;color:#fde68a}
 .enter{background:#8e30eb;color:#fff;font-weight:600;font-size:.95rem;
        padding:.65rem 1.5rem;border-radius:.5rem;text-decoration:none;
        letter-spacing:.01em;display:inline-flex;align-items:center;gap:.35rem}
@@ -119,19 +124,20 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
   <button class="act-btn" onclick="shareLink()">📤 Share</button>
 </div>
 
-<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">⚡ {{CLUBNAME}}</a>
+<a class="zap-btn" id="zap-btn" href="https://zapclub.io/club/{{CLUBID}}" target="_top">⚡ Zap the DJ</a>
+<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">↗ Enter Club</a>
 
 <script>
 var BASE = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
 var INFO = BASE + '/info'; // works on both relay.zapclub.io/radio/<id> and stream.zapclub.io/<id>
 var audio = document.getElementById('audio');
-var playing = false; // true once user has clicked play
+var playing = true; // start playing immediately
 var retryTimer = null;
+var currentDjNpub = '';
 
 document.getElementById('m3u-btn').href = BASE + '.m3u';
 
 function freshSrc() {
-  // Cache-bust so the browser always opens a new HTTP connection.
   return BASE + '?_=' + Date.now();
 }
 
@@ -145,7 +151,11 @@ function connect() {
   clearTimeout(retryTimer);
   retryTimer = null;
   audio.src = freshSrc();
-  audio.play().catch(function() { setStatus(false, ''); });
+  audio.play().catch(function() {
+    // Autoplay blocked by browser policy — show play button, wait for user gesture.
+    playing = false;
+    setStatus(false, '');
+  });
 }
 
 function retry(delayMs) {
@@ -190,15 +200,29 @@ function pollInfo() {
   fetch(INFO).then(function(r) { return r.json(); }).then(function(d) {
     var titleEl = document.getElementById('np-title');
     var djEl    = document.getElementById('np-dj');
+    var zapBtn  = document.getElementById('zap-btn');
     titleEl.textContent = d.title || (d.active ? '{{CLUBNAME}} — Live' : '— No DJ active —');
     if (d.dj_npub) {
-      djEl.innerHTML = '⚡ Now playing — <a href="https://zapclub.io/user/' +
-        encodeURIComponent(d.dj_npub) + '" target="_top">Zap the DJ</a>';
+      djEl.innerHTML = 'DJ: <a href="https://zapclub.io/user/' +
+        encodeURIComponent(d.dj_npub) + '" target="_top">' +
+        d.dj_npub.slice(0,12) + '…</a>';
+      zapBtn.style.display = 'inline-flex';
+      if (d.dj_npub !== currentDjNpub && playing) {
+        // New track / new DJ: re-connect so audio picks up the new stream segment.
+        currentDjNpub = d.dj_npub;
+        connect();
+      } else {
+        currentDjNpub = d.dj_npub;
+      }
     } else {
       djEl.textContent = '';
+      zapBtn.style.display = 'none';
+      currentDjNpub = '';
     }
   }).catch(function() {});
 }
+// Start playing immediately (autoplay; browser may block — handled in connect()).
+connect();
 pollInfo();
 setInterval(pollInfo, 12000);
 </script>

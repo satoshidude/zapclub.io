@@ -89,6 +89,7 @@ type condClub struct {
 type autoState struct {
 	owner  string
 	tracks []condTrack
+	since  int64 // ms — from 30105 CreatedAt; used as the DJ's round-robin sort key
 }
 
 // stageEntry is the newest known state for one DJ in one club (from 30102 index).
@@ -648,6 +649,18 @@ func (c *conductor) online(club, pk string, now int64) bool {
 	return false
 }
 
+// setVirtualOnline marks a pubkey as present for the current tick so matrix() treats it as
+// online and never applies the played-set to its tracks. Used for auto-DJ owners so their
+// queue loops naturally without draining.
+func (c *conductor) setVirtualOnline(club, pk string, now int64) {
+	c.presMu.Lock()
+	if c.pres[club] == nil {
+		c.pres[club] = map[string]int64{}
+	}
+	c.pres[club][pk] = now
+	c.presMu.Unlock()
+}
+
 // prunePresence drops stale presence entries so the map stays bounded.
 func (c *conductor) prunePresence(now int64) {
 	c.presMu.Lock()
@@ -681,9 +694,8 @@ func (c *conductor) tick() {
 	}()
 	ctx := context.Background()
 	active := c.activeClubs(ctx)
-	// Auto DJ: clubs with a premium owner-armed playlist but no real DJ on stage.
-	// armedAutoClubs publishes a 30111 disarm marker when a real DJ takes over.
-	auto := c.armedAutoClubs(ctx, active)
+	// Auto DJ: clubs with a premium owner-armed playlist. Included regardless of real DJs.
+	auto := c.armedAutoClubs(ctx)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -701,9 +713,22 @@ func (c *conductor) tick() {
 	c.prunePresence(now)
 	c.pruneBroken(now)
 	for club, djs := range active {
-		c.driveClub(ctx, club, djs, now)
+		if st, ok := auto[club]; ok {
+			// Auto DJ is armed AND real DJs are on stage → inject auto-DJ as a virtual
+			// participant in the round-robin. Mark owner as "virtually online" so matrix()
+			// never applies the played-set to their tracks (enabling natural loop behaviour).
+			c.setVirtualOnline(club, st.owner, now)
+			djsWithAuto := append(append([]condDJ{}, djs...), condDJ{pubkey: st.owner, since: st.since})
+			c.driveClub(ctx, club, djsWithAuto, map[string][]condTrack{st.owner: st.tracks}, now)
+		} else {
+			c.driveClub(ctx, club, djs, nil, now)
+		}
 	}
 	for club, st := range auto {
+		if _, hasRealDJ := active[club]; hasRealDJ {
+			continue // already driven above with auto-DJ injected
+		}
+		// Solo auto-DJ mode: no real DJs on stage.
 		c.driveAutoClub(ctx, club, st, now)
 	}
 }
@@ -807,8 +832,13 @@ func parseQueueTracks(ev *nostr.Event) []condTrack {
 
 // ── driving a club ───────────────────────────────────────────────────────────
 
-func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, now int64) {
+// driveClub drives a club in real-DJ round-robin mode. extraQueues, if non-nil, injects
+// additional per-DJ track lists (e.g. auto-DJ virtual tracks) into the queue map.
+func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, extraQueues map[string][]condTrack, now int64) {
 	queues := c.clubQueues(ctx, club)
+	for pk, tracks := range extraQueues {
+		queues[pk] = tracks
+	}
 	pb := c.clubs[club]
 	if pb == nil {
 		pb = c.resume(ctx, club)
@@ -1275,10 +1305,10 @@ func makeShuffledOrder(n int) []int {
 	return order
 }
 
-// armedAutoClubs returns clubs with an owner-armed Auto DJ playlist and no real DJ on stage.
-// When a real DJ takes over an armed club, it publishes a 30111 disarm marker (once, idempotent).
+// armedAutoClubs returns all clubs with an owner-armed Auto DJ playlist, regardless of whether
+// real DJs are on stage. The caller decides how to integrate auto-DJ (round-robin vs solo).
 // Reads from the in-memory indexes (no DB).
-func (c *conductor) armedAutoClubs(ctx context.Context, active map[string][]condDJ) map[string]*autoState {
+func (c *conductor) armedAutoClubs(ctx context.Context) map[string]*autoState {
 	type armedEntry struct {
 		ev    *nostr.Event
 		owner string
@@ -1303,25 +1333,18 @@ func (c *conductor) armedAutoClubs(ctx context.Context, active map[string][]cond
 
 	out := map[string]*autoState{}
 	for club, entry := range armed {
-		disarmFresh := disarmedAt[club] >= entry.ev.CreatedAt
-
-		if _, hasRealDJ := active[club]; hasRealDJ {
-			// A real DJ is on stage → publish a disarm marker once (idempotent).
-			if !disarmFresh {
-				c.publishAutoDJDisarm(ctx, club)
-			}
-			continue // real DJ drives this club via driveClub
+		if disarmedAt[club] >= entry.ev.CreatedAt {
+			continue // manually disarmed; owner must re-arm
 		}
-
-		if disarmFresh {
-			continue // disarmed; owner must manually re-arm
-		}
-
 		tracks := parseQueueTracks(entry.ev)
 		if len(tracks) == 0 {
 			continue
 		}
-		out[club] = &autoState{owner: entry.owner, tracks: tracks}
+		out[club] = &autoState{
+			owner:  entry.owner,
+			tracks: tracks,
+			since:  int64(entry.ev.CreatedAt) * 1000,
+		}
 	}
 	return out
 }
@@ -1366,6 +1389,7 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		pb.playing = true
 		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
 		c.publishPlay(ctx, club, pb, now)
+		c.notifyRadio(club, t.videoID, t.title, st.owner)
 	}
 
 	if !pb.playing {

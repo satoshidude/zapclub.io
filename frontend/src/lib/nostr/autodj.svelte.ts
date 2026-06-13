@@ -3,10 +3,11 @@ import { KIND_AUTODJ, publishClub } from './groups'
 import { CLUB_RELAY_PUBKEY } from './pool'
 import type { Playlist } from './types'
 
-// Auto DJ: an owner can arm one of their saved playlists as the club's fallback DJ.
-// When no real DJ is on stage, the conductor plays that playlist on shuffle rotation.
-// Arming publishes a kind-30105 snapshot to the club relay. When a real DJ joins, the
-// conductor publishes a kind-30111 disarm marker; the owner must manually re-arm.
+// Auto DJ: an owner can arm one of their saved playlists as a virtual DJ participant.
+// When real DJs are on stage, auto-DJ joins the round-robin as another slot.
+// When no real DJ is on stage, the conductor plays the playlist in shuffled loop rotation.
+// Arming publishes a kind-30105 snapshot to the club relay.
+// The owner manually disarms via the Stop button (publishes 30105 with status=off).
 
 interface AutoDJConfig {
   clubId: string
