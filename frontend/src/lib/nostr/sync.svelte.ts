@@ -8,6 +8,7 @@ import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
 import type { NowPlaying } from './types'
 import { setMoodBaseline } from './mood.svelte'
+import { autodj } from './autodj.svelte'
 
 // The RELAY is the conductor — it is the sole writer of now_playing (kind 30100). This module is
 // now purely a CONSUMER: it ingests now_playing, drift-corrects the playback position, exposes
@@ -130,16 +131,37 @@ function playableMatrix(djs: string[]): boolean[][] {
 /** Preview of the next round-robin tracks (across all DJs), max `max`. Fair rotation starting
  *  after the currently-playing DJ — each DJ contributes its TOP PLAYABLE (active, not-off) track in
  *  turn, exactly like the relay's repeated `advance` (so a reorder is reflected immediately and the
- *  interleave alternates fairly per DJ regardless of where off tracks sit). Off tracks drop out. */
-export function upcomingTracks(max = 5): { dj: string; videoId: string; title: string }[] {
-  const djs = stage.djs.map((d) => d.pubkey)
+ *  interleave alternates fairly per DJ regardless of where off tracks sit). Off tracks drop out.
+ *  If an Auto DJ is armed for the club and not already on stage, it is injected as an extra slot. */
+export function upcomingTracks(clubId: string, max = 5): { dj: string; videoId: string; title: string }[] {
+  const stageDjPks = stage.djs.map((d) => d.pubkey)
+
+  // Inject armed Auto DJ if it's not already a real stage DJ.
+  const autoCfg = autodj.getConfig(clubId)
+  const autoIsStage = autoCfg ? stageDjPks.includes(autoCfg.ownerPubkey) : false
+  const djs = autoCfg && !autoIsStage ? [...stageDjPks, autoCfg.ownerPubkey] : stageDjPks
+
   if (djs.length === 0) return []
-  const playable = playableMatrix(djs)
+
+  const cur = state.np?.videoId
+  const playable = djs.map((pk, i) => {
+    if (autoCfg && !autoIsStage && i === djs.length - 1) {
+      // Auto-DJ: all playlist tracks are always "active"; exclude only the current one.
+      return autoCfg.tracks.map((t) => t.videoId !== cur)
+    }
+    return (queues.get(pk)?.tracks ?? []).map((t) => t.active !== false && t.videoId !== cur)
+  })
+
   const lastDjIndex = djs.indexOf(state.np?.dj ?? '')
   const out: { dj: string; videoId: string; title: string }[] = []
   for (const { djIndex, trackIndex } of fairSequence(djs.length, playable, lastDjIndex, max)) {
     const dj = djs[djIndex]
-    const track = queues.trackAt(dj, trackIndex)
+    let track: { videoId: string; title: string } | undefined
+    if (autoCfg && !autoIsStage && djIndex === djs.length - 1) {
+      track = autoCfg.tracks[trackIndex]
+    } else {
+      track = queues.trackAt(dj, trackIndex) ?? undefined
+    }
     if (track) out.push({ dj, videoId: track.videoId, title: track.title })
   }
   return out

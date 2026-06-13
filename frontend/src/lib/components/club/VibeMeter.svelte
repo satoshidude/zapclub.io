@@ -13,99 +13,66 @@
   const activeIdx = $derived(level + 2)
   const ownVote   = $derived(pos >= 0 ? vibeMeter.ownVote(clubId, pos) : null)
 
-  // ── Per-minute cooldown ──────────────────────────────────────────────────────
   const COOLDOWN_MS = 60_000
   let lastVoteMs = $state(0)
-
   $effect(() => { void pos; lastVoteMs = 0 })
-
   let nowMs = $state(Date.now())
   $effect(() => {
     const t = setInterval(() => (nowMs = Date.now()), 1000)
     return () => clearInterval(t)
   })
-
   const cooldown = $derived(
     lastVoteMs === 0 ? 0 : Math.max(0, Math.ceil((lastVoteMs + COOLDOWN_MS - nowMs) / 1000))
   )
   const canVote = $derived(auth.canSign && pos >= 0 && !!sync.live && cooldown === 0)
 
-  // ── Segment metadata ─────────────────────────────────────────────────────────
-  const COLS  = ['#4488ff','#77ccff','#cc88ff','#ffbb44','#ff2d78']
-  const NAMES = ['skip','meh vibes','in the groove','heat rising','banger']
+  const NAMES = ['skip', 'meh vibes', 'in the groove', 'heat rising', 'banger']
+  const LABEL_COLS = ['#5588ff', '#88ccff', '#cc88ff', '#ffbb44', '#ff2d78']
 
-  const activeCol = $derived(COLS[activeIdx])
+  // ── SVG gauge geometry ────────────────────────────────────────────────────
+  // viewBox: -10 -5 220 150  →  left:-10, top:-5, right:210, bottom:145
+  const CX = 100, CY = 110
+  const Ro = 85, Ri = 63   // outer / inner arc radii
+  const SPAN = 80           // degrees either side of top (160° total)
 
-  // ── Canvas gauge ─────────────────────────────────────────────────────────────
-  let canvasEl = $state<HTMLCanvasElement | undefined>()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let gauge: any = null
+  // Segment colours (retro: steel-blue, slate-blue, purple, amber-bronze)
+  const SEG_COLS = ['#4a6080', '#596e84', '#664ea8', '#8a6a20']
 
-  $effect(() => {
-    const el = canvasEl
-    if (!el) return
-    let alive = true
-    import('canvas-gauges').then((mod: Record<string, unknown>) => {
-      if (!alive || !el) return
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const RadialGauge = mod.RadialGauge as any
-      gauge = new RadialGauge({
-        renderTo: el,
-        width: 400,  // high-res internal buffer; CSS scales it down
-        height: 210, // tight crop — arc sits in top 85% with these angles
-        units: false,
-        title: false,
-        minValue: -2,
-        maxValue: 2,
-        majorTicks: ['-2','-1','0','+1','+2'],
-        minorTicks: 0,
-        strokeTicks: false,
-        ticksAngle: 155,
-        startAngle: 102,
-        colorPlate: '#0a0a0f',
-        colorPlateEnd: '#0a0a0f',
-        borders: false,
-        borderShadowWidth: 0,
-        needleType: 'arrow',
-        needleWidth: 3,
-        needleCircleSize: 9,
-        needleCircleOuter: true,
-        needleCircleInner: false,
-        colorNeedle: '#ff2d78',
-        colorNeedleEnd: '#ff2d78aa',
-        colorNeedleShadowUp: 'rgba(0,255,180,0.15)',
-        colorNeedleShadowDown: 'rgba(0,0,0,0.4)',
-        colorNeedleCircleOuter: '#00ffb4',
-        colorNeedleCircleOuterEnd: '#00ffb455',
-        colorNeedleCircleInner: '#0a0a0f',
-        colorNeedleCircleInnerEnd: '#0a0a0f',
-        valueBox: false,
-        colorMajorTicks: '#334',
-        colorMinorTicks: '#222',
-        colorNumbers: '#556',
-        highlights: [
-          { from: -2, to: -1, color: '#4488ff55' },
-          { from: -1, to:  0, color: '#77ccff55' },
-          { from:  0, to:  1, color: '#cc88ff55' },
-          { from:  1, to:  2, color: '#ffbb4455' },
-        ],
-        highlightsWidth: 15,
-        fontNumbers: 'Courier New',
-        highDpiSupport: true,
-        animationDuration: 450,
-        animationRule: 'bounce',
-        value: level,
-      }).draw()
-      // canvas-gauges sets inline width/height — reset so CSS can control the size
-      el.style.width = '100%'
-      el.style.height = 'auto'
-    })
-    return () => { alive = false; gauge = null }
-  })
+  function ptArr(r: number, deg: number): [number, number] {
+    const rad = deg * Math.PI / 180
+    return [CX + r * Math.sin(rad), CY - r * Math.cos(rad)]
+  }
 
-  $effect(() => { const v = level; if (gauge) gauge.value = v })
+  function arcPath(from: number, to: number, ro: number, ri: number, gap = 2): string {
+    const t1 = from + gap, t2 = to - gap
+    const [ox1, oy1] = ptArr(ro, t1), [ox2, oy2] = ptArr(ro, t2)
+    const [ix2, iy2] = ptArr(ri, t2), [ix1, iy1] = ptArr(ri, t1)
+    const large = Math.abs(t2 - t1) > 180 ? 1 : 0
+    const f = (n: number) => n.toFixed(2)
+    return `M ${f(ox1)} ${f(oy1)} A ${ro} ${ro} 0 ${large} 1 ${f(ox2)} ${f(oy2)} L ${f(ix2)} ${f(iy2)} A ${ri} ${ri} 0 ${large} 0 ${f(ix1)} ${f(iy1)} Z`
+  }
 
-  // ── Fireworks ─────────────────────────────────────────────────────────────────
+  const SEGS = [
+    { from: -SPAN,       to: -SPAN / 2, col: SEG_COLS[0] },
+    { from: -SPAN / 2,  to: 0,          col: SEG_COLS[1] },
+    { from: 0,           to:  SPAN / 2, col: SEG_COLS[2] },
+    { from:  SPAN / 2,  to:  SPAN,      col: SEG_COLS[3] },
+  ]
+
+  const TICKS = [
+    { angle: -SPAN,      label: '-2' },
+    { angle: -SPAN / 2,  label: '-1' },
+    { angle:  SPAN / 2,  label: '+1' },
+    { angle:  SPAN,      label: '+2' },
+  ]
+
+  // Needle rotates from -SPAN (level=-2) to +SPAN (level=+2)
+  const needleAngle = $derived(level * (SPAN / 2))
+
+  const activeCol  = $derived(LABEL_COLS[activeIdx])
+  const labelName  = $derived(NAMES[activeIdx].toUpperCase())
+
+  // ── Fireworks ─────────────────────────────────────────────────────────────
   let fireworks = $state(false)
   $effect(() => {
     if (pos < 0) return
@@ -128,7 +95,6 @@
 <Fireworks show={fireworks} />
 
 <div class="vm">
-  <!-- Desktop: skip | gauge | banger  — Mobile: gauge on top, buttons below -->
   <button class="vbtn skip" class:active={ownVote === 'skip'}
     onclick={() => vote('skip')} disabled={!canVote}
     aria-label="Vote skip">
@@ -138,10 +104,78 @@
   </button>
 
   <div class="gauge-wrap">
-    <canvas bind:this={canvasEl} class="gauge-canvas"></canvas>
-    <div class="vm-lbl" style="color:{activeCol};text-shadow:0 0 8px {activeCol}55">
-      {NAMES[activeIdx]}
-    </div>
+    <svg viewBox="-10 -5 220 150" xmlns="http://www.w3.org/2000/svg" class="gauge-svg" aria-hidden="true">
+      <defs>
+        <filter id="vm-needle-glow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="vm-dot-glow" x="-120%" y="-120%" width="340%" height="340%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="vm-txt-glow" x="-40%" y="-80%" width="180%" height="260%">
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Arc segments -->
+      {#each SEGS as seg}
+        <path d={arcPath(seg.from, seg.to, Ro, Ri)} fill={seg.col} opacity="0.88"/>
+      {/each}
+
+      <!-- Tick marks (radial lines between inner edge and just outside outer edge) -->
+      {#each TICKS as tick}
+        {@const [x1, y1] = ptArr(Ri - 5, tick.angle)}
+        {@const [x2, y2] = ptArr(Ro + 5, tick.angle)}
+        <line
+          x1={x1.toFixed(1)} y1={y1.toFixed(1)}
+          x2={x2.toFixed(1)} y2={y2.toFixed(1)}
+          stroke="#9aabb8" stroke-width="1.5" opacity="0.55"
+        />
+      {/each}
+
+      <!-- Tick labels outside arc -->
+      {#each TICKS as tick}
+        {@const [lx, ly] = ptArr(Ro + 17, tick.angle)}
+        <text
+          x={lx.toFixed(1)} y={ly.toFixed(1)}
+          text-anchor="middle" dominant-baseline="middle"
+          font-family="'Courier New', monospace"
+          font-size="11" font-weight="600"
+          fill="#7a9ab0" opacity="0.85"
+        >{tick.label}</text>
+      {/each}
+
+      <!-- Needle — tonearm style: thick rounded bar, pivot at center, tip near arc -->
+      <g transform="translate({CX} {CY})">
+        <g style="transform: rotate({needleAngle}deg); transition: transform 0.45s cubic-bezier(0.34,1.56,0.64,1); transform-origin: 0 0">
+          <line x1="0" y1="10" x2="0" y2="-75"
+            stroke="#a060e8" stroke-width="5.5" stroke-linecap="round"
+            filter="url(#vm-needle-glow)"
+          />
+          <!-- Stylus tip dot -->
+          <circle cx="0" cy="-75" r="3.5" fill="#c899ff"/>
+        </g>
+      </g>
+
+      <!-- Pivot circle (bright green, layered) -->
+      <circle cx={CX} cy={CY} r="9"  fill="#00ff88" filter="url(#vm-dot-glow)" opacity="0.6"/>
+      <circle cx={CX} cy={CY} r="8"  fill="#00cc66"/>
+      <circle cx={CX} cy={CY} r="5"  fill="#0a0a0f"/>
+      <circle cx={CX} cy={CY} r="3"  fill="#00ff88"/>
+
+      <!-- State label -->
+      <text
+        x={CX} y={CY + 30}
+        text-anchor="middle" dominant-baseline="middle"
+        font-family="'Courier New', monospace"
+        font-size="11" font-weight="700" letter-spacing="2"
+        fill={activeCol}
+        filter="url(#vm-txt-glow)"
+      >{labelName}</text>
+    </svg>
   </div>
 
   <button class="vbtn banger" class:active={ownVote === 'banger'}
@@ -154,7 +188,6 @@
 </div>
 
 <style>
-  /* Row: skip | gauge | banger — fills full card width */
   .vm {
     background: #0a0a0f;
     border-radius: 12px;
@@ -168,42 +201,24 @@
     box-sizing: border-box;
   }
 
-  /* ── Gauge — grows to fill remaining space ── */
   .gauge-wrap {
-    position: relative;
     flex: 1 1 0;
     min-width: 0;
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
+    align-items: center;
+    justify-content: center;
   }
 
-  .gauge-canvas {
+  .gauge-svg {
     display: block;
-    width: 100% !important;
-    height: auto !important;
+    width: 100%;
+    height: auto;
   }
 
-  /* label overlaid in the arc center */
-  .vm-lbl {
-    position: absolute;
-    left: 50%;
-    bottom: 28%;
-    transform: translateX(-50%);
-    white-space: nowrap;
-    font-family: 'Courier New', monospace;
-    font-size: 0.75rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-    pointer-events: none;
-    transition: color 0.3s, text-shadow 0.3s;
-  }
-
-  /* ── Buttons — tall cards flanking the gauge ── */
+  /* ── Vote buttons ── */
   .vbtn {
     flex: 0 0 72px;
-    align-self: stretch;       /* fills the full row height */
+    align-self: stretch;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -221,7 +236,7 @@
   .vbtn:disabled { opacity: 0.35; cursor: default; }
 
   .btn-icon { font-size: 1.3rem; line-height: 1; }
-  .btn-lbl  {
+  .btn-lbl {
     font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -236,7 +251,6 @@
     margin-top: 0.1rem;
   }
 
-  /* Skip — left side */
   .vbtn.skip {
     background: #0d1625;
     border-color: #1e3050;
@@ -254,7 +268,6 @@
     box-shadow: 0 0 12px rgba(68,136,255,.25), inset 0 0 8px rgba(68,136,255,.08);
   }
 
-  /* Banger — right side */
   .vbtn.banger {
     background: #1a1008;
     border-color: #3a2010;
@@ -272,13 +285,12 @@
     box-shadow: 0 0 12px rgba(255,45,120,.25), inset 0 0 8px rgba(255,45,120,.08);
   }
 
-  /* Mobile: stack gauge above, buttons in a row below */
   @media (max-width: 380px) {
     .vm {
       flex-direction: column;
       padding: 0.4rem 0.6rem 0.5rem;
     }
-    .gauge-wrap { max-width: 200px; width: 100%; }
+    .gauge-wrap { max-width: 220px; width: 100%; }
     .vbtn {
       flex: 1;
       flex-direction: row;

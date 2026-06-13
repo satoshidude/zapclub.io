@@ -17,12 +17,9 @@
   import LegalNotice from './lib/components/LegalNotice.svelte'
   import Privacy from './lib/components/Privacy.svelte'
   import Terms from './lib/components/Terms.svelte'
-  import MiniPlayer from './lib/components/MiniPlayer.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
-  import { registerActiveClub, persistedActiveClub } from './lib/nostr/miniplay.svelte'
-  import { fetchClub } from './lib/nostr/groups'
   import { watchOwnPremium } from './lib/nostr/premium.svelte'
   import { auth } from './lib/nostr/auth.svelte'
 
@@ -39,16 +36,6 @@
   function reloginExtension() {
     logout()
     launchLogin()
-  }
-
-  // Reload-resume: pick up the club whose audio was playing and keep it going in the
-  // mini-player (unless we land straight back on that club's page, which has its own).
-  {
-    const resumeId = persistedActiveClub()
-    if (resumeId && !(router.route.name === 'club' && router.route.id === resumeId)) {
-      registerActiveClub(resumeId, '')
-      void fetchClub(resumeId).then((c) => c?.name && registerActiveClub(resumeId, c.name))
-    }
   }
 
   // Footer donation — plain LNURL payment to the project's lightning address.
@@ -130,7 +117,6 @@
   <span class="foot-note">Powered by Nostr &amp; Lightning · released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a></span>
 </footer>
 
-<MiniPlayer />
 <LoginDialog />
 <PayModal />
 

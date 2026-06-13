@@ -777,8 +777,37 @@ func (c *conductor) tick() {
 			// participant in the round-robin. Mark owner as "virtually online" so matrix()
 			// never applies the played-set to their tracks (enabling natural loop behaviour).
 			c.setVirtualOnline(club, st.owner, now)
+
+			// Ensure pb exists and the shuffle order is initialized before driveClub.
+			pb := c.clubs[club]
+			if pb == nil {
+				pb = c.resume(ctx, club)
+				c.clubs[club] = pb
+			}
+			if len(pb.autoOrder) != len(st.tracks) {
+				pb.autoOrder = makeShuffledOrder(len(st.tracks))
+				pb.autoIdx = 0
+			}
+			// Present only the current scheduled track for the auto-DJ, not the entire
+			// playlist. Without this, fairNext always returns track 0 because all tracks
+			// are active and the played-set is bypassed for virtual-online DJs.
+			var autoTracks []condTrack
+			if pb.autoIdx < len(st.tracks) {
+				autoTracks = []condTrack{st.tracks[pb.autoOrder[pb.autoIdx]]}
+			}
+			prevVideoID := pb.videoID
+
 			djsWithAuto := append(append([]condDJ{}, djs...), condDJ{pubkey: st.owner, since: st.since})
-			c.driveClub(ctx, club, djsWithAuto, map[string][]condTrack{st.owner: st.tracks}, now)
+			c.driveClub(ctx, club, djsWithAuto, map[string][]condTrack{st.owner: autoTracks}, now)
+
+			// If advance() just started the auto-DJ's track, move to the next in the shuffle order.
+			if cur := c.clubs[club]; cur != nil && cur.dj == st.owner && cur.videoID != prevVideoID {
+				cur.autoIdx++
+				if cur.autoIdx >= len(st.tracks) {
+					cur.autoOrder = makeShuffledOrder(len(st.tracks))
+					cur.autoIdx = 0
+				}
+			}
 		} else {
 			c.driveClub(ctx, club, djs, nil, now)
 		}

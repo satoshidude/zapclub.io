@@ -45,8 +45,7 @@
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
-  import { registerActiveClub } from '../nostr/miniplay.svelte'
-  import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
+import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
@@ -219,12 +218,6 @@
     void refreshPlayLog(groupId) // so a takeover gets the shared played-set immediately
   })
 
-  // This club is now the active audio source. The global mini-player keeps it playing
-  // when the user navigates to other (non-club) pages — until they enter another club.
-  $effect(() => {
-    registerActiveClub(groupId, club?.name ?? '')
-  })
-
   // Restore join-request state from localStorage on load (so "Request sent" persists across
   // page refreshes until the owner approves and the user appears in 39002).
   $effect(() => {
@@ -360,7 +353,6 @@
     }
   }
 
-  let chatOpen = $state(typeof window !== 'undefined' && window.innerWidth >= 700)
 
   // Share this club: copy the link, share via the OS sheet, post to a social network, or — with
   // an explicit extra confirm, since it publishes a public note — post it to Nostr.
@@ -640,25 +632,7 @@
         </div>
       </div>
     </div>
-    <div class="radio-bar">
-      {#if radioActive && sync.live}
-        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>
-      {:else if radioActive}
-        <a class="btn btn-radio-on" href={radioURL} target="_blank" rel="noopener" title="Stream online — no DJ active">📻 Stream</a>
-      {:else}
-        <span class="btn-radio-off">📻 Stream Offline</span>
-      {/if}
-      {#if isOwner && ownPremium.active}
-        <button class="btn btn-ghost btn-sm radio-toggle" onclick={toggleRadio} disabled={radioBusy} title={radioActive ? 'Stop stream' : 'Start stream'}>
-          {radioBusy ? '…' : radioActive ? '⏹ Stop' : '▶ Start'}
-        </button>
-      {:else if isOwner}
-        <button class="btn btn-ghost btn-sm radio-toggle radio-upsell" onclick={() => (showPremModal = true)} title="Livestream — Premium feature">
-          ⚡ Livestream — Premium
-        </button>
-      {/if}
-      {#if radioErr}<span class="radio-err">{radioErr}</span>{/if}
-    </div>
+    {#if radioErr}<div class="radio-bar"><span class="radio-err">{radioErr}</span></div>{/if}
 
     {#if editing}
       <div class="edit-form">
@@ -755,6 +729,11 @@
         onended={() => onTrackEnded(groupId)}
         onerror={(vid) => onTrackError(groupId, vid)}
         streamURL={radioActive && sync.live ? radioURL : ''}
+        {radioActive}
+        {radioBusy}
+        premiumActive={ownPremium.active}
+        onRadioToggle={isOwner ? toggleRadio : undefined}
+        onShowPremModal={isOwner && !ownPremium.active ? () => (showPremModal = true) : undefined}
       />
     </div>
   </header>
@@ -765,7 +744,7 @@
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
-  <div class="club-body" class:panel-open={chatOpen}>
+  <div class="club-body">
     <div class="main-col">
       <!-- The floor: DJs up front, crowd behind. -->
       <Dancefloor
@@ -780,8 +759,6 @@
         onkick={kick}
         onpromote={promote}
         ondelete={(id) => void deleteEvent(groupId, id)}
-        {chatOpen}
-        onChatToggle={() => (chatOpen = !chatOpen)}
       />
       <!-- The user's own live playlist — feeds the round-robin. -->
       {#if isMember}
@@ -791,20 +768,14 @@
       {/if}
     </div>
 
-    <!-- Chat: side panel (desktop) / bottom sheet (mobile) -->
-    <aside class="chat-panel" class:open={chatOpen}>
+    <!-- Chat: side panel (desktop) / inline below (mobile) -->
+    <aside class="chat-panel">
       <div class="panel-head">
         <span class="panel-title">💬 Chat</span>
-        <button class="panel-close" onclick={() => (chatOpen = false)} aria-label="Close chat">✕</button>
       </div>
       <Chat {groupId} canChat={isMember} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} ondelete={(id) => void deleteEvent(groupId, id)} />
     </aside>
   </div>
-
-  {#if chatOpen}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="chat-backdrop" role="presentation" onclick={() => (chatOpen = false)}></div>
-  {/if}
 
 </div>
 
@@ -818,7 +789,7 @@
     gap: 1rem;
   }
 
-  /* Club body: main column (floor + queue) + optional chat panel */
+  /* Club body: main column (floor + queue) + chat panel */
   .club-body {
     display: grid;
     grid-template-columns: 1fr;
@@ -832,19 +803,18 @@
     min-width: 0;
   }
 
-  /* Chat side panel (desktop) */
+  /* Chat panel — always visible */
   .chat-panel {
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    display: none;
+    display: flex;
     flex-direction: column;
     overflow: hidden;
   }
   .panel-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 0.7rem 0.9rem;
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
@@ -854,106 +824,16 @@
     font-weight: 600;
     color: var(--text-dim);
   }
-  .panel-close {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 0.8rem;
-    line-height: 1;
-    padding: 0.2rem 0.35rem;
-    border-radius: 4px;
-  }
-  .panel-close:hover { color: var(--text); background: var(--bg-elev-2); }
 
-  /* Chat FAB — reopen button */
-  .chat-fab {
-    position: fixed;
-    bottom: 1.3rem;
-    right: 1.1rem;
-    z-index: 50;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    width: 44px;
-    height: 44px;
-    font-size: 1.1rem;
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    display: grid;
-    place-items: center;
-  }
-  .chat-fab:hover { border-color: var(--accent-2); }
-
-  /* Backdrop: only on mobile */
-  .chat-backdrop {
-    display: none;
-  }
-
-  /* Desktop (≥700px): two-column grid when panel is open */
+  /* Desktop (≥700px): two-column grid, chat sticky on the right */
   @media (min-width: 700px) {
-    .club-body.panel-open {
+    .club-body {
       grid-template-columns: 1fr 280px;
     }
     .chat-panel {
-      display: none; /* overridden by .open below */
       position: sticky;
       top: 1rem;
       max-height: calc(100vh - 2rem);
-    }
-    .chat-panel.open {
-      display: flex;
-    }
-    /* Desktop FAB: smaller, top-right near the floor, not fixed */
-    .chat-fab {
-      position: static;
-      width: auto;
-      height: auto;
-      padding: 0.35rem 0.75rem;
-      font-size: 0.82rem;
-      box-shadow: none;
-      align-self: flex-start;
-      border-radius: var(--radius-sm);
-    }
-  }
-
-  /* Mobile (<700px): bottom sheet */
-  @media (max-width: 699px) {
-    .chat-panel {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      top: auto;
-      z-index: 100;
-      max-height: 65vh;
-      border-radius: var(--radius) var(--radius) 0 0;
-      border-left: none;
-      border-right: none;
-      border-bottom: none;
-      transform: translateY(100%);
-      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-      /* Add a swipe handle */
-    }
-    .chat-panel::before {
-      content: '';
-      display: block;
-      width: 36px;
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      margin: 8px auto 0;
-      flex: 0 0 auto;
-    }
-    .chat-panel.open {
-      transform: translateY(0);
-    }
-    .chat-backdrop {
-      display: block;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.45);
-      z-index: 99;
     }
   }
   .hero {
@@ -1316,44 +1196,6 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     padding: 0.4rem 0 0;
-  }
-  .btn-live,
-  .btn-radio-on,
-  .btn-radio-off {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.25rem 0.65rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 500;
-    text-decoration: none;
-    white-space: normal;
-    word-break: break-word;
-    max-width: 100%;
-    transition: background 0.15s;
-  }
-  .btn-live {
-    background: color-mix(in srgb, #22c55e 15%, transparent);
-    border: 1px solid color-mix(in srgb, #22c55e 50%, transparent);
-    color: #86efac;
-  }
-  .btn-live:hover {
-    background: color-mix(in srgb, #22c55e 25%, transparent);
-  }
-  .btn-radio-on {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-    color: var(--accent);
-  }
-  .btn-radio-on:hover {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-  .btn-radio-off {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    cursor: default;
   }
   .radio-toggle {
     flex: 0 0 auto;

@@ -2,16 +2,18 @@
   import { upcomingTracks, sync } from '../../nostr/sync.svelte'
   import { stage } from '../../nostr/stage.svelte'
   import { queues } from '../../nostr/queue.svelte'
+  import { autodj } from '../../nostr/autodj.svelte'
   import { useProfile, displayName } from '../../nostr/profiles.svelte'
 
-  // Recompute when the running track, the stage, OR any DJ's queue changes. `void queues`
-  // alone does NOT track queue edits (it's a constant object ref) — explicitly touch each
-  // DJ's queue `updatedAt` so a reorder/add updates "Up next" immediately.
+  let { clubId = '' }: { clubId?: string } = $props()
+
+  // Recompute when the running track, the stage, any DJ's queue, or the auto-DJ config changes.
   const next = $derived.by(() => {
     void sync.nowPlaying
+    void autodj.getConfig(clubId)
     const djs = stage.djs
     for (const d of djs) void queues.get(d.pubkey)?.updatedAt
-    return upcomingTracks(6)
+    return upcomingTracks(clubId, 6)
   })
   const firstProfile = $derived(next[0] ? useProfile(next[0].dj) : null)
   const rest = $derived(next.slice(1))

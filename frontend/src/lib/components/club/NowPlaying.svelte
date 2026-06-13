@@ -19,6 +19,11 @@
     onended,
     onerror,
     streamURL = '',
+    radioActive = false,
+    radioBusy = false,
+    premiumActive = false,
+    onRadioToggle,
+    onShowPremModal,
   }: {
     onGoStage?: () => void
     stageLabel?: string
@@ -30,6 +35,11 @@
     onended?: () => void
     onerror?: (videoId: string) => void
     streamURL?: string
+    radioActive?: boolean
+    radioBusy?: boolean
+    premiumActive?: boolean
+    onRadioToggle?: () => void
+    onShowPremModal?: () => void
   } = $props()
 
   const ZOOM_KEY = 'zapclub:videoZoom'
@@ -138,9 +148,6 @@
 <div class="np card" class:zoomed>
   {#if np}
     <div class="np-head">
-      {#if streamURL}
-        <a class="btn-live" href={streamURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>
-      {/if}
       <button
         class="like"
         class:on={liked}
@@ -148,6 +155,18 @@
         disabled={!auth.canSign}
         title={liked ? 'Liked — tap to remove' : 'Like this track'}
       >🔖</button>
+      <div class="radio-controls">
+        {#if streamURL}
+          <a class="btn-live" href={streamURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>
+        {/if}
+        {#if onRadioToggle && premiumActive}
+          <button class="btn-radio-tog" onclick={onRadioToggle} disabled={radioBusy} title={radioActive ? 'Stop stream' : 'Start stream'}>
+            {radioBusy ? '…' : radioActive ? '⏹ Stop' : '▶ Start'}
+          </button>
+        {:else if onShowPremModal}
+          <button class="btn-radio-tog radio-upsell" onclick={onShowPremModal} title="Livestream — Premium feature">⚡ Livestream</button>
+        {/if}
+      </div>
     </div>
   {/if}
   <div class="np-main">
@@ -220,8 +239,27 @@
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
+  .radio-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .btn-radio-tog {
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-radio-tog:hover:not(:disabled) { border-color: var(--text-dim); color: var(--text); }
+  .btn-radio-tog:disabled { opacity: 0.5; cursor: default; }
+  .btn-radio-tog.radio-upsell { border-color: var(--amber); color: var(--amber); }
+  .btn-radio-tog.radio-upsell:hover { background: color-mix(in srgb, var(--amber) 10%, transparent); }
   .btn-live {
-    margin-right: auto;
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;

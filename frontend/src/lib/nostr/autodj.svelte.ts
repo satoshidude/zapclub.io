@@ -14,6 +14,8 @@ interface AutoDJConfig {
   armed: boolean
   srcId: string
   name: string
+  ownerPubkey: string
+  tracks: { videoId: string; title: string; duration: number }[]
   updatedAt: number
 }
 
@@ -47,6 +49,9 @@ export const autodj = {
   name(clubId: string): string {
     return state.config[clubId]?.name ?? ''
   },
+  getConfig(clubId: string): AutoDJConfig | undefined {
+    return effectivelyArmed(clubId) ? state.config[clubId] : undefined
+  },
 }
 
 /** Ingest a kind-30105 Auto DJ config event (owner-authored). */
@@ -57,7 +62,13 @@ export function ingestAutoDJ(ev: Event): void {
   if (prev && ev.created_at < prev.updatedAt) return
   const armed = ev.tags.find((t) => t[0] === 'status')?.[1] === 'armed'
   const srcId = ev.tags.find((t) => t[0] === 'src')?.[1] ?? ''
-  state.config = { ...state.config, [club]: { clubId: club, armed, srcId, name: ev.content, updatedAt: ev.created_at } }
+  const tracks = ev.tags
+    .filter((t) => t[0] === 'track' && typeof t[1] === 'string' && t[1].startsWith('yt:'))
+    .map((t) => ({ videoId: t[1].slice(3), title: t[2] ?? t[1], duration: parseInt(t[3] ?? '0', 10) || 0 }))
+  state.config = {
+    ...state.config,
+    [club]: { clubId: club, armed, srcId, name: ev.content, ownerPubkey: ev.pubkey, tracks, updatedAt: ev.created_at },
+  }
 }
 
 /** Ingest a kind-30111 Auto DJ disarm marker (relay-signed). */

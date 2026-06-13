@@ -27,8 +27,6 @@
     onkick,
     onpromote,
     ondelete,
-    chatOpen = false,
-    onChatToggle,
   }: {
     groupId: string
     members: ClubMember[]
@@ -41,8 +39,6 @@
     onkick?: (pubkey: string) => void
     onpromote?: (pubkey: string) => void
     ondelete?: (eventId: string) => void
-    chatOpen?: boolean
-    onChatToggle?: () => void
   } = $props()
 
   // DJs currently on stage — the floor's front row (even if their presence beat is a little
@@ -192,11 +188,6 @@
   <div class="head">
     <h3>In Da Club</h3>
     <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
-    {#if onChatToggle}
-      <button class="chat-tog" onclick={onChatToggle} class:open={chatOpen} title={chatOpen ? 'Close chat' : 'Open chat'} aria-label={chatOpen ? 'Close chat' : 'Open chat'}>
-        {chatOpen ? '✕' : '💬'}
-      </button>
-    {/if}
   </div>
 
   {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
@@ -248,7 +239,7 @@
   <div class="reactions">
     <VibeMeter clubId={groupId} />
   </div>
-  <ComingNext />
+  <ComingNext clubId={groupId} />
 
   <!-- The dancing crowd (online members) — loose flat cluster. -->
   {#if shownOnline.length > 0}
@@ -342,22 +333,6 @@
     font-variant-numeric: tabular-nums;
     margin-right: auto;
   }
-  .chat-tog {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--text-dim);
-    font-size: 0.9rem;
-    width: 30px;
-    height: 30px;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: border-color 0.15s, color 0.15s;
-  }
-  .chat-tog:hover { border-color: var(--accent-2); color: var(--text); }
-  .chat-tog.open { border-color: var(--accent-2); color: var(--accent-2); }
   .dim {
     color: var(--text-dim);
     font-size: 0.85rem;
