@@ -163,12 +163,12 @@ func (b *Bridge) session(ctx context.Context) error {
 	// Load bot's existing queue from relay
 	b.loadQueue(ctx, relay)
 
-	// Subscribe to club chat + now_playing
+	// Subscribe to now_playing only (chat is not mirrored to Telegram)
 	sub, err := relay.Subscribe(ctx, []nostr.Filter{
 		{
-			Kinds: []int{9, 30100},
+			Kinds: []int{30100},
 			Tags:  nostr.TagMap{"h": {b.cfg.ClubID}},
-			Limit: 0,
+			Limit: 1,
 		},
 	})
 	if err != nil {
@@ -199,23 +199,8 @@ func (b *Bridge) session(ctx context.Context) error {
 
 // ── Relay → Telegram ─────────────────────────────────────────────────────────
 
-func (b *Bridge) handleNostrEvent(ctx context.Context, ev *nostr.Event) {
+func (b *Bridge) handleNostrEvent(_ context.Context, ev *nostr.Event) {
 	switch ev.Kind {
-	case 9: // chat
-		b.mu.Lock()
-		own := ev.PubKey == b.pk || b.ownIDs[ev.ID]
-		b.mu.Unlock()
-		if own {
-			return
-		}
-		name := b.displayName(ctx, ev.PubKey)
-		text := fmt.Sprintf("💬 *%s*: %s", escMD(name), escMD(ev.Content))
-		msg := tgbotapi.NewMessage(b.cfg.TGChatID, text)
-		msg.ParseMode = "MarkdownV2"
-		if _, err := b.tg.Send(msg); err != nil {
-			log.Printf("[bot] tg send err: %v", err)
-		}
-
 	case 30100: // now_playing — track state only, no automatic TG post (use /np)
 		trackTag := ev.Tags.GetFirst([]string{"track"})
 		if trackTag == nil || len(*trackTag) < 2 {
