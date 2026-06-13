@@ -136,13 +136,16 @@
     optimisticVote(clubId, pos, auth.pubkey, v)
     sendMood(clubId, pos, v).catch(() => {})
 
-    // Determine payment target
-    const targetPk = v === 'banger' ? (sync.live?.dj ?? '') : ownerPubkey
+    // Determine payment target; banger falls back to owner if DJ has no lud16
+    let targetPk = v === 'banger' ? (sync.live?.dj ?? '') : ownerPubkey
     if (!targetPk) return
 
-    const profile = useProfile(targetPk)
-    const lud16 = profile?.lud16 as string | undefined
-    if (!lud16) return // no lightning address — vote still counts
+    let lud16 = useProfile(targetPk)?.lud16 as string | undefined
+    if (!lud16 && v === 'banger' && ownerPubkey && ownerPubkey !== targetPk) {
+      targetPk = ownerPubkey
+      lud16 = useProfile(ownerPubkey)?.lud16 as string | undefined
+    }
+    if (!lud16) return // still nothing — vote counts, no payment
 
     paying = true
     try {
