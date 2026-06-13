@@ -662,9 +662,30 @@ func envOr(k, def string) string {
 	return def
 }
 
+// ── genkey ────────────────────────────────────────────────────────────────────
+
+// genkey prints a fresh Nostr keypair (nsec + npub) for use as BOT_NSEC.
+func genkey() {
+	sk := nostr.GeneratePrivateKey()
+	pk, err := nostr.GetPublicKey(sk)
+	if err != nil {
+		log.Fatalf("genkey: %v", err)
+	}
+	nsec, _ := nip19.EncodePrivateKey(sk)
+	npub, _ := nip19.EncodePublicKey(pk)
+	fmt.Printf("BOT_NSEC=%s\n", nsec)
+	fmt.Printf("# npub (read-only public key):\n# %s\n", npub)
+	fmt.Printf("# hex pubkey:\n# %s\n", pk)
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "genkey" {
+		genkey()
+		return
+	}
+
 	cfg := loadConfig()
 	b := newBridge(cfg)
 
