@@ -21,18 +21,7 @@
   const activeSegIdx = $derived(level === 0 ? -1 : level < 0 ? level + 2 : level + 1)
   const ownVote      = $derived(pos >= 0 ? vibeMeter.ownVote(clubId, pos) : null)
 
-  const COOLDOWN_MS = 60_000
-  let lastVoteMs = $state(0)
-  $effect(() => { void pos; lastVoteMs = 0 })
-  let nowMs = $state(Date.now())
-  $effect(() => {
-    const t = setInterval(() => (nowMs = Date.now()), 1000)
-    return () => clearInterval(t)
-  })
-  const cooldown = $derived(
-    lastVoteMs === 0 ? 0 : Math.max(0, Math.ceil((lastVoteMs + COOLDOWN_MS - nowMs) / 1000))
-  )
-  const canVote = $derived(auth.canSign && pos >= 0 && !!sync.live && cooldown === 0)
+  const canVote = $derived(auth.canSign && pos >= 0 && !!sync.live)
 
   // Single-word labels — keep them short so SVG buttons fit alongside
   const NAMES      = ['skip', 'meh', 'groove', 'fire', 'banger']
@@ -95,9 +84,8 @@
   let skipHover   = $state(false)
   let bangerHover = $state(false)
 
-  // Button label text (no emoji prefix — icons drawn as SVG paths beside the text)
-  const skipTxt   = $derived(cooldown > 0 ? `${cooldown}s` : skips   > 0 ? `${skips}`   : 'skip')
-  const bangerTxt = $derived(cooldown > 0 ? `${cooldown}s` : bangers > 0 ? `${bangers}` : 'banger')
+  const skipTxt   = 'skip'
+  const bangerTxt = 'banger'
 
   // ── Fireworks ────────────────────────────────────────────────────────────────
   let fireworks = $state(false)
@@ -132,7 +120,6 @@
 
   async function vote(v: 'banger' | 'skip') {
     if (!canVote || !auth.pubkey || paying) return
-    lastVoteMs = Date.now()
     optimisticVote(clubId, pos, auth.pubkey, v)
     sendMood(clubId, pos, v).catch(() => {})
 
@@ -320,15 +307,10 @@
           stroke-width="1.5"
           filter={ownVote === 'skip' ? 'url(#vm-btn-glow)' : undefined}
         />
-        <!-- Skip icon: ✕ cross (reject), or mini timer during cooldown -->
+        <!-- Skip icon: ✕ cross -->
         <g transform="translate({SKIP_X + 10},{BTN_Y + BTN_H / 2})" style="pointer-events:none">
-          {#if cooldown > 0}
-            <circle r="3.2" fill="none" stroke={ownVote === 'skip' ? '#88bbff' : '#5070a0'} stroke-width="1"/>
-            <line x1="0" y1="-2.2" x2="0" y2="0" stroke={ownVote === 'skip' ? '#88bbff' : '#5070a0'} stroke-width="1" stroke-linecap="round"/>
-          {:else}
-            <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={ownVote === 'skip' ? '#88bbff' : '#6090c0'} stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="2.5" y1="-2.5" x2="-2.5" y2="2.5" stroke={ownVote === 'skip' ? '#88bbff' : '#6090c0'} stroke-width="1.5" stroke-linecap="round"/>
-          {/if}
+          <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={ownVote === 'skip' ? '#88bbff' : '#6090c0'} stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="2.5" y1="-2.5" x2="-2.5" y2="2.5" stroke={ownVote === 'skip' ? '#88bbff' : '#6090c0'} stroke-width="1.5" stroke-linecap="round"/>
         </g>
         <text
           x={SKIP_X + BTN_W - 4} y={BTN_Y + BTN_H / 2}
@@ -357,17 +339,12 @@
           stroke-width="1.5"
           filter={ownVote === 'banger' ? 'url(#vm-btn-glow)' : undefined}
         />
-        <!-- Banger icon: lightning bolt, or mini timer during cooldown -->
+        <!-- Banger icon: lightning bolt -->
         <g transform="translate({BNG_X + 10},{BTN_Y + BTN_H / 2})" style="pointer-events:none">
-          {#if cooldown > 0}
-            <circle r="3.2" fill="none" stroke={ownVote === 'banger' ? '#ffcc44' : '#9a6020'} stroke-width="1"/>
-            <line x1="0" y1="-2.2" x2="0" y2="0" stroke={ownVote === 'banger' ? '#ffcc44' : '#9a6020'} stroke-width="1" stroke-linecap="round"/>
-          {:else}
-            <path d="M1.2,-3.5 L-1.5,0 L1.5,0 L-1.2,3.5"
-              fill="none"
-              stroke={ownVote === 'banger' ? '#ffcc44' : '#cc8822'}
-              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          {/if}
+          <path d="M1.2,-3.5 L-1.5,0 L1.5,0 L-1.2,3.5"
+            fill="none"
+            stroke={ownVote === 'banger' ? '#ffcc44' : '#cc8822'}
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </g>
         <text
           x={BNG_X + BTN_W - 4} y={BTN_Y + BTN_H / 2}
