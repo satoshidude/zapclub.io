@@ -52,6 +52,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
   import ShareBlock from './club/ShareBlock.svelte'
+  import NwcBlock from './club/NwcBlock.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -769,23 +770,20 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       {/if}
     </div>
 
-    <!-- Right column: share card + chat panel -->
+    <!-- Right column: wallet · share · chat -->
     <div class="right-col">
+      <NwcBlock />
       <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
-      {#if isMember}
       <aside class="chat-panel">
         <div class="panel-head">
           <span class="panel-title">💬 Chat</span>
-          <a class="tg-link" href="https://t.me/+1tNuTyp8tKw2Mjgy" target="_blank" rel="noopener noreferrer" title="Join on Telegram">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
-            </svg>
-            Telegram
+          <a class="tg-link" href="https://t.me/+1tNuTyp8tKw2Mjgy" target="_blank" rel="noopener noreferrer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"></path></svg>
+            Join on Telegram
           </a>
         </div>
         <Chat {groupId} canChat={isMember} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} ondelete={(id) => void deleteEvent(groupId, id)} />
       </aside>
-      {/if}
     </div>
   </div>
 
