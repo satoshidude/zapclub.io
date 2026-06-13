@@ -123,7 +123,7 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 
 <script>
 var BASE = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
-var INFO = '/radio/{{CLUBID}}/info';
+var INFO = BASE + '/info'; // works on both relay.zapclub.io/radio/<id> and stream.zapclub.io/<id>
 var audio = document.getElementById('audio');
 var playing = false; // true once user has clicked play
 var retryTimer = null;

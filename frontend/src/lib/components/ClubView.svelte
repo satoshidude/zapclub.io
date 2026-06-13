@@ -518,8 +518,7 @@
 
   import { startRadioStream, stopRadioStream } from '../nostr/radiostream'
 
-  const RELAY_HTTP = 'https://relay.zapclub.io'
-  const radioURL = $derived(`${RELAY_HTTP}/radio/${groupId}`)
+  const radioURL = $derived(`https://stream.zapclub.io/${groupId}`)
 
   // Radio stream state: track the latest KIND_STREAM radio event from the club owner.
   let latestStreamEv = $state<Event | null>(null)

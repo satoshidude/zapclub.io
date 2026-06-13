@@ -4,6 +4,7 @@ import { publishClub } from './groups'
 import { KIND_STREAM } from './groups'
 
 const RELAY_HTTP = 'https://relay.zapclub.io'
+const STREAM_BASE = 'https://stream.zapclub.io'
 
 async function nip98Header(path: string): Promise<string> {
   const pk = auth.pubkey
@@ -38,7 +39,7 @@ async function publishStreamStatus(club: string, status: 'live' | 'ended', watch
 
 export async function startRadioStream(club: string): Promise<void> {
   await radioRequest(club, 'start')
-  await publishStreamStatus(club, 'live', `${RELAY_HTTP}/radio/${club}`)
+  await publishStreamStatus(club, 'live', `${STREAM_BASE}/${club}`)
 }
 
 export async function stopRadioStream(club: string): Promise<void> {
@@ -47,5 +48,5 @@ export async function stopRadioStream(club: string): Promise<void> {
 }
 
 export function radioStreamURL(club: string): string {
-  return `${RELAY_HTTP}/radio/${club}`
+  return `${STREAM_BASE}/${club}`
 }
