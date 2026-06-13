@@ -66,6 +66,12 @@ Mitglieder können als DJs aktiv werden und Songs oder ganze Playlists beisteuer
 
 Die Musik mehrerer DJs wird automatisch zu einer gemeinsamen Warteschlange kombiniert und sorgt für ein kollaboratives Musikerlebnis.
 
+### VibeMeter
+
+Der VibeMeter ist eine SVG-Pegelanzeige, die die Stimmung des Clubs für den aktuellen Track in Echtzeit zeigt.
+
+Mitglieder stimmen per Klick auf *Skip* oder *Banger*. Die Nadel schwingt in das aktive Segment (von tief-blau für „überspringen" bis neon-orange für „Banger"), das Segment leuchtet auf. Die Anzeige setzt sich bei jedem Trackwechsel zurück.
+
 ### Lightning-Zahlungen
 
 Mitglieder können DJs direkt über Lightning-Zahlungen und Nostr-Zaps unterstützen.
@@ -118,10 +124,10 @@ Bezahlung über Lightning (NIP-57 Zap), automatische Verlängerung über Nostr W
 - Eintrittsgelder über Lightning verlangen (relay-erzwungen)
 - Exklusive Veranstaltungen monetarisieren
 
-#### Private Clubs *(in Entwicklung)*
+#### Private Clubs
 
 - Geschlossene, einladungsbasierte Clubs
-- Beitrittsgenehmigung durch den Betreiber
+- Beitrittsgenehmigung durch den Betreiber (live)
 
 #### Hervorgehobene Clubs
 

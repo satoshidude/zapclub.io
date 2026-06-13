@@ -54,6 +54,9 @@ a listener zaps sats straight to the DJ whose track is playing.
 - **Zaps (NIP-57)** — a pulsing ⚡ on the live DJ; pay with the Alby extension
   (WebLN), Alby Go on mobile (`alby:` deep link), or any wallet via QR/copy.
   Shows the DJ's total received sats.
+- **VibeMeter** — a live SVG arc-gauge showing the room's mood for the current
+  track. Members vote *skip* or *banger*; the needle swings to the active segment,
+  which lights up neon. Score resets on every track change.
 - **Moderation** — skip, kick from stage, ban (relay-enforced), appoint mods.
 
 ## Freemium model

@@ -19,6 +19,13 @@
       algorithmic recommendations. No accounts, no central database, no tracking. Your Nostr key
       is your identity.
     </p>
+    <ul class="feat-list">
+      <li><strong>Synchronized playback</strong> — relay conductor drives the clock; everyone hears the same moment.</li>
+      <li><strong>DJ stage &amp; round-robin</strong> — up to 2 (Free) or 5 (Premium) DJs; queues interleaved track-by-track.</li>
+      <li><strong>VibeMeter</strong> — live arc-gauge showing the room's mood; vote skip or banger, needle swings to the active segment, resets per track.</li>
+      <li><strong>Zaps (NIP-57)</strong> — pay the live DJ directly with Lightning; sats go straight to their wallet.</li>
+      <li><strong>Chat, avatars &amp; moderation</strong> — ephemeral Nostr events; relay-enforced bans and roles.</li>
+    </ul>
   </section>
 
   <section class="card tier-grid">
@@ -95,6 +102,16 @@
     color: var(--text);
   }
   p:last-child { margin-bottom: 0; }
+  .feat-list {
+    margin: 0.5rem 0 0;
+    padding-left: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
   .tier-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

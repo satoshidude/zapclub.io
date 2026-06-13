@@ -66,6 +66,12 @@ Members can join the stage as DJs and contribute songs or playlists.
 
 Tracks from multiple DJs are combined into a collaborative queue, creating a community-driven listening experience.
 
+### VibeMeter
+
+The VibeMeter is an SVG arc-gauge that shows the room's live mood for the current track.
+
+Members vote *skip* or *banger* with a single tap. The needle swings into the active segment (deep blue for "skip" through neon orange for "banger"), which lights up. The gauge resets on every track change.
+
 ### Lightning Payments
 
 Members can directly support DJs through Lightning payments and Nostr Zaps.
@@ -119,9 +125,9 @@ Payment via Lightning (NIP-57 Zap); auto-renewal via Nostr Wallet Connect (NWC) 
 - Charge Lightning-based admission fees (relay-enforced)
 - Monetize exclusive events and communities
 
-#### Private Clubs *(coming soon)*
+#### Private Clubs
 
-- Invitation-only or approval-based membership
+- Invitation-only or approval-based membership (live)
 
 #### Featured Placement
 
