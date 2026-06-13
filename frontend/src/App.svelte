@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome, goAbout, goHowto, goAdmin, goLeaderboard, goPrivacy, goTerms, goLegal } from './lib/router.svelte'
+  import { router, goHome, goAbout, goAdmin, goLeaderboard, goPrivacy, goTerms, goLegal } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import { accountWatch, startAccountWatch } from './lib/nostr/accountWatch.svelte'
@@ -75,7 +75,6 @@
     <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <div class="top-actions">
-    <button class="icon-btn" onclick={goHowto} title="How it works" aria-label="How it works">?</button>
     {#if isSuperadmin()}
       <button class="icon-btn" onclick={goAdmin} title="Admin" aria-label="Admin">⚙️</button>
     {/if}

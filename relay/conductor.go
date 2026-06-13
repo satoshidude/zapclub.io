@@ -816,7 +816,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 		// Notify the radio manager of the resumed track so streams restart immediately
 		// after a relay restart (notifyRadio is otherwise only called by advance/stop).
 		if pb.playing && pb.videoID != "" {
-			c.notifyRadio(club, pb.videoID, pb.title)
+			c.notifyRadio(club, pb.videoID, pb.title, pb.dj)
 		}
 	}
 	djPks := make([]string, len(djs))
@@ -895,7 +895,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	if len(djPks) == 0 {
 		c.stop(pb)
 		c.sqClearState(club)
-		c.notifyRadio(club, "", "")
+		c.notifyRadio(club, "", "", "")
 		return
 	}
 	mat := c.matrix(djPks, queues, pb, club, now)
@@ -907,7 +907,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.stop(pb)
 		delete(c.played, club) // clear in-memory played-set — session boundary
 		c.sqClearState(club)   // clear SQLite state + played rows
-		c.notifyRadio(club, "", "")
+		c.notifyRadio(club, "", "", "")
 		return
 	}
 	tracks := queues[djPks[di]]
@@ -915,7 +915,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		log.Printf("conductor [%.8s] stop: track index out of range di=%d ti=%d", club, di, ti)
 		c.stop(pb)
 		c.sqClearState(club)
-		c.notifyRadio(club, "", "")
+		c.notifyRadio(club, "", "", "")
 		return
 	}
 	t := tracks[ti]
@@ -940,7 +940,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
-	c.notifyRadio(club, t.videoID, t.title)
+	c.notifyRadio(club, t.videoID, t.title, pb.dj)
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
@@ -1012,9 +1012,9 @@ func (c *conductor) currentVideoID(clubID string) string {
 }
 
 // notifyRadio forwards track changes to the radio manager (no-op if radio is not set up).
-func (c *conductor) notifyRadio(clubID, videoID, title string) {
+func (c *conductor) notifyRadio(clubID, videoID, title, dj string) {
 	if c.radioMgr != nil {
-		c.radioMgr.onTrackChange(clubID, videoID, title)
+		c.radioMgr.onTrackChange(clubID, videoID, title, dj)
 	}
 }
 

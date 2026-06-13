@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
 const (
@@ -45,32 +48,46 @@ const radioBrandCSS = `
 .brand-name .word{color:#fff}
 .brand-name .tld{color:#8e30eb;font-weight:700}`
 
-// radioPlayerPage args: streamPath, streamPath (m3u), clubID, clubName
+// radioPlayerPage uses {{CLUBID}} and {{CLUBNAME}} placeholders (replaced via strings.NewReplacer).
+// No fmt.Sprintf args — avoids %% escaping issues with CSS.
 const radioPlayerPage = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📻 zapclub.io Webradio</title>
+<meta name="theme-color" content="#0d0d0f">
+<title>📻 {{CLUBNAME}} — zapclub.io</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
      display:flex;flex-direction:column;align-items:center;justify-content:center;
-     min-height:100vh;gap:2rem;padding:2rem}
+     min-height:100vh;gap:1.5rem;padding:2rem 1rem}
 ` + radioBrandCSS + `
-audio{width:min(320px,85vw);opacity:.7}
-.offline{color:#ef4444;font-size:.85rem;display:none}
-.url-row{display:flex;align-items:center;gap:.5rem;width:min(340px,88vw)}
-.url-row input{flex:1;background:#1e1e2e;border:1px solid #334155;border-radius:.4rem;
-               color:#64748b;font-size:.73rem;padding:.4rem .6rem;outline:none;min-width:0}
-.url-row button{background:#1e1e2e;border:1px solid #334155;border-radius:.4rem;color:#94a3b8;
-                font-size:.73rem;padding:.4rem .7rem;cursor:pointer;white-space:nowrap}
-.url-row button:hover{border-color:#475569;color:#e2e8f0}
-.url-row a{color:#64748b;font-size:.73rem;text-decoration:none;white-space:nowrap}
-.url-row a:hover{color:#94a3b8}
-.enter{display:inline-block;background:#8e30eb;color:#fff;
-       font-weight:600;font-size:.9rem;padding:.6rem 1.4rem;border-radius:.5rem;
-       text-decoration:none;letter-spacing:.01em}
+.now-playing{text-align:center;max-width:340px;min-height:2.8rem}
+.np-title{font-size:1.05rem;font-weight:600;color:#e2e8f0;line-height:1.35}
+.np-dj{margin-top:.35rem;font-size:.82rem;color:#94a3b8}
+.np-dj a{color:#a78bfa;text-decoration:none;font-weight:600}
+.np-dj a:hover{text-decoration:underline}
+.player-ctrl{display:flex;align-items:center;gap:.9rem}
+.btn-play{width:3.2rem;height:3.2rem;border-radius:50%;border:none;
+          background:#8e30eb;color:#fff;font-size:1.3rem;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.btn-play:hover{background:#a855f7}
+.live-badge{background:#ef4444;color:#fff;font-size:.68rem;font-weight:700;
+            letter-spacing:.07em;padding:.2rem .5rem;border-radius:.25rem;
+            text-transform:uppercase;display:none}
+.vol{width:88px;accent-color:#8e30eb;cursor:pointer}
+.offline-msg{color:#ef4444;font-size:.82rem;display:none;margin-top:.2rem}
+.actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center}
+.act-btn{background:#1e1e2e;border:1px solid #334155;border-radius:.4rem;
+         color:#94a3b8;font-size:.8rem;padding:.45rem .85rem;cursor:pointer;
+         text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;
+         white-space:nowrap;font-family:inherit}
+.act-btn:hover{border-color:#475569;color:#e2e8f0}
+.act-btn.copied{color:#22c55e;border-color:#22c55e}
+.enter{background:#8e30eb;color:#fff;font-weight:600;font-size:.95rem;
+       padding:.65rem 1.5rem;border-radius:.5rem;text-decoration:none;
+       letter-spacing:.01em;display:inline-flex;align-items:center;gap:.35rem}
 .enter:hover{background:#a855f7}
 </style>
 </head>
@@ -79,33 +96,97 @@ audio{width:min(320px,85vw);opacity:.7}
 ` + radioBrandSVG + `
   <span class="brand-name"><span class="word">zapclub</span><span class="tld">.io</span></span>
 </div>
-<audio id="player" src="%s" autoplay controls
-  onerror="document.getElementById('offline').style.display='block'"></audio>
-<p id="offline" class="offline">⚠ Stream offline</p>
-<div class="url-row">
-  <input id="streamurl" type="text" readonly>
-  <button onclick="copyURL()">Copy</button>
-  <a href="%s.m3u" download>M3U</a>
+
+<div class="now-playing">
+  <div class="np-title" id="np-title">Connecting…</div>
+  <div class="np-dj" id="np-dj"></div>
 </div>
-<a class="enter" href="https://zapclub.io/?club=%s">Enter the Club: %s</a>
+
+<audio id="audio" preload="none"></audio>
+
+<div class="player-ctrl">
+  <button class="btn-play" id="btn-play" onclick="togglePlay()" title="Play / Pause">▶</button>
+  <span class="live-badge" id="live-badge">LIVE</span>
+  <input class="vol" type="range" id="vol" min="0" max="1" step="0.02" value="1"
+         oninput="document.getElementById('audio').volume=+this.value" title="Volume">
+</div>
+<p class="offline-msg" id="offline-msg">⚠ Stream offline or no DJ active</p>
+
+<div class="actions">
+  <button class="act-btn" id="copy-btn" onclick="copyLink()">📋 Copy link</button>
+  <a class="act-btn" id="m3u-btn" href="#" download="zapclub-radio.m3u">📂 Open M3U</a>
+  <button class="act-btn" onclick="shareLink()">📤 Share</button>
+</div>
+
+<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">⚡ {{CLUBNAME}}</a>
+
 <script>
-var u=location.href.replace(/\?.*$/,'');
-document.getElementById('streamurl').value=u;
-document.getElementById('player').src=u;
-function copyURL(){navigator.clipboard.writeText(u).then(function(){
-  var b=document.querySelector('.url-row button');
-  b.textContent='Copied!';setTimeout(function(){b.textContent='Copy'},1500);
-});}
+var STREAM = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
+var INFO = '/radio/{{CLUBID}}/info';
+var audio = document.getElementById('audio');
+audio.src = STREAM;
+document.getElementById('m3u-btn').href = STREAM + '.m3u';
+
+audio.addEventListener('playing', function() { setLive(true); });
+audio.addEventListener('stalled', function() { setLive(false); });
+audio.addEventListener('error',   function() {
+  setLive(false);
+  document.getElementById('offline-msg').style.display = 'block';
+});
+function setLive(on) {
+  document.getElementById('live-badge').style.display = on ? 'inline-block' : 'none';
+}
+function togglePlay() {
+  var btn = document.getElementById('btn-play');
+  if (audio.paused) {
+    audio.play().catch(function() {});
+    btn.textContent = '⏸';
+  } else {
+    audio.pause();
+    btn.textContent = '▶';
+    setLive(false);
+  }
+}
+function copyLink() {
+  navigator.clipboard.writeText(STREAM).then(function() {
+    var btn = document.getElementById('copy-btn');
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = '📋 Copy link'; btn.classList.remove('copied'); }, 1800);
+  }).catch(function() { prompt('Copy this URL:', STREAM); });
+}
+function shareLink() {
+  var d = { title: '{{CLUBNAME}} — zapclub.io Webradio', url: STREAM };
+  if (navigator.share && navigator.canShare && navigator.canShare(d)) {
+    navigator.share(d).catch(function() {});
+  } else { copyLink(); }
+}
+function pollInfo() {
+  fetch(INFO).then(function(r) { return r.json(); }).then(function(d) {
+    var titleEl = document.getElementById('np-title');
+    var djEl    = document.getElementById('np-dj');
+    titleEl.textContent = d.title || (d.active ? '{{CLUBNAME}} — Live' : '— No DJ active —');
+    if (d.dj_npub) {
+      djEl.innerHTML = '⚡ Now playing — <a href="https://zapclub.io/user/' +
+        encodeURIComponent(d.dj_npub) + '" target="_top">Zap the DJ</a>';
+    } else {
+      djEl.textContent = '';
+    }
+  }).catch(function() {});
+}
+pollInfo();
+setInterval(pollInfo, 12000);
 </script>
 </body>
 </html>`
 
-// radioOfflinePage args: clubID, clubName
+// radioOfflinePage uses {{CLUBID}} and {{CLUBNAME}} placeholders (replaced via strings.NewReplacer).
 const radioOfflinePage = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>📻 zapclub.io Webradio</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>📻 {{CLUBNAME}} — zapclub.io</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d0d0f;font-family:system-ui,sans-serif;
@@ -115,8 +196,8 @@ body{background:#0d0d0f;font-family:system-ui,sans-serif;
 .turntable{opacity:.4}
 .vinyl{animation:none!important}
 .status{color:#475569;font-size:.85rem}
-.enter{display:inline-block;background:#8e30eb;color:#fff;font-weight:600;
-       font-size:.9rem;padding:.6rem 1.4rem;border-radius:.5rem;
+.enter{display:inline-flex;align-items:center;gap:.35rem;background:#8e30eb;color:#fff;
+       font-weight:600;font-size:.9rem;padding:.65rem 1.5rem;border-radius:.5rem;
        text-decoration:none;letter-spacing:.01em}
 .enter:hover{background:#a855f7}
 </style>
@@ -127,7 +208,7 @@ body{background:#0d0d0f;font-family:system-ui,sans-serif;
   <span class="brand-name"><span class="word">zapclub</span><span class="tld">.io</span></span>
 </div>
 <p class="status">📻 Stream offline</p>
-<a class="enter" href="https://zapclub.io/?club=%s">Enter the Club: %s</a>
+<a class="enter" href="https://zapclub.io/club/{{CLUBID}}">⚡ {{CLUBNAME}}</a>
 </body>
 </html>`
 
@@ -217,7 +298,8 @@ type radioClub struct {
 	cancel  context.CancelFunc
 	videoID string
 	title   string
-	enabled bool // owner-controlled; persisted in radio_enabled SQLite table
+	dj      string // pubkey of DJ playing the current track
+	enabled bool   // owner-controlled; persisted in radio_enabled SQLite table
 }
 
 // radioManager manages server-side audio streaming per club.
@@ -269,11 +351,12 @@ func (m *radioManager) saveEnabled(clubID string, enabled bool) {
 // onTrackChange is called by the conductor on every track advance or stop.
 // videoID="" means lobby mode — if enabled, the silent placeholder keeps the stream alive.
 // A real track auto-enables a previously-disabled club's stream.
-func (m *radioManager) onTrackChange(clubID, videoID, title string) {
+func (m *radioManager) onTrackChange(clubID, videoID, title, dj string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rc := m.getOrCreate(clubID)
 	rc.title = title
+	rc.dj = dj
 	rc.station.setTitle(title)
 	if videoID != "" && !rc.enabled {
 		rc.enabled = true
@@ -473,6 +556,9 @@ func (h *radioHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, "/stop") && strings.HasPrefix(path, "/radio/"):
 		clubID := strings.TrimSuffix(strings.TrimPrefix(path, "/radio/"), "/stop")
 		h.handleToggle(w, r, clubID, false)
+	case strings.HasSuffix(path, "/info") && strings.HasPrefix(path, "/radio/"):
+		clubID := strings.TrimSuffix(strings.TrimPrefix(path, "/radio/"), "/info")
+		h.handleInfo(w, r, clubID)
 	case strings.HasPrefix(path, "/radio/") && len(path) > len("/radio/"):
 		clubID := strings.TrimPrefix(path, "/radio/")
 		h.handleListen(w, r, clubID)
@@ -529,6 +615,36 @@ func (h *radioHandler) handleToggle(w http.ResponseWriter, r *http.Request, club
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleInfo returns a JSON snapshot of the club's current stream state.
+// Used by the radio player page to poll track/DJ info.
+func (h *radioHandler) handleInfo(w http.ResponseWriter, r *http.Request, clubID string) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "application/json")
+
+	h.mgr.mu.Lock()
+	rc := h.mgr.clubs[clubID]
+	h.mgr.mu.Unlock()
+
+	type infoResponse struct {
+		Active  bool   `json:"active"`
+		Title   string `json:"title,omitempty"`
+		DJNpub  string `json:"dj_npub,omitempty"`
+		Club    string `json:"club"`
+	}
+	resp := infoResponse{Club: h.clubName(clubID)}
+	if rc != nil {
+		resp.Active = rc.enabled
+		resp.Title = rc.title
+		if rc.dj != "" {
+			if npub, err := nip19.EncodePublicKey(rc.dj); err == nil {
+				resp.DJNpub = npub
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
 func (h *radioHandler) handleListen(w http.ResponseWriter, r *http.Request, clubID string) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
@@ -544,17 +660,16 @@ func (h *radioHandler) handleListen(w http.ResponseWriter, r *http.Request, club
 	// Browser navigation: serve an HTML player page instead of raw audio.
 	// Media players and <audio> elements send Accept: */*, not text/html.
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		repl := strings.NewReplacer("{{CLUBID}}", clubID, "{{CLUBNAME}}", h.clubName(clubID))
 		if !h.mgr.isActive(clubID) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, radioOfflinePage, clubID, h.clubName(clubID)) //nolint:errcheck
+			fmt.Fprint(w, repl.Replace(radioOfflinePage)) //nolint:errcheck
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		streamPath := "/radio/" + clubID
-		clubName := h.clubName(clubID)
-		fmt.Fprintf(w, radioPlayerPage, streamPath, streamPath, clubID, clubName)
+		fmt.Fprint(w, repl.Replace(radioPlayerPage)) //nolint:errcheck
 		return
 	}
 

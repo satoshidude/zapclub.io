@@ -17,7 +17,7 @@
   import { persistedStageGroup } from '../nostr/stage.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../player/youtube'
   import { fetchUserClubActivity, createClub } from '../nostr/groups'
-  import { goClub, goUser, goHowto, goLeaderboard } from '../router.svelte'
+  import { goClub, goUser, goLeaderboard } from '../router.svelte'
   import TrackPreview from './TrackPreview.svelte'
   import { clubAvatar } from '../avatar'
   import { npubEncode } from 'nostr-tools/nip19'
@@ -329,6 +329,44 @@
 </script>
 
 <div class="wrap">
+  <details class="howto-block">
+    <summary class="howto-summary">How-to &amp; Tips</summary>
+    <div class="howto-body">
+      <section class="howto-card">
+        <h3>🍏 iOS / macOS Safari</h3>
+        <p>Safari needs a small signing extension. <strong>Nostash</strong> gives Safari the <code>window.nostr</code> login zapclub uses. For paying zaps, <strong>Alby Go</strong> is the smoothest.</p>
+        <ul class="howto-links">
+          <li><a href="https://apps.apple.com/us/app/nostash/id6744309333" target="_blank" rel="noopener noreferrer">Nostash — App Store</a> — sign in. After install, open the Nostash icon in Safari, allow it for zapclub, then tap "🧩 Browser extension (NIP-07)".</li>
+          <li><a href="https://apps.apple.com/us/app/alby-go/id6471335774" target="_blank" rel="noopener noreferrer">Alby Go — App Store</a> — pay zaps. Tap "📲 Open in Alby Go" on the pay screen.</li>
+        </ul>
+      </section>
+      <section class="howto-card">
+        <h3>🎚️ Bring Spotify / Apple Music playlists</h3>
+        <p>zapclub plays YouTube. Convert your playlist first, then paste the YouTube playlist link into the DJ Station search box — "Add all" drops every track into your set.</p>
+        <ul class="howto-links">
+          <li><a href="https://www.tunemymusic.com/" target="_blank" rel="noopener noreferrer">TuneMyMusic</a> — Spotify / Apple Music → YouTube, free.</li>
+          <li><a href="https://soundiiz.com/" target="_blank" rel="noopener noreferrer">Soundiiz</a> — another solid converter across many services.</li>
+        </ul>
+      </section>
+      <section class="howto-card">
+        <h3>⚡ Set up a lightning address</h3>
+        <p>Zaps are real sats sent straight to the DJ. To <strong>receive</strong> them you need a <strong>lightning address</strong> (like <code>you@wallet.com</code>). Add it in Profile → Edit.</p>
+        <ul class="howto-links">
+          <li><a href="https://rizful.com/" target="_blank" rel="noopener noreferrer">Rizful</a> — Nostr-native lightning address.</li>
+          <li><a href="https://www.walletofsatoshi.com/" target="_blank" rel="noopener noreferrer">Wallet of Satoshi</a> — one-tap install, instant address.</li>
+          <li><a href="https://coinos.io/" target="_blank" rel="noopener noreferrer">Coinos</a> — instant <code>name@coinos.io</code> address.</li>
+        </ul>
+      </section>
+      <section class="howto-card">
+        <h3>🐝 Zap faster with Alby</h3>
+        <ul class="howto-links">
+          <li><a href="https://getalby.com/products/alby-go" target="_blank" rel="noopener noreferrer">Alby Go</a> (iOS / Android) — one tap to pay from your phone.</li>
+          <li><a href="https://getalby.com/" target="_blank" rel="noopener noreferrer">Alby browser extension</a> — enables in-page "⚡ Pay now" button, no QR needed.</li>
+        </ul>
+      </section>
+    </div>
+  </details>
+
   {#if isMe}
     <div class="profile-topbar">
       <button class="prem-btn" class:prem-active={ownPremium.active} onclick={() => (showPremModal = true)} title="zapclub Premium">
@@ -391,7 +429,7 @@
       </label>
       <label class="fld">⚡ Lightning address (lud16)
         <input class="in" bind:value={eLud16} placeholder="you@walletofsatoshi.com" autocomplete="off" />
-        <span class="fhint">Needed to receive zaps. No address? See the <a href="/howto" onclick={(e) => { e.preventDefault(); goHowto() }}>How-to</a> for one-click providers.</span>
+        <span class="fhint">Needed to receive zaps. No address? See <a href="#howto" onclick={(e) => { e.preventDefault(); const d = document.querySelector('.howto-block') as HTMLDetailsElement; if(d){d.open=true;d.scrollIntoView({behavior:'smooth'})} }}>How-to & Tips</a> above for one-click providers.</span>
       </label>
       <label class="fld">NIP-05 (optional)
         <input class="in" bind:value={eNip05} placeholder="you@domain.com" autocomplete="off" />
@@ -690,6 +728,84 @@
     max-width: 680px;
     margin: 0 auto;
     padding: 1.4rem 1rem 4rem;
+  }
+  .howto-block {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+  }
+  .howto-summary {
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select: none;
+  }
+  .howto-summary::before {
+    content: '▶';
+    font-size: 0.65rem;
+    transition: transform 0.15s;
+  }
+  .howto-block[open] .howto-summary::before {
+    transform: rotate(90deg);
+  }
+  .howto-summary:hover {
+    color: var(--text);
+  }
+  .howto-body {
+    padding: 0 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .howto-card {
+    background: var(--bg-elev-2, var(--bg-elev));
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 2px);
+    padding: 0.85rem 1rem;
+  }
+  .howto-card h3 {
+    font-size: 0.95rem;
+    margin: 0 0 0.4rem;
+  }
+  .howto-card p {
+    font-size: 0.87rem;
+    color: var(--text-dim);
+    margin: 0 0 0.4rem;
+    line-height: 1.5;
+  }
+  .howto-links {
+    list-style: none;
+    padding: 0;
+    margin: 0.25rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .howto-links li {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+  .howto-links a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .howto-links a:hover {
+    text-decoration: underline;
+  }
+  .howto-card code {
+    background: var(--bg-elev-2, rgba(255,255,255,0.07));
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    font-size: 0.82em;
   }
   .phead {
     display: flex;
