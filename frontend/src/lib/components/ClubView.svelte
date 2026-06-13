@@ -774,6 +774,12 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
       <div class="panel-head">
         <span class="panel-title">💬 Chat</span>
+        <a class="tg-link" href="https://t.me/+1tNuTyp8tKw2Mjgy" target="_blank" rel="noopener noreferrer" title="Join on Telegram">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
+          </svg>
+          Telegram
+        </a>
       </div>
       <Chat {groupId} canChat={isMember} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} ondelete={(id) => void deleteEvent(groupId, id)} />
     </aside>
@@ -817,6 +823,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   .panel-head {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
     padding: 0.7rem 0.9rem;
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
@@ -825,6 +832,21 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-dim);
+  }
+  .tg-link {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #29a0d4;
+    text-decoration: none;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+  }
+  .tg-link:hover {
+    opacity: 1;
   }
 
   /* Desktop (≥700px): two-column grid, chat sticky on the right */
