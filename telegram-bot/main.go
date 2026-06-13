@@ -139,12 +139,14 @@ func (b *Bridge) session(ctx context.Context) error {
 	defer relay.Close()
 	log.Printf("[bot] connected to %s", b.cfg.RelayURL)
 
-	// NIP-42 AUTH — required for writes
+	// NIP-42 AUTH — wait up to 2 s for relay to send the challenge, then respond
+	select {
+	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	if err := relay.Auth(ctx, func(event *nostr.Event) error {
 		event.PubKey = b.pk
-		event.Kind = 22242
-		event.CreatedAt = nostr.Timestamp(time.Now().Unix())
-		event.Tags = nostr.Tags{{"relay", b.cfg.RelayURL}}
 		return event.Sign(b.sk)
 	}); err != nil {
 		log.Printf("[bot] AUTH err: %v", err)
