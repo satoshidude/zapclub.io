@@ -133,10 +133,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 1rem;
-    background: rgba(7, 7, 10, 0.85);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--border);
-    border-radius: 999px;
+    background: transparent;
     white-space: nowrap;
   }
   .top-actions {
