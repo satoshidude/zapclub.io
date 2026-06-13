@@ -158,7 +158,7 @@
           <p class="hint">Sign in to subscribe.</p>
         {/if}
         <button class="btn btn-ghost btn-sm nwc-btn" onclick={() => (step = 'nwc')}>
-          {nwcActive ? '⚙ NWC auto-renew' : '⚡ Set up auto-renew (NWC)'}
+          {nwcActive ? '⚡ NWC connected — auto-renew &amp; zapping' : '⚡ Set up auto-renew &amp; zapping (NWC)'}
         </button>
       </div>
 
@@ -196,8 +196,8 @@
       </div>
 
     {:else if step === 'nwc'}
-      <h2>NWC auto-renew</h2>
-      <p class="hint">Connect a Nostr Wallet Connect (NWC) compatible wallet (e.g. Alby Hub) to auto-renew 3 days before expiry. Your connection string is stored locally — never sent anywhere.</p>
+      <h2>⚡ Connect wallet (NWC)</h2>
+      <p class="hint">Connect a Nostr Wallet Connect wallet (e.g. Alby Hub) to enable:<br/>• <strong>Auto-renew</strong> — premium renews silently 3 days before expiry<br/>• <strong>1-tap zapping</strong> — Vibe Meter skip/banger votes pay 1 sat in the background<br/><br/>Your connection string is stored locally and never sent anywhere.</p>
       <input
         class="nwc-input"
         bind:value={nwcInput}
