@@ -1,7 +1,6 @@
 <script lang="ts">
   import { auth } from '../../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
-  import { sync } from '../../nostr/sync.svelte'
   import { signEvent } from '../../nostr/nostrLogin'
   import { pool, PROFILE_RELAYS } from '../../nostr/pool'
 
@@ -14,15 +13,7 @@
   let sharing = $state(false)
   let shared = $state(false)
 
-  const np = $derived(sync.nowPlaying)
-  const thumbUrl = $derived(
-    np?.videoId ? `https://img.youtube.com/vi/${np.videoId}/mqdefault.jpg` : null,
-  )
-  const shareText = $derived(
-    np
-      ? `🎵 ${np.title}\n\nListening in "${clubName}" on zapclub.io`
-      : `🎧 Listening in "${clubName}" on zapclub.io`,
-  )
+  const shareText = $derived(`🎧 Listening in "${clubName}" on zapclub.io`)
   const shareUrl = $derived(`https://zapclub.io/club/${clubId}`)
   const fullText = $derived(`${shareText}\n\n${shareUrl}`)
 
@@ -102,20 +93,13 @@
       {/if}
     </div>
     <p class="post-text">{shareText}</p>
-    {#if thumbUrl}
-      <div class="og-card">
-        <img src={thumbUrl} alt="track thumbnail" class="og-thumb" />
-        <div class="og-meta">
-          <span class="og-domain">zapclub.io</span>
-          <span class="og-title">{np?.title ?? clubName}</span>
-        </div>
-      </div>
-    {:else}
-      <div class="og-card og-text-only">
+    <div class="og-card">
+      <img src="/og.png" alt="zapclub.io" class="og-thumb" />
+      <div class="og-meta">
         <span class="og-domain">zapclub.io</span>
         <span class="og-title">{clubName}</span>
       </div>
-    {/if}
+    </div>
   </div>
 
   <button
