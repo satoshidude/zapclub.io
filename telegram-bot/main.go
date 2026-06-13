@@ -273,14 +273,14 @@ func (b *Bridge) handleTGMessage(ctx context.Context, relay *nostr.Relay, msg *t
 	cmd = strings.SplitN(cmd, "@", 2)[0] // strip @botname suffix
 
 	switch cmd {
+	case "/start", "/help":
+		b.cmdHelp(msg.Chat.ID)
 	case "/add":
 		b.cmdAdd(ctx, relay, msg.Chat.ID, from, strings.TrimSpace(arg))
 	case "/np":
 		b.cmdNP(msg.Chat.ID)
 	case "/queue":
 		b.cmdQueue(msg.Chat.ID)
-	case "/help":
-		b.cmdHelp(msg.Chat.ID)
 	default:
 		if strings.HasPrefix(text, "/") {
 			return // unknown command — ignore silently
@@ -356,13 +356,16 @@ func (b *Bridge) cmdQueue(chatID int64) {
 }
 
 func (b *Bridge) cmdHelp(chatID int64) {
-	help := `zapclub bot
-
-/add <YouTube URL or query> — add track to queue
-/np — show current track
-/queue — list the bot's queue
-Any other message is forwarded to the club chat.`
-	_, _ = b.tg.Send(tgbotapi.NewMessage(chatID, help))
+	help := "🎧 *zapclub\\.io* — Sunnyhill Basement\n\n" +
+		"I'm the club DJ\\. Add tracks, I'll play them in the mix\\.\n\n" +
+		"*/add* _<YouTube URL or search query>_\n" +
+		"*/np* — current track\n" +
+		"*/queue* — bot's queue\n\n" +
+		"Any other message is forwarded to the club chat\\.\n" +
+		"👉 https://zapclub\\.io/club/c6f0f845fb2a3792"
+	msg := tgbotapi.NewMessage(chatID, help)
+	msg.ParseMode = "MarkdownV2"
+	_, _ = b.tg.Send(msg)
 }
 
 // ── Nostr publishing ──────────────────────────────────────────────────────────
