@@ -76,11 +76,13 @@ type Bridge struct {
 	pk       string // hex public key
 	tg       *tgbotapi.BotAPI
 	mu       sync.Mutex
-	profiles map[string]string // pubkey → display name cache
-	lastNP   string            // last now-playing track ref (e.g. "yt:abc") — dedup
-	ownIDs   map[string]bool   // event IDs we published — avoid echo
-	queue    []Track           // current bot DJ queue
-	since    int64             // stage join time (ms) — persisted across heartbeats
+	profiles  map[string]string // pubkey → display name cache
+	clubName  string            // fetched from kind 39000 on connect
+	lastNP    string            // last now-playing track ref (e.g. "yt:abc") — dedup
+	lastTitle string            // human-readable title for /np
+	ownIDs    map[string]bool   // event IDs we published — avoid echo
+	queue     []Track           // current bot DJ queue
+	since     int64             // stage join time (ms) — persisted across heartbeats
 }
 
 func newBridge(cfg Config) *Bridge {
@@ -155,6 +157,9 @@ func (b *Bridge) session(ctx context.Context) error {
 	// Join club if not already a member (NIP-29 open clubs: auto-approved)
 	b.joinClub(ctx, relay)
 
+	// Fetch club name from kind 39000 metadata
+	b.loadClubName(ctx, relay)
+
 	// Load bot's existing queue from relay
 	b.loadQueue(ctx, relay)
 
@@ -211,27 +216,20 @@ func (b *Bridge) handleNostrEvent(ctx context.Context, ev *nostr.Event) {
 			log.Printf("[bot] tg send err: %v", err)
 		}
 
-	case 30100: // now_playing
+	case 30100: // now_playing — track state only, no automatic TG post (use /np)
 		trackTag := ev.Tags.GetFirst([]string{"track"})
 		if trackTag == nil || len(*trackTag) < 2 {
 			return
 		}
 		ref := (*trackTag)[1]
-		b.mu.Lock()
-		changed := b.lastNP != ref
-		b.lastNP = ref
-		b.mu.Unlock()
-		if !changed {
-			return // heartbeat with same track — suppress
-		}
 		title := ev.Content
 		if title == "" {
 			title = strings.TrimPrefix(ref, "yt:")
 		}
-		text := "🎵 *Now playing:* " + escMD(title)
-		msg := tgbotapi.NewMessage(b.cfg.TGChatID, text)
-		msg.ParseMode = "MarkdownV2"
-		_, _ = b.tg.Send(msg)
+		b.mu.Lock()
+		b.lastNP = ref
+		b.lastTitle = title
+		b.mu.Unlock()
 	}
 }
 
@@ -318,19 +316,32 @@ func (b *Bridge) cmdAdd(ctx context.Context, relay *nostr.Relay, chatID int64, f
 		reply("❌ Relay error: " + err.Error())
 		return
 	}
-	reply(fmt.Sprintf("✅ Added by %s:\n%s", from, t.Title))
+	b.mu.Lock()
+	clubName := b.clubName
+	b.mu.Unlock()
+	club := clubName
+	if club == "" {
+		club = b.cfg.ClubID
+	}
+	reply(fmt.Sprintf("✅ Added by %s to [%s]:\n%s", from, club, t.Title))
 }
 
 func (b *Bridge) cmdNP(chatID int64) {
 	b.mu.Lock()
 	np := b.lastNP
+	title := b.lastTitle
+	clubName := b.clubName
 	b.mu.Unlock()
 	if np == "" {
 		_, _ = b.tg.Send(tgbotapi.NewMessage(chatID, "Nothing playing right now."))
 		return
 	}
 	vid := strings.TrimPrefix(np, "yt:")
-	_, _ = b.tg.Send(tgbotapi.NewMessage(chatID, "🎵 https://youtu.be/"+vid))
+	text := "🎵 " + title + "\n" + "https://youtu.be/" + vid
+	if clubName != "" {
+		text += "\n📍 " + clubName + " · zapclub.io"
+	}
+	_, _ = b.tg.Send(tgbotapi.NewMessage(chatID, text))
 }
 
 func (b *Bridge) cmdQueue(chatID int64) {
@@ -479,6 +490,31 @@ func (b *Bridge) joinClub(ctx context.Context, relay *nostr.Relay) {
 		log.Printf("[bot] join club: %v", err)
 	} else {
 		log.Printf("[bot] joined club %s", b.cfg.ClubID)
+	}
+}
+
+func (b *Bridge) loadClubName(ctx context.Context, relay *nostr.Relay) {
+	lCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	sub, err := relay.Subscribe(lCtx, []nostr.Filter{{
+		Kinds: []int{39000},
+		Tags:  nostr.TagMap{"d": {b.cfg.ClubID}},
+		Limit: 1,
+	}})
+	if err != nil {
+		return
+	}
+	defer sub.Unsub()
+	select {
+	case ev := <-sub.Events:
+		if t := ev.Tags.GetFirst([]string{"name"}); t != nil && len(*t) >= 2 {
+			b.mu.Lock()
+			b.clubName = (*t)[1]
+			b.mu.Unlock()
+			log.Printf("[bot] club name: %s", b.clubName)
+		}
+	case <-lCtx.Done():
+		log.Println("[bot] club name not found")
 	}
 }
 
