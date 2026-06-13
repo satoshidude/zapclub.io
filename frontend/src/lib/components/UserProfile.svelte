@@ -28,7 +28,7 @@
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
-  import { ownPremium, isPremium } from '../nostr/premium.svelte'
+  import { ownPremium, isPremium, loadNwcConnection, saveNwcConnection, clearNwcConnection } from '../nostr/premium.svelte'
   import PremiumModal from './PremiumModal.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
@@ -147,6 +147,45 @@
   // ── Profile editor (own profile only) ──────────────────────────────────
   let editing = $state(false)
   let showPremModal = $state(false)
+
+  // ── NWC wallet state ──────────────────────────────────────────────────────
+  let nwcStored   = $state(!!loadNwcConnection())
+  let nwcBalance  = $state<number | null>(null)  // sats, null = not loaded
+  let nwcLoading  = $state(false)
+  let nwcEditOpen = $state(false)
+  let nwcInput    = $state('')
+  let nwcError    = $state('')
+
+  async function fetchNwcBalance() {
+    const conn = loadNwcConnection()
+    if (!conn) return
+    nwcLoading = true
+    nwcBalance = null
+    try {
+      const { NWCClient } = await import('@getalby/sdk/nwc')
+      const client = new NWCClient({ nostrWalletConnectUrl: conn })
+      const { balance } = await client.getBalance()
+      client.close()
+      nwcBalance = Math.round(balance / 1000) // msats → sats
+    } catch {
+      nwcBalance = null
+    } finally {
+      nwcLoading = false
+    }
+  }
+
+  function saveNwc() {
+    const s = nwcInput.trim()
+    if (!s.startsWith('nostr+walletconnect://')) { nwcError = 'Must start with nostr+walletconnect://'; return }
+    saveNwcConnection(s)
+    nwcStored = true; nwcEditOpen = false; nwcInput = ''; nwcError = ''
+    fetchNwcBalance()
+  }
+
+  function removeNwc() {
+    clearNwcConnection()
+    nwcStored = false; nwcBalance = null; nwcEditOpen = false
+  }
   let eName = $state('')
   let eAbout = $state('')
   let ePic = $state('')
@@ -495,6 +534,58 @@
           {/if}
         {/each}
       </ul>
+    </section>
+  {/if}
+
+  {#if isMe}
+    <section class="card wallet-card">
+      <div class="wallet-head">
+        <h2>⚡ Wallet (NWC)</h2>
+        {#if nwcStored}
+          <button class="wallet-refresh" onclick={fetchNwcBalance} disabled={nwcLoading} title="Refresh balance">
+            {nwcLoading ? '…' : '↻'}
+          </button>
+        {/if}
+      </div>
+
+      {#if nwcStored && !nwcEditOpen}
+        <div class="wallet-status">
+          <span class="wallet-dot connected"></span>
+          <span class="wallet-label">Connected</span>
+          {#if nwcBalance !== null}
+            <span class="wallet-balance">{nwcBalance.toLocaleString()} sats</span>
+          {:else if !nwcLoading}
+            <button class="wallet-load-bal" onclick={fetchNwcBalance}>Check balance</button>
+          {/if}
+        </div>
+        <p class="wallet-hint">Auto-renews premium · pays 1-sat VibeMeter votes in background</p>
+        <div class="wallet-actions">
+          <button class="btn-sm-ghost" onclick={() => (nwcEditOpen = true)}>Change connection</button>
+          <button class="btn-sm-danger" onclick={removeNwc}>Remove</button>
+        </div>
+      {:else if nwcEditOpen || !nwcStored}
+        {#if !nwcStored}
+          <div class="wallet-status">
+            <span class="wallet-dot"></span>
+            <span class="wallet-label dim">Not connected</span>
+          </div>
+          <p class="wallet-hint">Connect a NWC wallet (e.g. Alby Hub) to enable auto-renew and 1-tap zapping from the Vibe Meter.</p>
+        {/if}
+        <input
+          class="nwc-input"
+          type="password"
+          placeholder="nostr+walletconnect://..."
+          bind:value={nwcInput}
+          onkeydown={(e) => e.key === 'Enter' && saveNwc()}
+        />
+        {#if nwcError}<p class="nwc-err">{nwcError}</p>{/if}
+        <div class="wallet-actions">
+          <button class="btn-sm-primary" onclick={saveNwc} disabled={!nwcInput.trim()}>Save</button>
+          {#if nwcEditOpen}
+            <button class="btn-sm-ghost" onclick={() => { nwcEditOpen = false; nwcInput = ''; nwcError = '' }}>Cancel</button>
+          {/if}
+        </div>
+      {/if}
     </section>
   {/if}
 
@@ -1662,5 +1753,61 @@
     flex: 0 0 auto;
     font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Wallet card ── */
+  .wallet-card { display: flex; flex-direction: column; gap: 0.55rem; }
+  .wallet-head { display: flex; align-items: center; gap: 0.5rem; }
+  .wallet-head h2 { margin: 0; }
+  .wallet-refresh {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 1rem; cursor: pointer; padding: 0 0.2rem;
+  }
+  .wallet-refresh:hover { color: var(--text); }
+  .wallet-status { display: flex; align-items: center; gap: 0.5rem; }
+  .wallet-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #444; flex-shrink: 0;
+  }
+  .wallet-dot.connected { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
+  .wallet-label { font-size: 0.85rem; }
+  .wallet-label.dim { color: var(--text-dim); }
+  .wallet-balance {
+    margin-left: auto;
+    font-size: 0.9rem; font-weight: 700; color: var(--amber);
+    font-variant-numeric: tabular-nums;
+  }
+  .wallet-load-bal {
+    margin-left: auto;
+    background: none; border: none; color: var(--accent);
+    font-size: 0.8rem; cursor: pointer; padding: 0;
+    text-decoration: underline;
+  }
+  .wallet-hint { margin: 0; font-size: 0.78rem; color: var(--text-dim); }
+  .wallet-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .nwc-input {
+    width: 100%; box-sizing: border-box;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
+    color: var(--text); font-size: 0.82rem; font-family: monospace;
+  }
+  .nwc-input:focus { outline: none; border-color: var(--accent-2); }
+  .nwc-err { margin: 0; font-size: 0.75rem; color: var(--danger); }
+  .btn-sm-primary {
+    background: var(--accent); border: none; border-radius: 6px;
+    color: #fff; font-size: 0.78rem; font-weight: 600;
+    padding: 0.3rem 0.75rem; cursor: pointer;
+  }
+  .btn-sm-primary:disabled { opacity: 0.4; cursor: default; }
+  .btn-sm-ghost {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-dim); font-size: 0.78rem;
+    padding: 0.3rem 0.75rem; cursor: pointer;
+  }
+  .btn-sm-ghost:hover { border-color: var(--text-dim); color: var(--text); }
+  .btn-sm-danger {
+    background: none; border: 1px solid var(--danger); border-radius: 6px;
+    color: var(--danger); font-size: 0.78rem;
+    padding: 0.3rem 0.75rem; cursor: pointer;
   }
 </style>
