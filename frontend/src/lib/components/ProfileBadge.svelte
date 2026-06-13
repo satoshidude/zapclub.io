@@ -50,7 +50,7 @@
     border: 1px solid var(--border);
   }
   .name-clip {
-    max-width: 12ch;
+    max-width: 16ch;
     overflow: hidden;
     display: inline-block;
   }
@@ -67,7 +67,7 @@
   }
   @keyframes name-scroll {
     0%, 15%  { transform: translateX(0); }
-    70%, 85% { transform: translateX(calc(-100% + 12ch)); }
+    70%, 85% { transform: translateX(calc(-100% + 16ch)); }
     95%, 100% { transform: translateX(0); }
   }
 </style>
