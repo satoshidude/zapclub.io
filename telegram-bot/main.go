@@ -152,6 +152,9 @@ func (b *Bridge) session(ctx context.Context) error {
 		log.Printf("[bot] AUTH err: %v", err)
 	}
 
+	// Join club if not already a member (NIP-29 open clubs: auto-approved)
+	b.joinClub(ctx, relay)
+
 	// Load bot's existing queue from relay
 	b.loadQueue(ctx, relay)
 
@@ -453,6 +456,26 @@ func (b *Bridge) publishStage(ctx context.Context, relay *nostr.Relay) {
 	_ = ev.Sign(b.sk)
 	if err := relay.Publish(ctx, ev); err != nil {
 		log.Printf("[bot] stage heartbeat err: %v", err)
+	}
+}
+
+// joinClub sends a NIP-29 kind 9021 join-request so the bot becomes a member
+// of the club. For open clubs the relay approves automatically. Safe to call
+// every session — redundant joins are ignored.
+func (b *Bridge) joinClub(ctx context.Context, relay *nostr.Relay) {
+	ev := nostr.Event{
+		PubKey:    b.pk,
+		Kind:      9021,
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Tags:      nostr.Tags{{"h", b.cfg.ClubID}},
+		Content:   "",
+	}
+	_ = ev.Sign(b.sk)
+	if err := relay.Publish(ctx, ev); err != nil {
+		// "duplicate: already a member" is expected — not a real error
+		log.Printf("[bot] join club: %v", err)
+	} else {
+		log.Printf("[bot] joined club %s", b.cfg.ClubID)
 	}
 }
 
