@@ -123,18 +123,20 @@
 <style>
   .topbar {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
     height: var(--topbar-h);
     z-index: 50;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 1.25rem;
     padding: 0 1rem;
-    background: rgba(7, 7, 10, 0.8);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--border);
+    background: rgba(7, 7, 10, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    white-space: nowrap;
   }
   .top-actions {
     display: flex;

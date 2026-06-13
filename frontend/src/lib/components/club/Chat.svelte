@@ -52,11 +52,12 @@
     {:else}
       {#each chat.messages as m (m.id)}
         {@const profile = useProfile(m.pubkey)}
+        {@const name = displayName(m.pubkey, profile)}
         <div class="msg">
           <img class="av" class:online={presence.isOnline(m.pubkey)} src={avatarUrl(m.pubkey, profile)} alt="" width="24" height="24" />
           <div class="body">
-            <button class="author" onclick={() => onauthor?.(m.pubkey)}>
-              {displayName(m.pubkey, profile)}
+            <button class="author" class:long={name.length > 16} onclick={() => onauthor?.(m.pubkey)}>
+              <span class="name-inner">{name}</span>
             </button>
             <span class="text">{m.content}</span>
           </div>
@@ -148,9 +149,22 @@
     padding: 0;
     cursor: pointer;
     text-align: left;
+    max-width: 16ch;
+    overflow: hidden;
+    white-space: nowrap;
   }
   .author:hover {
     text-decoration: underline;
+  }
+  .name-inner {
+    display: inline-block;
+  }
+  .author.long .name-inner {
+    animation: scroll-name 5s ease-in-out infinite;
+  }
+  @keyframes scroll-name {
+    0%, 25%  { transform: translateX(0); }
+    75%, 100% { transform: translateX(calc(-100% + 16ch)); }
   }
   .text {
     font-size: 0.92rem;
