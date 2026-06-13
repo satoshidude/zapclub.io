@@ -4,6 +4,7 @@
   import { enrichMyTrackTitle, enrichMyTrackDuration, queues } from '../../nostr/queue.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import Player from './Player.svelte'
+  import ZapButton from './ZapButton.svelte'
 
   // The video lives INSIDE this card: small on the left by default to save space, with a zoom
   // toggle that expands it to full content-width. The Player instance is never remounted on
@@ -155,6 +156,7 @@
         disabled={!auth.canSign}
         title={liked ? 'Liked — tap to remove' : 'Like this track'}
       >🔖</button>
+      <ZapButton club={clubId} showDj={true} />
       <div class="radio-controls">
         {#if streamURL}
           <a class="btn-live" href={streamURL} target="_blank" rel="noopener" title="Open Livestream">📻 Livestream</a>

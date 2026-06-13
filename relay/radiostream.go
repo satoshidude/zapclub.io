@@ -590,8 +590,8 @@ func (m *radioManager) saveEnabled(clubID string, enabled bool) {
 }
 
 // onTrackChange is called by the conductor on every track advance or stop.
-// videoID="" means lobby mode — if enabled, the silent placeholder keeps the stream alive.
-// A real track auto-enables a previously-disabled club's stream.
+// videoID="" means no active DJ — stream is disabled automatically so listeners
+// don't receive silence. A real track auto-enables a previously-disabled stream.
 func (m *radioManager) onTrackChange(clubID, videoID, title, dj string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -599,9 +599,16 @@ func (m *radioManager) onTrackChange(clubID, videoID, title, dj string) {
 	rc.title = title
 	rc.dj = dj
 	rc.station.setTitle(title)
-	if videoID != "" && !rc.enabled {
+	if videoID == "" {
+		if rc.enabled {
+			rc.enabled = false
+			m.saveEnabled(clubID, false)
+			log.Printf("radio [%.8s] auto-stop: no active DJ", clubID)
+		}
+	} else if !rc.enabled {
 		rc.enabled = true
 		m.saveEnabled(clubID, true)
+		log.Printf("radio [%.8s] auto-start: DJ active vid=%s", clubID, videoID)
 	}
 	m.startStream(rc, clubID, videoID)
 }

@@ -118,6 +118,7 @@
 <Fireworks show={fireworks} />
 
 <div class="vm">
+  <div class="vm-head"><span class="vm-title">Vibe Meter</span></div>
   <div class="gauge-wrap">
     <svg viewBox="-10 -5 220 165" xmlns="http://www.w3.org/2000/svg" class="gauge-svg">
       <defs>
@@ -312,6 +313,16 @@
     width: 100%;
     box-sizing: border-box;
     padding: 0.4rem;
+  }
+  .vm-head {
+    padding: 0.3rem 0.4rem 0;
+  }
+  .vm-title {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
   }
 
   .gauge-wrap {

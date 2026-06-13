@@ -12,6 +12,7 @@
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
+  import VibeMeter from './VibeMeter.svelte'
   import ComingNext from './ComingNext.svelte'
 
   let {
@@ -188,6 +189,8 @@
     <h3>In Da Club</h3>
     <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
   </div>
+
+  <VibeMeter clubId={groupId} />
 
   {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
     <p class="dim">No one here yet — be the first on the floor.</p>

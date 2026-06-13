@@ -2,7 +2,7 @@ import type { Event } from 'nostr-tools/pure'
 import { KIND_SKIP, publishClub, reportBrokenTrack } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
-import { queues } from './queue.svelte'
+import { queues, markMyTrackPlayed } from './queue.svelte'
 import { fairSequence } from './roundrobin'
 import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
@@ -94,6 +94,14 @@ export function ingestNowPlaying(ev: Event, clubId: string): void {
   if (state.np && np.sentAt < state.np.sentAt) {
     console.log(`[zc:sync] drop old np sentAt=${np.sentAt} cur=${state.np.sentAt} track=${np.videoId}`)
     return
+  }
+  // When the track changes and the previous DJ was me, mark that track as played (off).
+  // This is what keeps the round-robin moving — without marking off, the conductor always
+  // sees the same track as "first active" and replays it every other round.
+  const prev = state.np
+  const me = auth.pubkey
+  if (prev && me && prev.dj === me && prev.videoId !== np.videoId && clubId) {
+    void markMyTrackPlayed(clubId, prev.videoId)
   }
   if (np.sentAt > 0) state.offsetMs = np.sentAt - Date.now()
   console.log(`[zc:sync] now_playing: ${np.videoId} pos=${np.pos} status=${np.status} offset=${Math.round(state.offsetMs)}ms sentAt=${np.sentAt}`)
