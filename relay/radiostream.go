@@ -69,9 +69,10 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 .np-dj a{color:#a78bfa;text-decoration:none;font-weight:600}
 .np-dj a:hover{text-decoration:underline}
 .player-ctrl{display:flex;align-items:center;gap:.9rem}
-.btn-play{width:3.2rem;height:3.2rem;border-radius:50%;border:none;
-          background:#8e30eb;color:#fff;font-size:1.3rem;cursor:pointer;
-          display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.btn-play{height:3rem;padding:0 1.2rem;border-radius:1.5rem;border:none;
+          background:#8e30eb;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;flex-shrink:0;
+          font-family:inherit;letter-spacing:.01em}
 .btn-play:hover{background:#a855f7}
 .live-badge{background:#ef4444;color:#fff;font-size:.68rem;font-weight:700;
             letter-spacing:.07em;padding:.2rem .5rem;border-radius:.25rem;
@@ -105,12 +106,12 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 <audio id="audio" preload="none"></audio>
 
 <div class="player-ctrl">
-  <button class="btn-play" id="btn-play" onclick="userToggle()" title="Play / Pause">▶</button>
+  <button class="btn-play" id="btn-play" onclick="userToggle()" title="Play / Pause">▶ Play</button>
   <span class="live-badge" id="live-badge">LIVE</span>
   <input class="vol" type="range" id="vol" min="0" max="1" step="0.02" value="1"
          oninput="document.getElementById('audio').volume=+this.value" title="Volume">
 </div>
-<p class="offline-msg" id="offline-msg">⚠ Stream offline or no DJ active</p>
+<p class="offline-msg" id="offline-msg"></p>
 
 <div class="actions">
   <button class="act-btn" id="copy-btn" onclick="copyLink()">📋 Copy link</button>
@@ -121,71 +122,66 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 <a class="enter" href="https://zapclub.io/club/{{CLUBID}}">⚡ {{CLUBNAME}}</a>
 
 <script>
-var STREAM = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
+var BASE = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
 var INFO = '/radio/{{CLUBID}}/info';
 var audio = document.getElementById('audio');
-var userPaused = false; // true only when user explicitly paused
-var reconnTimer = null;
-document.getElementById('m3u-btn').href = STREAM + '.m3u';
+var playing = false; // true once user has clicked play
+var retryTimer = null;
 
-function setLive(on) {
-  document.getElementById('live-badge').style.display = on ? 'inline-block' : 'none';
-  document.getElementById('btn-play').textContent = on ? '⏸' : '▶';
+document.getElementById('m3u-btn').href = BASE + '.m3u';
+
+function freshSrc() {
+  // Cache-bust so the browser always opens a new HTTP connection.
+  return BASE + '?_=' + Date.now();
 }
 
-function startPlay() {
-  // Force a fresh connection by resetting src (avoids stale HTTP/2 stream).
-  audio.src = '';
-  audio.src = STREAM;
-  audio.load();
-  audio.play().catch(function() {
-    // Autoplay blocked by browser — show ▶ for user to click.
-    document.getElementById('btn-play').textContent = '▶';
-  });
+function setStatus(live, msg) {
+  document.getElementById('live-badge').style.display = live ? 'inline-block' : 'none';
+  document.getElementById('btn-play').textContent = live ? '⏸ Pause' : '▶ Play';
+  document.getElementById('offline-msg').textContent = msg || '';
 }
 
-function scheduleReconnect(delayMs) {
-  if (reconnTimer) return;
-  reconnTimer = setTimeout(function() {
-    reconnTimer = null;
-    if (!userPaused) startPlay();
-  }, delayMs || 3000);
+function connect() {
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  audio.src = freshSrc();
+  audio.play().catch(function() { setStatus(false, ''); });
 }
 
-audio.addEventListener('playing', function() {
-  setLive(true);
-  document.getElementById('offline-msg').style.display = 'none';
-});
-audio.addEventListener('stalled', function() { setLive(false); });
-audio.addEventListener('waiting', function() { setLive(false); });
-audio.addEventListener('ended',   function() { if (!userPaused) scheduleReconnect(1500); });
-audio.addEventListener('error',   function() {
-  setLive(false);
-  if (!userPaused) scheduleReconnect(4000); // track change gap: retry after 4 s
-});
+function retry(delayMs) {
+  if (retryTimer || !playing) return;
+  retryTimer = setTimeout(connect, delayMs || 3000);
+}
+
+audio.addEventListener('playing', function() { setStatus(true, ''); });
+audio.addEventListener('stalled', function() { setStatus(false, 'Buffering…'); });
+audio.addEventListener('waiting', function() { setStatus(false, 'Buffering…'); });
+audio.addEventListener('ended',   function() { setStatus(false, ''); retry(1500); });
+audio.addEventListener('error',   function() { setStatus(false, ''); retry(4000); });
 
 function userToggle() {
-  if (audio.paused) {
-    userPaused = false;
-    clearTimeout(reconnTimer); reconnTimer = null;
-    startPlay();
+  if (!playing || audio.paused || audio.error || audio.ended) {
+    playing = true;
+    connect();
   } else {
-    userPaused = true;
+    playing = false;
+    clearTimeout(retryTimer); retryTimer = null;
     audio.pause();
-    setLive(false);
+    audio.src = '';
+    setStatus(false, '');
   }
 }
 
 function copyLink() {
-  navigator.clipboard.writeText(STREAM).then(function() {
+  navigator.clipboard.writeText(BASE).then(function() {
     var btn = document.getElementById('copy-btn');
     btn.textContent = '✓ Copied';
     btn.classList.add('copied');
     setTimeout(function() { btn.textContent = '📋 Copy link'; btn.classList.remove('copied'); }, 1800);
-  }).catch(function() { prompt('Copy this URL:', STREAM); });
+  }).catch(function() { prompt('Copy this URL:', BASE); });
 }
 function shareLink() {
-  var d = { title: '{{CLUBNAME}} — zapclub.io Webradio', url: STREAM };
+  var d = { title: '{{CLUBNAME}} — zapclub.io Webradio', url: BASE };
   if (navigator.share && navigator.canShare && navigator.canShare(d)) {
     navigator.share(d).catch(function() {});
   } else { copyLink(); }
@@ -205,9 +201,6 @@ function pollInfo() {
 }
 pollInfo();
 setInterval(pollInfo, 12000);
-
-// Auto-start on page load.
-startPlay();
 </script>
 </body>
 </html>`
