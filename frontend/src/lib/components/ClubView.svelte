@@ -769,9 +769,10 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       {/if}
     </div>
 
-    <!-- Share + Chat: side panel (desktop) / inline below (mobile) -->
-    <aside class="chat-panel">
+    <!-- Right column: share card + chat panel -->
+    <div class="right-col">
       <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
+      <aside class="chat-panel">
       <div class="panel-head">
         <span class="panel-title">💬 Chat</span>
         <a class="tg-link" href="https://t.me/+1tNuTyp8tKw2Mjgy" target="_blank" rel="noopener noreferrer" title="Join on Telegram">
@@ -782,7 +783,8 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
         </a>
       </div>
       <Chat {groupId} canChat={isMember} {canModerate} onauthor={(pk) => goUser(npubEncode(pk))} ondelete={(id) => void deleteEvent(groupId, id)} />
-    </aside>
+      </aside>
+    </div>
   </div>
 
 </div>
@@ -791,13 +793,13 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   .wrap {
     max-width: 960px;
     margin: 0 auto;
-    padding: 1.2rem 1rem 5rem;
+    padding: 1.8rem 1.6rem 5rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
   }
 
-  /* Club body: main column (floor + queue) + chat panel */
+  /* Club body: main column (floor + queue) + right column */
   .club-body {
     display: grid;
     grid-template-columns: 1fr;
@@ -808,6 +810,12 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    min-width: 0;
+  }
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     min-width: 0;
   }
 

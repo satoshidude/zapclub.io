@@ -41,11 +41,11 @@
   const SPAN = 78   // degrees either side of top (156° total)
 
   // Button geometry (in SVG user units), vertically centred on mood label (y=144)
-  const BTN_Y  = 135   // rect top
-  const BTN_H  = 18    // rect height  → center at BTN_Y + BTN_H/2 = 144
-  const BTN_W  = 56    // rect width
-  const SKIP_X = 3     // left edge of skip rect  → right edge = 59
-  const BNG_X  = 141   // left edge of banger rect → right edge = 197
+  const BTN_Y  = 137   // rect top
+  const BTN_H  = 14    // rect height  → center at BTN_Y + BTN_H/2 = 144
+  const BTN_W  = 46    // rect width
+  const SKIP_X = 8     // left edge of skip rect
+  const BNG_X  = 146   // left edge of banger rect
 
   // zapclub palette — dim (base) and neon (active) per segment
   const SEGS_DEF = [
