@@ -49,9 +49,9 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
-  import VibeMeter from './club/VibeMeter.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
+  import ShareBlock from './club/ShareBlock.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -747,8 +747,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
 
   <div class="club-body">
     <div class="main-col">
-      <VibeMeter clubId={groupId} />
-
       <!-- The floor: DJs up front, crowd behind. -->
       <Dancefloor
         {groupId}
@@ -771,8 +769,9 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       {/if}
     </div>
 
-    <!-- Chat: side panel (desktop) / inline below (mobile) -->
+    <!-- Share + Chat: side panel (desktop) / inline below (mobile) -->
     <aside class="chat-panel">
+      <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
       <div class="panel-head">
         <span class="panel-title">💬 Chat</span>
       </div>
