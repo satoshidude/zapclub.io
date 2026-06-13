@@ -190,7 +190,7 @@
     <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
   </div>
 
-  <VibeMeter clubId={groupId} />
+  <VibeMeter clubId={groupId} ownerPubkey={owner} />
 
   {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
     <p class="dim">No one here yet — be the first on the floor.</p>
@@ -357,6 +357,8 @@
     gap: 0.5rem 0.9rem;
     align-items: flex-end;
     padding: 1.7rem 0.2rem 0.7rem; /* headroom for the tag + chat bubbles */
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border);
     border-bottom: 1px dashed var(--border);
     background: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 7%, transparent), transparent 70%);
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;

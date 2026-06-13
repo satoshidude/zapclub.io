@@ -213,3 +213,19 @@ async function tryNwcRenew(pubkey: string): Promise<void> {
     console.warn('NWC auto-renew failed:', e)
   }
 }
+
+/**
+ * Pay a bolt11 invoice silently in the background via the stored NWC connection.
+ * Returns true on success. Throws on payment failure or if no NWC is configured.
+ */
+export async function payViaBackground(bolt11: string): Promise<void> {
+  const connStr = loadNwcConnection()
+  if (!connStr) throw new Error('No NWC connection stored')
+  const { NWCClient } = await import('@getalby/sdk/nwc')
+  const client = new NWCClient({ nostrWalletConnectUrl: connStr })
+  try {
+    await client.payInvoice({ invoice: bolt11 })
+  } finally {
+    client.close()
+  }
+}

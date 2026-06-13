@@ -4,9 +4,13 @@
   import { vibeMeter, sendMood, optimisticVote } from '../../nostr/mood.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import { sync } from '../../nostr/sync.svelte'
+  import { useProfile } from '../../nostr/profiles.svelte'
+  import { requestZapInvoice, creditZap } from '../../nostr/zaps.svelte'
+  import { loadNwcConnection, saveNwcConnection, clearNwcConnection, payViaBackground } from '../../nostr/premium.svelte'
+  import { showPay } from '../../nostr/payModal.svelte'
   import Fireworks from './Fireworks.svelte'
 
-  let { clubId = '' }: { clubId?: string } = $props()
+  let { clubId = '', ownerPubkey = '' }: { clubId?: string; ownerPubkey?: string } = $props()
 
   const pos     = $derived(sync.live?.pos ?? -1)
   const bangers = $derived(pos >= 0 ? vibeMeter.bangerCount(clubId, pos) : 0)
@@ -107,18 +111,87 @@
     }
   })
 
+  // ── NWC ──────────────────────────────────────────────────────────────────────
+  let nwcStored = $state(!!loadNwcConnection())
+  let nwcInput  = $state('')
+  let nwcOpen   = $state(false)
+  let nwcError  = $state('')
+
+  function saveNwc() {
+    const s = nwcInput.trim()
+    if (!s.startsWith('nostr+walletconnect://')) { nwcError = 'Must start with nostr+walletconnect://'; return }
+    saveNwcConnection(s)
+    nwcStored = true; nwcOpen = false; nwcInput = ''; nwcError = ''
+  }
+  function removeNwc() {
+    clearNwcConnection(); nwcStored = false
+  }
+
+  // ── Vote + Payment ────────────────────────────────────────────────────────────
+  let paying = $state(false)
+
   async function vote(v: 'banger' | 'skip') {
-    if (!canVote || !auth.pubkey) return
+    if (!canVote || !auth.pubkey || paying) return
     lastVoteMs = Date.now()
     optimisticVote(clubId, pos, auth.pubkey, v)
-    try { await sendMood(clubId, pos, v) } catch { }
+    sendMood(clubId, pos, v).catch(() => {})
+
+    // Determine payment target
+    const targetPk = v === 'banger' ? (sync.live?.dj ?? '') : ownerPubkey
+    if (!targetPk) return
+
+    const profile = useProfile(targetPk)
+    const lud16 = profile?.lud16 as string | undefined
+    if (!lud16) return // no lightning address — vote still counts
+
+    paying = true
+    try {
+      const comment = v === 'banger' ? '🔥 banger' : '⏭ skip'
+      const { invoice, verify } = await requestZapInvoice(targetPk, lud16, 1, comment)
+      if (nwcStored) {
+        await payViaBackground(invoice)
+        creditZap(targetPk, 1, invoice)
+      } else {
+        showPay(invoice, 1, v === 'banger' ? '🔥 Banger — 1 sat to DJ' : '⏭ Skip — 1 sat to club', { verify })
+      }
+    } catch (e) {
+      console.warn('[vibe] payment failed:', e)
+    } finally {
+      paying = false
+    }
   }
 </script>
 
 <Fireworks show={fireworks} />
 
 <div class="vm">
-  <div class="vm-head"><span class="vm-title">Vibe Meter</span></div>
+  <div class="vm-head">
+    <span class="vm-title">Vibe Meter</span>
+    <button class="nwc-btn" class:active={nwcStored} onclick={() => (nwcOpen = !nwcOpen)} title={nwcStored ? 'NWC connected' : 'Connect wallet for 1-tap voting'}>
+      ⚡{nwcStored ? '' : ' wallet'}
+    </button>
+  </div>
+
+  {#if nwcOpen}
+    <div class="nwc-panel">
+      {#if nwcStored}
+        <p class="nwc-status ok">⚡ NWC connected — votes pay 1 sat silently</p>
+        <button class="nwc-remove" onclick={removeNwc}>Remove wallet</button>
+      {:else}
+        <p class="nwc-hint">Paste your NWC connection string to vote with 1 sat automatically</p>
+        <input
+          class="nwc-input"
+          type="password"
+          placeholder="nostr+walletconnect://..."
+          bind:value={nwcInput}
+          onkeydown={(e) => e.key === 'Enter' && saveNwc()}
+        />
+        {#if nwcError}<p class="nwc-err">{nwcError}</p>{/if}
+        <button class="nwc-save" onclick={saveNwc} disabled={!nwcInput.trim()}>Connect</button>
+      {/if}
+    </div>
+  {/if}
+
   <div class="gauge-wrap">
     <svg viewBox="-10 -5 220 165" xmlns="http://www.w3.org/2000/svg" class="gauge-svg">
       <defs>
@@ -255,9 +328,9 @@
           {/if}
         </g>
         <text
-          x={SKIP_X + 20} y={BTN_Y + BTN_H / 2}
-          text-anchor="start" dominant-baseline="middle"
-          font-family="system-ui, sans-serif" font-size="9" font-weight="600"
+          x={SKIP_X + BTN_W - 4} y={BTN_Y + BTN_H / 2}
+          text-anchor="end" dominant-baseline="middle"
+          font-family="system-ui, sans-serif" font-size="7.5" font-weight="600"
           fill={ownVote === 'skip' ? '#88bbff' : '#6090c0'}
           style="pointer-events: none"
         >{skipTxt}</text>
@@ -294,9 +367,9 @@
           {/if}
         </g>
         <text
-          x={BNG_X + 20} y={BTN_Y + BTN_H / 2}
-          text-anchor="start" dominant-baseline="middle"
-          font-family="system-ui, sans-serif" font-size="9" font-weight="600"
+          x={BNG_X + BTN_W - 4} y={BTN_Y + BTN_H / 2}
+          text-anchor="end" dominant-baseline="middle"
+          font-family="system-ui, sans-serif" font-size="7.5" font-weight="600"
           fill={ownVote === 'banger' ? '#ffcc44' : '#c08030'}
           style="pointer-events: none"
         >{bangerTxt}</text>
@@ -316,6 +389,9 @@
   }
   .vm-head {
     padding: 0.3rem 0.4rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   .vm-title {
     font-size: 0.62rem;
@@ -323,6 +399,67 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-dim);
+  }
+  .nwc-btn {
+    background: none;
+    border: 1px solid #2a2a40;
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.62rem;
+    padding: 0.1rem 0.35rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .nwc-btn.active { border-color: #4a9040; color: #6dc060; }
+  .nwc-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .nwc-panel {
+    padding: 0.5rem 0.5rem 0.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  .nwc-hint, .nwc-status {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.4;
+  }
+  .nwc-status.ok { color: #6dc060; }
+  .nwc-input {
+    background: #0d0d1a;
+    border: 1px solid #2a2a40;
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.7rem;
+    padding: 0.3rem 0.4rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .nwc-input:focus { outline: none; border-color: var(--accent); }
+  .nwc-err { font-size: 0.65rem; color: var(--danger); margin: 0; }
+  .nwc-save {
+    background: var(--accent);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    align-self: flex-start;
+  }
+  .nwc-save:disabled { opacity: 0.4; cursor: default; }
+  .nwc-remove {
+    background: none;
+    border: 1px solid var(--danger);
+    border-radius: 4px;
+    color: var(--danger);
+    font-size: 0.68rem;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    align-self: flex-start;
   }
 
   .gauge-wrap {
