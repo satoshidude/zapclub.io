@@ -11,10 +11,7 @@
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
-  import PremiumModal from '../PremiumModal.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
-  import { playlists, loadMyPlaylists } from '../../nostr/playlists.svelte'
-  import { autodj, armAutoDJ, disarmAutoDJ } from '../../nostr/autodj.svelte'
 
   let {
     groupId,
@@ -183,43 +180,6 @@
     goUser(npubEncode(pk))
   }
 
-  // Auto DJ (owner-only, premium).
-  let selectedPlaylistId = $state('')
-  let autoDJBusy = $state(false)
-  let autoDJError = $state('')
-  let showAutoDJModal = $state(false)
-
-  // Load owner's playlists so the Auto DJ picker has something to show.
-  $effect(() => {
-    if (isOwner && auth.pubkey && !playlists.loaded) void loadMyPlaylists()
-  })
-
-  async function doArmAutoDJ() {
-    const pl = playlists.mine.find((p) => p.id === selectedPlaylistId)
-    if (!pl || autoDJBusy) return
-    autoDJBusy = true
-    autoDJError = ''
-    try {
-      await armAutoDJ(groupId, pl)
-      selectedPlaylistId = ''
-    } catch (e) {
-      autoDJError = String((e as Error)?.message ?? e)
-    } finally {
-      autoDJBusy = false
-    }
-  }
-
-  async function doDisarmAutoDJ() {
-    autoDJBusy = true
-    autoDJError = ''
-    try {
-      await disarmAutoDJ(groupId)
-    } catch (e) {
-      autoDJError = String((e as Error)?.message ?? e)
-    } finally {
-      autoDJBusy = false
-    }
-  }
 </script>
 
 <section class="floor card" class:playing class:hyped>
@@ -273,34 +233,6 @@
     {/each}
   </div>
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
-
-  {#if isOwner}
-    <div class="autodj-bar">
-      {#if autodj.isArmed(groupId)}
-        <span class="autodj-on">⚡ Auto DJ — {autodj.name(groupId)}</span>
-        <button class="mini" onclick={doDisarmAutoDJ} disabled={autoDJBusy}>Stop</button>
-      {:else if ownPremium.active}
-        {#if playlists.mine.length === 0}
-          <span class="autodj-hint">Auto DJ: save a playlist first</span>
-        {:else}
-          <select class="autodj-select" bind:value={selectedPlaylistId}>
-            <option value="">Auto DJ: pick playlist…</option>
-            {#each playlists.mine as pl (pl.id)}
-              <option value={pl.id}>{pl.name} ({pl.tracks.length} tracks)</option>
-            {/each}
-          </select>
-          <button class="mini" onclick={doArmAutoDJ} disabled={!selectedPlaylistId || autoDJBusy}>
-            {autoDJBusy ? '…' : 'Arm'}
-          </button>
-        {/if}
-      {:else}
-        <button class="mini amber" onclick={() => (showAutoDJModal = true)}>⚡ Auto DJ — Premium</button>
-      {/if}
-      {#if autoDJError}<span class="autodj-err">{autoDJError}</span>{/if}
-    </div>
-  {/if}
-
-  {#if showAutoDJModal}<PremiumModal onClose={() => (showAutoDJModal = false)} />{/if}
 
   <!-- The dancing crowd (online members) — loose flat cluster. -->
   {#if shownOnline.length > 0}
@@ -787,49 +719,6 @@
     flex: 0 0 auto;
   }
 
-  .autodj-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-    padding: 0.35rem 0.5rem;
-    background: color-mix(in srgb, var(--amber, #f59e0b) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--amber, #f59e0b) 30%, transparent);
-    border-radius: var(--radius-sm, 6px);
-    font-size: 0.78rem;
-    flex-wrap: wrap;
-  }
-  .autodj-on {
-    color: var(--amber, #f59e0b);
-    font-weight: 600;
-    flex: 1;
-  }
-  .autodj-hint {
-    color: var(--text-dim);
-    flex: 1;
-  }
-  .autodj-select {
-    flex: 1;
-    min-width: 0;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    color: var(--text);
-    font-size: 0.78rem;
-    padding: 0.2rem 0.4rem;
-  }
-  .autodj-err {
-    color: var(--danger);
-    font-size: 0.75rem;
-    width: 100%;
-  }
-  .mini.amber {
-    color: var(--amber, #f59e0b);
-    border-color: color-mix(in srgb, var(--amber, #f59e0b) 50%, transparent);
-  }
-  .mini.amber:hover {
-    border-color: var(--amber, #f59e0b);
-  }
 
   @media (prefers-reduced-motion: reduce) {
     .floor.playing .bob,

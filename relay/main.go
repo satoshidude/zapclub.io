@@ -324,8 +324,8 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
-	rtmpMgr := newRtmpManager(cond)
-	radioMgr := newRadioManager(cond)
+	radioMgr := newRadioManager()
+	cond.radioMgr = radioMgr
 	// SQLite for persistent conductor state (played-set + track state survive restarts)
 	// and premium status cache (eliminates per-check BadgerDB scans).
 	if sq, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
@@ -355,12 +355,8 @@ func main() {
 	board := newZapBoard(env("RELAY_LEADERBOARD", "./leaderboard.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
 
-	rtmpH := &rtmpHandler{mgr: rtmpMgr, cond: cond}
-	relay.Router().Handle("/rtmp/push/", rtmpH) // WebSocket: browser audio → ffmpeg → RTMP
-
 	radioH := &radioHandler{mgr: radioMgr, cond: cond}
-	relay.Router().Handle("/radio/push/", radioH) // WebSocket: browser audio → fan-out
-	relay.Router().Handle("/radio/", radioH)       // GET: HTTP audio stream listener
+	relay.Router().Handle("/radio/", radioH) // GET listen + POST start/stop
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)

@@ -142,6 +142,8 @@ type conductor struct {
 	autoDJCtrlIdx map[string]nostr.Timestamp         // club → newest relay-signed 30111
 	ownerCache    map[string]string                  // club → creator pubkey (permanent)
 	premCache     map[string]premCacheEntry          // club → {valid bool, t ms}
+
+	radioMgr *radioManager // set after construction; nil = no radio
 }
 
 func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
@@ -811,6 +813,11 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, no
 	if pb == nil {
 		pb = c.resume(ctx, club)
 		c.clubs[club] = pb
+		// Notify the radio manager of the resumed track so streams restart immediately
+		// after a relay restart (notifyRadio is otherwise only called by advance/stop).
+		if pb.playing && pb.videoID != "" {
+			c.notifyRadio(club, pb.videoID, pb.title)
+		}
 	}
 	djPks := make([]string, len(djs))
 	for i, d := range djs {
@@ -888,6 +895,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	if len(djPks) == 0 {
 		c.stop(pb)
 		c.sqClearState(club)
+		c.notifyRadio(club, "", "")
 		return
 	}
 	mat := c.matrix(djPks, queues, pb, club, now)
@@ -899,6 +907,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.stop(pb)
 		delete(c.played, club) // clear in-memory played-set — session boundary
 		c.sqClearState(club)   // clear SQLite state + played rows
+		c.notifyRadio(club, "", "")
 		return
 	}
 	tracks := queues[djPks[di]]
@@ -906,6 +915,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		log.Printf("conductor [%.8s] stop: track index out of range di=%d ti=%d", club, di, ti)
 		c.stop(pb)
 		c.sqClearState(club)
+		c.notifyRadio(club, "", "")
 		return
 	}
 	t := tracks[ti]
@@ -930,6 +940,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
+	c.notifyRadio(club, t.videoID, t.title)
 }
 
 // matrix builds the playability matrix. A track is playable if it is `active` (NOT marked `off`)
@@ -987,6 +998,24 @@ func (c *conductor) stop(pb *condClub) {
 	// one track back until a different/new active track plays (which changes pb.videoID) — so a set
 	// plays through once, then the lobby runs. No auto-loop.
 	pb.playing = false
+}
+
+// currentVideoID returns the currently playing video for a club, or "" if stopped/lobby.
+func (c *conductor) currentVideoID(clubID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pb := c.clubs[clubID]
+	if pb == nil || !pb.playing {
+		return ""
+	}
+	return pb.videoID
+}
+
+// notifyRadio forwards track changes to the radio manager (no-op if radio is not set up).
+func (c *conductor) notifyRadio(clubID, videoID, title string) {
+	if c.radioMgr != nil {
+		c.radioMgr.onTrackChange(clubID, videoID, title)
+	}
 }
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───

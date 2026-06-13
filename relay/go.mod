@@ -7,6 +7,7 @@ require (
 	github.com/fiatjaf/khatru v0.17.5
 	github.com/fiatjaf/relay29 v0.5.2-0.20250621200750-3276594e9d85
 	github.com/nbd-wtf/go-nostr v0.51.7
+	modernc.org/sqlite v1.52.0
 )
 
 require (
@@ -49,7 +50,6 @@ require (
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38 // indirect
-	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -67,5 +67,4 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.52.0 // indirect
 )

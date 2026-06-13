@@ -3,6 +3,7 @@
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
+  import { autodj, armAutoDJ, disarmAutoDJ } from '../../nostr/autodj.svelte'
   import PremiumModal from '../PremiumModal.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
@@ -11,7 +12,7 @@
   import TrackPreview from '../TrackPreview.svelte'
   import { marquee } from '../../actions/marquee'
 
-  let { groupId, clubName = '', canModerate = false }: { groupId: string; clubName?: string; canModerate?: boolean } = $props()
+  let { groupId, clubName = '', canModerate = false, isOwner = false }: { groupId: string; clubName?: string; canModerate?: boolean; isOwner?: boolean } = $props()
 
   const me = $derived(auth.pubkey)
   const onStage = $derived(stage.isOnStage(me))
@@ -59,6 +60,40 @@
     await setMyQueue(groupId, pl.tracks.map((t) => ({ videoId: t.videoId, title: t.title, duration: t.duration })))
     selectedPlaylistId = pl.id
     showLib = false
+  }
+
+  // Auto DJ (owner-only, premium) — arms the relay conductor with a playlist.
+  // Arming also loads the playlist into the live queue so it's immediately visible.
+  let autoDJBusy = $state(false)
+  let autoDJError = $state('')
+
+  async function doArmAutoDJ() {
+    const pl = playlists.mine.find((p) => p.id === selectedPlaylistId)
+    if (!pl || autoDJBusy) return
+    autoDJBusy = true
+    autoDJError = ''
+    try {
+      await Promise.all([
+        armAutoDJ(groupId, pl),
+        loadPl(pl),
+      ])
+    } catch (e) {
+      autoDJError = String((e as Error)?.message ?? e)
+    } finally {
+      autoDJBusy = false
+    }
+  }
+
+  async function doDisarmAutoDJ() {
+    autoDJBusy = true
+    autoDJError = ''
+    try {
+      await disarmAutoDJ(groupId)
+    } catch (e) {
+      autoDJError = String((e as Error)?.message ?? e)
+    } finally {
+      autoDJBusy = false
+    }
   }
 
   // ▶ preview / details modal.
@@ -175,6 +210,32 @@
       {/if}
     </div>
   </div>
+
+  {#if isOwner}
+    <div class="autodj-bar">
+      {#if autodj.isArmed(groupId)}
+        <span class="autodj-on">⚡ Auto DJ — {autodj.name(groupId)}</span>
+        <button class="mini" onclick={doDisarmAutoDJ} disabled={autoDJBusy}>Stop</button>
+      {:else if ownPremium.active}
+        {#if playlists.mine.length === 0}
+          <span class="autodj-hint">Auto DJ: save a playlist first</span>
+        {:else}
+          <select class="autodj-select" bind:value={selectedPlaylistId}>
+            <option value="">Auto DJ: pick playlist…</option>
+            {#each playlists.mine as pl (pl.id)}
+              <option value={pl.id}>{pl.name} ({pl.tracks.length} tracks)</option>
+            {/each}
+          </select>
+          <button class="mini" onclick={doArmAutoDJ} disabled={!selectedPlaylistId || autoDJBusy}>
+            {autoDJBusy ? '…' : 'Arm'}
+          </button>
+        {/if}
+      {:else}
+        <button class="mini amber" onclick={() => (showPremModal = true)}>⚡ Auto DJ — Premium</button>
+      {/if}
+      {#if autoDJError}<span class="autodj-err">{autoDJError}</span>{/if}
+    </div>
+  {/if}
 
   <!-- Save / load playlists. Free: 1 playlist. Premium: unlimited. -->
   <div class="lib">
@@ -569,5 +630,57 @@
     color: var(--danger);
     font-size: 0.8rem;
     margin: 0 0 0.5rem;
+  }
+  .autodj-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-elev-2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+  }
+  .autodj-on {
+    flex: 1;
+    color: var(--accent);
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .autodj-hint {
+    flex: 1;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+  .autodj-select {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8rem;
+  }
+  .autodj-select:focus {
+    outline: none;
+    border-color: var(--accent-2);
+  }
+  .autodj-err {
+    flex: 1 1 100%;
+    color: var(--danger);
+    font-size: 0.78rem;
+  }
+  .mini.amber {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .mini.amber:hover {
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
   }
 </style>

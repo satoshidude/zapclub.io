@@ -51,8 +51,6 @@
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
-  import RtmpStreamButton from './club/RtmpStreamButton.svelte'
-  import { startRadioStream, type RadioSession } from '../nostr/rtmpstream'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -144,7 +142,6 @@
       onEmote: ingestEmote,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
-      onStream: ingestStream,
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
         const target = ev.tags.find((t) => t[0] === 'e')?.[1]
@@ -178,7 +175,6 @@
       resetZaps()
       resetPresence()
       resetAutoDJ()
-      activeStreams = new Map()
     }
   })
 
@@ -513,56 +509,8 @@
     }
   }
 
-  // ── Streams (kind 30110) ─────────────────────────────────────────────────────
-  // Active streams visible in the club hero. Keyed by pubkey, one per author.
-  type StreamInfo = { pubkey: string; type: 'rtmp' | 'radio'; watchURL: string }
-  let activeStreams = $state<Map<string, StreamInfo>>(new Map())
-
-  function ingestStream(ev: Event): void {
-    const status = ev.tags.find((t) => t[0] === 'status')?.[1]
-    const type = (ev.tags.find((t) => t[0] === 'type')?.[1] ?? 'rtmp') as 'rtmp' | 'radio'
-    const watchURL = ev.tags.find((t) => t[0] === 'watch')?.[1] ?? ''
-    const m = new Map(activeStreams)
-    if (status === 'live' && watchURL) {
-      m.set(ev.pubkey, { pubkey: ev.pubkey, type, watchURL })
-    } else {
-      m.delete(ev.pubkey)
-    }
-    activeStreams = m
-  }
-
-  // Webradio toggle (owner only)
-  let radioActive = $state(false)
-  let radioBusy = $state(false)
-  let radioErr = $state('')
-  let radioSession = $state<RadioSession | null>(null)
-
-  async function toggleRadio() {
-    radioBusy = true
-    radioErr = ''
-    try {
-      if (radioActive && radioSession) {
-        await radioSession.stop()
-        radioSession = null
-        radioActive = false
-      } else {
-        radioSession = await startRadioStream(groupId)
-        radioActive = true
-      }
-    } catch (e) {
-      radioErr = String((e as Error)?.message ?? e)
-      radioSession = null
-      radioActive = false
-    } finally {
-      radioBusy = false
-    }
-  }
-
-  // Sync radioActive from stream events (owner's own stream)
-  $effect(() => {
-    const own = activeStreams.get(ownerPk)
-    radioActive = own?.type === 'radio' && own.watchURL !== ''
-  })
+  const RELAY_HTTP = 'https://relay.zapclub.io'
+  const radioURL = $derived(`${RELAY_HTTP}/radio/${groupId}`)
 </script>
 
 <div class="wrap">
@@ -647,6 +595,11 @@
         </div>
       </div>
     </div>
+    {#if sync.live}
+      <div class="radio-bar">
+        <a class="btn btn-live" href={radioURL} target="_blank" rel="noopener" title="Open Webradio">📻 Webradio Live</a>
+      </div>
+    {/if}
 
     {#if editing}
       <div class="edit-form">
@@ -729,50 +682,6 @@
         {#if inviteError}<p class="invite-err">{inviteError}</p>{/if}
       </div>
     {/if}
-    <!-- Active streams (kind 30110): show watch links to all members. -->
-    {#if activeStreams.size > 0}
-      <div class="stream-banner">
-        {#each [...activeStreams.values()] as s (s.pubkey)}
-          {#if s.type === 'radio'}
-            <div class="stream-radio-row">
-              <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
-                📻 Webradio — Live
-              </a>
-              <span class="stream-url">{s.watchURL}</span>
-              <button
-                class="btn-copy"
-                title="Copy stream URL"
-                onclick={() => navigator.clipboard.writeText(s.watchURL)}
-              >⎘</button>
-            </div>
-          {:else}
-            {@const sp = useProfile(s.pubkey)}
-            <a class="stream-link" href={s.watchURL} target="_blank" rel="noopener">
-              📡 {displayName(s.pubkey, sp)} is live — Watch
-            </a>
-          {/if}
-        {/each}
-      </div>
-    {/if}
-
-    <!-- Stream controls: owner only -->
-    {#if isOwner}
-      <div class="stream-controls">
-        <RtmpStreamButton {groupId} clubName={club?.name ?? ''} />
-        <div class="radio-wrap">
-          <button
-            class="btn-stream"
-            class:btn-on={radioActive}
-            onclick={toggleRadio}
-            disabled={radioBusy}
-            title={radioActive ? 'Stop webradio stream' : 'Start webradio stream for this club'}
-          >
-            {radioActive ? '● Webradio — Stop' : '📻 Start Webradio'}
-          </button>
-          {#if radioErr}<span class="stream-err">{radioErr}</span>{/if}
-        </div>
-      </div>
-    {/if}
 
     <!-- Player lives inside the hero: no separate card, just a section divider. -->
     <div class="player-section">
@@ -814,7 +723,7 @@
       />
       <!-- The user's own live playlist — feeds the round-robin. -->
       {#if isMember}
-        <Queue {groupId} {canModerate} clubName={club?.name ?? ''} />
+        <Queue {groupId} {canModerate} {isOwner} clubName={club?.name ?? ''} />
       {:else}
         <section class="join-hint">Join the club to step on stage and queue tracks.</section>
       {/if}
@@ -1342,36 +1251,30 @@
     gap: 0.5rem;
     margin-top: 0.6rem;
   }
-  .stream-link {
+  .radio-bar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.4rem 0 0;
+  }
+  .btn-live {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.75rem;
-    background: color-mix(in srgb, var(--accent, #7c3aed) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+    gap: 0.25rem;
+    padding: 0.25rem 0.65rem;
+    background: color-mix(in srgb, #22c55e 15%, transparent);
+    border: 1px solid color-mix(in srgb, #22c55e 50%, transparent);
     border-radius: 999px;
-    color: var(--accent, #a78bfa);
+    color: #86efac;
     font-size: 0.78rem;
     font-weight: 500;
     text-decoration: none;
+    white-space: normal;
+    word-break: break-word;
+    max-width: 100%;
     transition: background 0.15s;
   }
-  .stream-link:hover {
-    background: color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
-  }
-
-  .stream-radio-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex-wrap: wrap;
-  }
-  .stream-url {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    font-family: var(--font-mono, monospace);
-    opacity: 0.75;
-    word-break: break-all;
+  .btn-live:hover {
+    background: color-mix(in srgb, #22c55e 25%, transparent);
   }
   .btn-copy {
     background: none;
@@ -1389,49 +1292,6 @@
     color: var(--accent, #a78bfa);
   }
 
-  .stream-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-  .radio-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .btn-stream {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.25rem 0.65rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: border-color 0.15s, color 0.15s;
-  }
-  .btn-stream:hover:not(:disabled) {
-    border-color: var(--accent, #7c3aed);
-    color: var(--text);
-  }
-  .btn-stream.btn-on {
-    border-color: #7c3aed;
-    color: #a78bfa;
-  }
-  .btn-stream:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .stream-err {
-    font-size: 0.72rem;
-    color: var(--danger, #ef4444);
-  }
 
   .player-section {
     margin-top: 0.9rem;
