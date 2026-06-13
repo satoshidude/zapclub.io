@@ -275,6 +275,8 @@ func (b *Bridge) handleTGMessage(ctx context.Context, relay *nostr.Relay, msg *t
 		b.cmdHelp(msg.Chat.ID)
 	case "/add":
 		b.cmdAdd(ctx, relay, msg.Chat.ID, from, strings.TrimSpace(arg))
+	case "/addplaylist", "/addlist":
+		b.cmdAddPlaylist(ctx, relay, msg.Chat.ID, from, strings.TrimSpace(arg))
 	case "/np":
 		b.cmdNP(msg.Chat.ID)
 	case "/queue":
@@ -326,6 +328,48 @@ func (b *Bridge) cmdAdd(ctx context.Context, relay *nostr.Relay, chatID int64, f
 	reply(fmt.Sprintf("✅ Added by %s to [%s]:\n%s", from, club, t.Title))
 }
 
+func (b *Bridge) cmdAddPlaylist(ctx context.Context, relay *nostr.Relay, chatID int64, from, arg string) {
+	reply := func(s string) { _, _ = b.tg.Send(tgbotapi.NewMessage(chatID, s)) }
+
+	if arg == "" {
+		reply("Usage: /addplaylist <YouTube playlist URL>")
+		return
+	}
+	m := ytListRe.FindStringSubmatch(arg)
+	if m == nil {
+		reply("❌ No playlist ID found in URL. Use a youtube.com/playlist?list=… link.")
+		return
+	}
+	listID := m[1]
+	reply(fmt.Sprintf("📋 Fetching playlist %s…", listID))
+
+	apiURL := b.cfg.RelayAPI + "/yt-playlist?list=" + listID
+	tracks, err := b.fetchSearch(ctx, apiURL)
+	if err != nil || len(tracks) == 0 {
+		reply("❌ Could not load playlist. Make sure it's public.")
+		return
+	}
+
+	b.mu.Lock()
+	b.queue = append(b.queue, tracks...)
+	q := make([]Track, len(b.queue))
+	copy(q, b.queue)
+	b.mu.Unlock()
+
+	if err := b.publishQueue(ctx, relay, q); err != nil {
+		reply("❌ Relay error: " + err.Error())
+		return
+	}
+	b.mu.Lock()
+	clubName := b.clubName
+	b.mu.Unlock()
+	club := clubName
+	if club == "" {
+		club = b.cfg.ClubID
+	}
+	reply(fmt.Sprintf("✅ Added %d tracks by %s to [%s]", len(tracks), from, club))
+}
+
 func (b *Bridge) cmdNP(chatID int64) {
 	b.mu.Lock()
 	np := b.lastNP
@@ -367,13 +411,20 @@ func (b *Bridge) cmdQueue(chatID int64) {
 }
 
 func (b *Bridge) cmdHelp(chatID int64) {
-	help := "🎧 *zapclub\\.io* — Sunnyhill Basement\n\n" +
+	b.mu.Lock()
+	clubName := b.clubName
+	b.mu.Unlock()
+	if clubName == "" {
+		clubName = b.cfg.ClubID
+	}
+	help := "🎧 *zapclub\\.io* — " + escMD(clubName) + "\n\n" +
 		"I'm the club DJ\\. Add tracks, I'll play them in the mix\\.\n\n" +
 		"*/add* _<YouTube URL or search query>_\n" +
+		"*/addplaylist* _<YouTube playlist URL>_\n" +
 		"*/np* — current track\n" +
 		"*/queue* — bot's queue\n\n" +
 		"Any other message is forwarded to the club chat\\.\n" +
-		"👉 https://zapclub\\.io/club/c6f0f845fb2a3792"
+		"👉 https://zapclub\\.io/club/" + escMD(b.cfg.ClubID)
 	msg := tgbotapi.NewMessage(chatID, help)
 	msg.ParseMode = "MarkdownV2"
 	_, _ = b.tg.Send(msg)
@@ -584,7 +635,8 @@ func (b *Bridge) loadQueue(ctx context.Context, relay *nostr.Relay) {
 
 // ── YouTube search ────────────────────────────────────────────────────────────
 
-var ytIDRe = regexp.MustCompile(`(?:v=|youtu\.be/|shorts/|embed/)([a-zA-Z0-9_-]{11})`)
+var ytIDRe   = regexp.MustCompile(`(?:v=|youtu\.be/|shorts/|embed/)([a-zA-Z0-9_-]{11})`)
+var ytListRe = regexp.MustCompile(`[?&]list=([A-Za-z0-9_-]{10,64})`)
 
 type searchResult struct {
 	ID       string `json:"id"`
