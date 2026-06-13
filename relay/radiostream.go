@@ -105,7 +105,7 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 <audio id="audio" preload="none"></audio>
 
 <div class="player-ctrl">
-  <button class="btn-play" id="btn-play" onclick="togglePlay()" title="Play / Pause">▶</button>
+  <button class="btn-play" id="btn-play" onclick="userToggle()" title="Play / Pause">▶</button>
   <span class="live-badge" id="live-badge">LIVE</span>
   <input class="vol" type="range" id="vol" min="0" max="1" step="0.02" value="1"
          oninput="document.getElementById('audio').volume=+this.value" title="Volume">
@@ -124,29 +124,58 @@ body{background:#0d0d0f;color:#e2e8f0;font-family:system-ui,sans-serif;
 var STREAM = location.href.replace(/[?#].*$/, '').replace(/\/$/, '');
 var INFO = '/radio/{{CLUBID}}/info';
 var audio = document.getElementById('audio');
-audio.src = STREAM;
+var userPaused = false; // true only when user explicitly paused
+var reconnTimer = null;
 document.getElementById('m3u-btn').href = STREAM + '.m3u';
 
-audio.addEventListener('playing', function() { setLive(true); });
-audio.addEventListener('stalled', function() { setLive(false); });
-audio.addEventListener('error',   function() {
-  setLive(false);
-  document.getElementById('offline-msg').style.display = 'block';
-});
 function setLive(on) {
   document.getElementById('live-badge').style.display = on ? 'inline-block' : 'none';
+  document.getElementById('btn-play').textContent = on ? '⏸' : '▶';
 }
-function togglePlay() {
-  var btn = document.getElementById('btn-play');
+
+function startPlay() {
+  // Force a fresh connection by resetting src (avoids stale HTTP/2 stream).
+  audio.src = '';
+  audio.src = STREAM;
+  audio.load();
+  audio.play().catch(function() {
+    // Autoplay blocked by browser — show ▶ for user to click.
+    document.getElementById('btn-play').textContent = '▶';
+  });
+}
+
+function scheduleReconnect(delayMs) {
+  if (reconnTimer) return;
+  reconnTimer = setTimeout(function() {
+    reconnTimer = null;
+    if (!userPaused) startPlay();
+  }, delayMs || 3000);
+}
+
+audio.addEventListener('playing', function() {
+  setLive(true);
+  document.getElementById('offline-msg').style.display = 'none';
+});
+audio.addEventListener('stalled', function() { setLive(false); });
+audio.addEventListener('waiting', function() { setLive(false); });
+audio.addEventListener('ended',   function() { if (!userPaused) scheduleReconnect(1500); });
+audio.addEventListener('error',   function() {
+  setLive(false);
+  if (!userPaused) scheduleReconnect(4000); // track change gap: retry after 4 s
+});
+
+function userToggle() {
   if (audio.paused) {
-    audio.play().catch(function() {});
-    btn.textContent = '⏸';
+    userPaused = false;
+    clearTimeout(reconnTimer); reconnTimer = null;
+    startPlay();
   } else {
+    userPaused = true;
     audio.pause();
-    btn.textContent = '▶';
     setLive(false);
   }
 }
+
 function copyLink() {
   navigator.clipboard.writeText(STREAM).then(function() {
     var btn = document.getElementById('copy-btn');
@@ -176,6 +205,9 @@ function pollInfo() {
 }
 pollInfo();
 setInterval(pollInfo, 12000);
+
+// Auto-start on page load.
+startPlay();
 </script>
 </body>
 </html>`
