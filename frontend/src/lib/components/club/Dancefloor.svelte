@@ -12,7 +12,6 @@
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
   import { ownPremium } from '../../nostr/premium.svelte'
-  import VibeMeter from './VibeMeter.svelte'
   import ComingNext from './ComingNext.svelte'
 
   let {
@@ -236,9 +235,6 @@
   </div>
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
-  <div class="reactions">
-    <VibeMeter clubId={groupId} />
-  </div>
   <ComingNext clubId={groupId} />
 
   <!-- The dancing crowd (online members) — loose flat cluster. -->
@@ -320,7 +316,7 @@
   .head {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
+    gap: 0.45rem;
     margin-bottom: 0.7rem;
   }
   h3 {
@@ -331,7 +327,6 @@
     color: var(--text-dim);
     font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
-    margin-right: auto;
   }
   .dim {
     color: var(--text-dim);
@@ -475,12 +470,6 @@
     100% { opacity: 0; transform: translateY(-150px) scale(1); }
   }
 
-  .reactions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    margin-top: 0.5rem;
-  }
   .emote-bar {
     display: flex;
     gap: 0.4rem;

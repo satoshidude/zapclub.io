@@ -49,6 +49,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
+  import VibeMeter from './club/VibeMeter.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
   import Chat from './club/Chat.svelte'
   import { clubAvatar } from '../avatar'
@@ -746,6 +747,8 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
 
   <div class="club-body">
     <div class="main-col">
+      <VibeMeter clubId={groupId} />
+
       <!-- The floor: DJs up front, crowd behind. -->
       <Dancefloor
         {groupId}
@@ -828,7 +831,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   /* Desktop (≥700px): two-column grid, chat sticky on the right */
   @media (min-width: 700px) {
     .club-body {
-      grid-template-columns: 1fr 280px;
+      grid-template-columns: 60fr 40fr;
     }
     .chat-panel {
       position: sticky;
