@@ -1,0 +1,84 @@
+import { SimplePool } from 'nostr-tools/pool'
+import type { Event } from 'nostr-tools/pure'
+import type { ProfileMetadata } from './types'
+
+/**
+ * Public relays for user profiles (kind:0). Profiles are global, not club-local —
+ * they live in the open Nostr network, never on the NIP-29 relay.
+ */
+export const PROFILE_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.band', // indexer — kept for broad READ/search coverage
+  'wss://relay.primal.net',
+  'wss://offchain.pub', // probed: accepts writes + reads → extra write-redundancy
+]
+
+/**
+ * Our own NIP-29 relay (khatru + relay29) for club/group data.
+ * DNS relay.zapclub.io already points at the server.
+ */
+export const CLUB_RELAY = 'wss://relay.zapclub.io'
+
+/**
+ * Public key of our NIP-29 relay (its NIP-11 `pubkey`, derived from RELAY_SECRET_KEY).
+ * The relay IS the conductor: it authors now_playing (30100) + the play-log (1313) for every
+ * club, so clients accept those events from this key (not from an on-stage DJ) and never write
+ * now_playing themselves. Must match the live relay's key — verify via NIP-11 if it ever rotates.
+ */
+export const CLUB_RELAY_PUBKEY = 'b095f4347bab926917ccd36f371d1741e71d99079bb30562c2227dda29e0b8b1'
+
+/**
+ * Relays for NIP-57 zap receipts (kind 9735). The DJ's LNURL server publishes the
+ * receipt to the relays named in the zap request; the client reads them from the same
+ * list. Public relays — zap receipts are global, not club-scoped (the NIP-29 relay
+ * rejects events without an h-tag).
+ */
+// Lean + write-friendly: the LNURL server publishes the 9735 to exactly these relays (the
+// 9734 `relays` tag), and we read from the same list — so every entry must reliably ACCEPT
+// the zapper's write and be fast to read. nostr.band dropped (indexer: didn't store receipts,
+// connect errors). nsnip.io is whitelist-only for writes, but its own zapper is whitelisted
+// there → it publishes reliably to its home relay; we only read from it.
+export const ZAP_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+  'wss://relay.nsnip.io',
+]
+
+/**
+ * YouTube video ID that loops in the player when no DJ has active tracks.
+ * Set to '' to disable the lobby video (shows the static lobby overlay instead).
+ */
+export const LOBBY_VIDEO_ID = 'w8NRrAOS6s0'
+
+/** Shared pool for profile and club relays. */
+export const pool = new SimplePool()
+
+/** Reads the latest kind:0 profile of a pubkey from the public pool. */
+export async function fetchProfile(pubkey: string): Promise<ProfileMetadata | null> {
+  const event = await pool.get(PROFILE_RELAYS, { kinds: [0], authors: [pubkey] }, { maxWait: 4000 })
+  if (!event) return null
+  try {
+    return JSON.parse(event.content) as ProfileMetadata
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Publishes an already-signed kind:0 event to the profile relays.
+ * Throws if not a single relay accepted it.
+ */
+export async function publishProfile(event: Event): Promise<void> {
+  const results = await Promise.allSettled(pool.publish(PROFILE_RELAYS, event))
+  const ok = results.some((r) => r.status === 'fulfilled')
+  if (!ok) {
+    const reason = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+    throw new Error(reason?.reason?.toString() ?? 'No relay accepted the event')
+  }
+}
+
+export function closePool(): void {
+  pool.close([...PROFILE_RELAYS, CLUB_RELAY])
+}

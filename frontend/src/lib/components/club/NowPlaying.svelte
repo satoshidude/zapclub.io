@@ -1,0 +1,393 @@
+<script lang="ts">
+  import { sync, targetPosition } from '../../nostr/sync.svelte'
+  import { enrichMyTrackTitle, enrichMyTrackDuration, queues } from '../../nostr/queue.svelte'
+  import { auth } from '../../nostr/auth.svelte'
+  import Player from './Player.svelte'
+  import ZapButton from './ZapButton.svelte'
+
+  // The video lives INSIDE this card: small on the left by default to save space, with a zoom
+  // toggle that expands it to full content-width. The Player instance is never remounted on
+  // toggle (only CSS changes) → no reload, playback continues.
+  let {
+    onGoStage,
+    stageLabel = '',
+    clubId = '',
+    clubName = '',
+    canHear = false,
+    ctaText = '',
+    onCta,
+    onended,
+    onerror,
+    hasDjOnStage = false,
+  }: {
+    onGoStage?: () => void
+    stageLabel?: string
+    clubId?: string
+    clubName?: string
+    canHear?: boolean
+    ctaText?: string
+    onCta?: () => void
+    onended?: () => void
+    onerror?: (videoId: string) => void
+    hasDjOnStage?: boolean
+  } = $props()
+
+  const ZOOM_KEY = 'zapclub:videoZoom'
+  let zoomed = $state.raw((() => {
+    try {
+      return localStorage.getItem(ZOOM_KEY) === '1'
+    } catch {
+      return false
+    }
+  })())
+  function toggleZoom() {
+    zoomed = !zoomed
+    try {
+      localStorage.setItem(ZOOM_KEY, zoomed ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Reactive clock so the progress bar advances between now_playing events.
+  let nowMs = $state(Date.now())
+  $effect(() => {
+    const t = setInterval(() => (nowMs = Date.now()), 500)
+    return () => clearInterval(t)
+  })
+
+  const np = $derived(sync.live)
+  // Custom cover for the live track — looked up from the DJ's queue (the client already holds all
+  // DJ queues for the round-robin preview), so no relay/now_playing change is needed. Shown over
+  // the video for everyone in the club.
+  const coverImage = $derived.by(() => {
+    if (!np?.dj || !np?.videoId) return undefined
+    return queues.get(np.dj)?.tracks.find((t) => t.videoId === np.videoId)?.image
+  })
+
+  // Channel name reported live by the YouTube embed (getVideoData) — no extraction, no bot gate.
+  // Keyed to the videoId it belongs to, so it persists across now_playing heartbeats (same track,
+  // new object) and is ignored the moment the track changes — until the player reports the new one.
+  let ytMeta = $state({ vid: '', author: '' })
+
+  // Derive the artist from a YouTube channel ONLY when it carries a music marker ("Artist -
+  // Topic", "ArtistVEVO", "Artist Official") — mirrors the relay's artistFromChannel. A plain
+  // uploader channel yields "" (better no artist than a random uploader name).
+  function artistFromChannel(ch: string): string {
+    const c = (ch ?? '').trim()
+    if (!c || c === 'NA') return ''
+    const low = c.toLowerCase()
+    for (const m of [' - topic', ' official', ' officiel', 'vevo']) {
+      if (low.endsWith(m)) return c.slice(0, c.length - m.length).trim()
+    }
+    return ''
+  }
+
+  // Stored titles stay "Artist - Title" (Live Set, playlists). For DISPLAY the card splits
+  // them: the bare track title in the title row, the artist on its own meta line below.
+  // For a bare title without a dash the artist comes from the embed's channel (getVideoData).
+  const channelArtist = $derived(
+    np?.videoId && ytMeta.vid === np.videoId ? artistFromChannel(ytMeta.author) : '',
+  )
+  const parts = $derived.by(() => {
+    const full = np?.title || np?.videoId || ''
+    const m = full.match(/^(.+?) [–—-] (.+)$/)
+    if (m) return { artist: m[1], title: m[2] }
+    return { artist: channelArtist, title: full }
+  })
+
+  // Marquee: when the title is wider than its box, scroll it slowly back and forth instead of
+  // ellipsizing. Measure the overflow (re-measured on title/layout change via ResizeObserver).
+  let titleEl = $state<HTMLElement>()
+  let scrollPx = $state(0)
+  const marqueeDur = $derived(Math.max(9, Math.round(scrollPx / 14) + 6)) // slower for longer titles
+  $effect(() => {
+    void parts.title // re-measure when the title changes
+    const el = titleEl
+    if (!el) return
+    const measure = () => {
+      if (titleEl) scrollPx = Math.max(0, titleEl.scrollWidth - titleEl.clientWidth)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
+  const pos = $derived.by(() => {
+    void nowMs // re-evaluate on tick
+    return np ? targetPosition() : 0
+  })
+  const pct = $derived(np && np.duration > 0 ? Math.min(100, (pos / np.duration) * 100) : 0)
+
+  function fmt(s: number): string {
+    if (!s || s < 0) return '0:00'
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+</script>
+
+<div class="np card" class:zoomed>
+  {#if np}
+    <div class="np-head">
+      <ZapButton club={clubId} showDj={true} />
+    </div>
+  {/if}
+  <div class="np-main">
+    <div class="video">
+      <Player {canHear} {ctaText} {onCta} {onended} {onerror} compact={!zoomed} onmeta={(author) => {
+        if (!np) return
+        ytMeta = { vid: np.videoId, author }
+        // If this is MY track and its stored title is still bare, fold the artist in so it
+        // persists into the Live Set / playlists too (not just live in this card).
+        const a = artistFromChannel(author)
+        if (a && np.dj === auth.pubkey && np.title && !/ [–—-] /.test(np.title)) {
+          void enrichMyTrackTitle(clubId, np.videoId, `${a} - ${np.title}`)
+        }
+      }} onduration={(secs) => {
+        if (np && np.dj === auth.pubkey) void enrichMyTrackDuration(clubId, np.videoId, secs)
+      }} />
+      {#if coverImage}<img class="cover-img" src={coverImage} alt="" />{/if}
+      <button class="zoom" onclick={toggleZoom} title={zoomed ? 'Shrink video' : 'Expand video to full width'} aria-label={zoomed ? 'Shrink video' : 'Expand video'}>
+        {zoomed ? '⤡' : '⤢'}
+      </button>
+    </div>
+    <div class="meta">
+      {#if np}
+        <div class="info">
+          <div class="title-row">
+            <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="title" bind:this={titleEl} class:scroll={scrollPx > 0} style:--scroll="{scrollPx}px" style:--marquee-dur="{marqueeDur}s">
+              <span class="title-text">{parts.title}</span>
+            </span>
+          </div>
+        </div>
+        {#if np.auto}
+          <div class="autodj-badge">⚡ Auto DJ</div>
+        {:else if parts.artist}
+          <div class="artist">{parts.artist}</div>
+        {/if}
+        {#if np.auto && parts.artist}
+          <div class="artist">{parts.artist}</div>
+        {/if}
+      {:else}
+        <div class="idle">
+          {hasDjOnStage ? 'No tracks in queue — lobby is playing.' : 'No DJ on stage — lobby is playing.'}
+          {#if onGoStage && stageLabel}
+            <button class="stage-link" onclick={onGoStage}>{stageLabel}</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </div>
+  {#if np}
+    <div class="bar-row">
+      <div class="bar"><div class="fill" style:width="{pct}%"></div></div>
+      <span class="time">{fmt(pos)}{np.duration ? ' / ' + fmt(np.duration) : ''}</span>
+    </div>
+  {/if}
+</div>
+
+<style>
+  /* No border/padding/bg of its own — it sits inside the stage card; this saves vertical space
+     (the stage card already provides the frame + padding). */
+  .np {
+    background: transparent;
+    border: none;
+    padding: 0;
+  }
+  .np-head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .np-main {
+    display: flex;
+    gap: 0.8rem;
+    align-items: stretch;
+  }
+  /* Small video on the left (default). Player fills the container width at 16:9. */
+  .video {
+    position: relative;
+    flex: 0 0 40%;
+    max-width: 190px;
+    align-self: flex-start;
+  }
+  /* Custom cover shown over the video (the YouTube embed keeps playing the audio underneath).
+     pointer-events:none → taps still reach the player (tap-for-sound); below the zoom button. */
+  .cover-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    z-index: 1;
+  }
+  /* Zoomed: video on top, full content-width; meta below. */
+  .np.zoomed .np-main {
+    flex-direction: column;
+  }
+  .np.zoomed .video {
+    flex-basis: auto;
+    max-width: none;
+    width: 100%;
+  }
+  .zoom {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    z-index: 3;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 7px;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .zoom:hover {
+    background: rgba(0, 0, 0, 0.8);
+    border-color: var(--accent);
+  }
+  .meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  .np.zoomed .meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .info {
+    min-width: 0;
+  }
+  .artist {
+    margin-top: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .autodj-badge {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: var(--amber, #f59e0b);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+    font-size: 0.98rem;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .title-text {
+    display: inline-block;
+    white-space: nowrap;
+  }
+  /* Title wider than its box → scroll it slowly back and forth (marquee) instead of clipping. */
+  .title.scroll .title-text {
+    animation: title-marquee var(--marquee-dur, 12s) ease-in-out infinite;
+  }
+  @keyframes title-marquee {
+    0%, 12% { transform: translateX(0); }
+    50%, 62% { transform: translateX(calc(-1 * var(--scroll, 0px))); }
+    100% { transform: translateX(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .title.scroll .title-text {
+      animation: none;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+  .time {
+    flex: 0 0 auto;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Progress bar at the bottom, with the runtime attached on the right. */
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+  .bar {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    background: var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width 0.4s linear;
+  }
+  .idle {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    text-align: center;
+  }
+  .stage-link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.88rem;
+    cursor: pointer;
+    padding: 0 0 0 0.25rem;
+  }
+  .stage-link:hover {
+    text-decoration: underline;
+  }
+  /* Tiny equalizer animation. */
+  .eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+  .eq i {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    animation: eq 0.9s ease-in-out infinite;
+  }
+  .eq i:nth-child(1) { height: 40%; animation-delay: 0s; }
+  .eq i:nth-child(2) { height: 90%; animation-delay: 0.2s; }
+  .eq i:nth-child(3) { height: 60%; animation-delay: 0.4s; }
+  @keyframes eq {
+    0%, 100% { transform: scaleY(0.4); }
+    50% { transform: scaleY(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .eq i { animation: none; }
+  }
+</style>

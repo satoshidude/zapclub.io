@@ -1,0 +1,392 @@
+// E2E smoke test for the zapclub NIP-29 relay. Verifies the two lessons that
+// code review can't catch, plus membership write-protection:
+//   1. open club auto-join (9021 without approval) — relay29 must be on master
+//      (v0.5.1 inverts open/closed and breaks this)
+//   2. now_playing (kind 30100) ReplaceEvent dedup — two writes → exactly ONE row
+//   3. non-members cannot write content events
+//
+// Run: RELAY_URL=ws://127.0.0.1:3334 NODE_PATH=<nostr-tools dir> node grouptest.mjs
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { minePow } from 'nostr-tools/nip13'
+
+// PoW the relay requires (must be ≥ RELAY_POW_CHAT it boots with). Join (9021) isn't gated.
+const POWBITS = { 9: 12 }
+
+const URL = process.env.RELAY_URL || 'ws://127.0.0.1:3334'
+const now = () => Math.floor(Date.now() / 1000)
+const G = 'zc' + Math.random().toString(16).slice(2, 16)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+function conn(sk) {
+  const ws = new WebSocket(URL)
+  const pend = new Map()
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data.toString())
+    if (m[0] === 'AUTH') ws.send(JSON.stringify(['AUTH', finalizeEvent({ kind: 22242, created_at: now(), tags: [['relay', URL], ['challenge', m[1]]], content: '' }, sk)]))
+    else if (m[0] === 'OK') { const p = pend.get(m[1]); if (p) { pend.delete(m[1]); p([m[2], m[3]]) } }
+    else if (m[0] === 'EVENT') { const p = pend.get('r:' + m[1]); if (p) p.got.push(m[2]) }
+    else if (m[0] === 'EOSE') { const p = pend.get('r:' + m[1]); if (p) { pend.delete('r:' + m[1]); p.res(p.got) } }
+  }
+  const send = (e) => new Promise((r) => { pend.set(e.id, r); ws.send(JSON.stringify(['EVENT', e])) })
+  return new Promise((res) => { ws.onopen = () => setTimeout(() => res({
+    pub: getPublicKey(sk),
+    // ev() mines NIP-13 PoW for join/chat (as the real client does); evRaw() skips it.
+    ev: (t) => {
+      const bits = POWBITS[t.kind]
+      let tt = t
+      if (bits) { const m = minePow({ pubkey: getPublicKey(sk), created_at: t.created_at, kind: t.kind, tags: [...(t.tags || [])], content: t.content }, bits); tt = { kind: m.kind, created_at: m.created_at, tags: m.tags, content: m.content } }
+      return send(finalizeEvent(tt, sk))
+    },
+    evRaw: (t) => send(finalizeEvent(t, sk)),
+    query: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: r, got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
+  }), 400) })
+}
+const ok = (r) => (r[0] ? 'OK' : 'REJECT ' + r[1])
+let failures = 0
+const assert = (cond, msg) => { console.log((cond ? '  ✓ ' : '  ✗ FAIL ') + msg); if (!cond) failures++ }
+
+const hsk = generateSecretKey(), msk = generateSecretKey(), ssk = generateSecretKey()
+const host = await conn(hsk), mem = await conn(msk), stranger = await conn(ssk)
+console.log('club', G)
+
+// 1. create + open/public metadata
+await host.ev({ kind: 9007, created_at: now(), tags: [['h', G]], content: '' })
+await host.ev({ kind: 9002, created_at: now(), tags: [['h', G], ['name', 'E2E Club'], ['open'], ['public']], content: '' })
+await sleep(600)
+
+// 2. member self-joins an OPEN club without approval
+const join = await mem.ev({ kind: 9021, created_at: now(), tags: [['h', G]], content: '' })
+console.log('JOIN (open) ->', ok(join))
+await sleep(600)
+const members = (await host.query({ kinds: [39002], '#d': [G] }))
+const memberPubs = members.flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(memberPubs.includes(mem.pub), 'open club auto-join: member is in 39002')
+
+// 2a. LEAVE then REJOIN (open club). relay29 stores a remove-user record on a 9022 leave
+// and then (buggily) bars ALL future joins by that pubkey — clearRemovalBarOnJoin must
+// clear that stale record so the rejoin re-adds the member. Regression guard for the
+// "can't rejoin after leaving" bug.
+await mem.ev({ kind: 9022, created_at: now(), tags: [['h', G]], content: '' })
+await sleep(600)
+const afterLeave = (await host.query({ kinds: [39002], '#d': [G] }))
+  .flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(!afterLeave.includes(mem.pub), 'leave removes member from 39002')
+const rejoin = await mem.ev({ kind: 9021, created_at: now() + 1, tags: [['h', G]], content: '' })
+console.log('REJOIN (after leave) ->', ok(rejoin))
+await sleep(600)
+const afterRejoin = (await host.query({ kinds: [39002], '#d': [G] }))
+  .flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(afterRejoin.includes(mem.pub), 'rejoin after leave re-adds member to 39002')
+
+// 2b. NIP-13 PoW: chat without proof-of-work is rejected, with PoW accepted.
+const noPow = await mem.evRaw({ kind: 9, created_at: now(), tags: [['h', G]], content: 'no pow' })
+assert(noPow[0] === false && /pow/i.test(noPow[1] || ''), 'chat without PoW rejected: ' + ok(noPow))
+const yesPow = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'mined' })
+assert(yesPow[0] === true, 'chat with PoW accepted: ' + ok(yesPow))
+
+// 3. now_playing (30100) + play-log (1313) are relay-authored ONLY — even a MEMBER's write is
+//    rejected (the relay is the sole conductor). Guards against per-author tombstones. The
+//    ReplaceEvent dedup of the relay's OWN writes is asserted in the conductor section below.
+const memNp = await mem.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:AAA'], ['pos', '0']], content: 'member now_playing' })
+assert(memNp[0] === false && /relay-authored/.test(memNp[1] || ''), 'member now_playing (30100) write rejected: ' + ok(memNp))
+const memPlay = await mem.ev({ kind: 1313, created_at: now(), tags: [['h', G], ['p', mem.pub], ['pos', '0']], content: 'yt:AAA' })
+assert(memPlay[0] === false && /relay-authored/.test(memPlay[1] || ''), 'member play-log (1313) write rejected: ' + ok(memPlay))
+const npNone = await host.query({ kinds: [30100], '#h': [G] })
+assert(npNone.length === 0, `no now_playing stored from a member write (got ${npNone.length})`)
+
+// 4. non-member write is rejected
+const strangerWrite = await stranger.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:EVIL']], content: 'intruder' })
+assert(strangerWrite[0] === false, 'non-member write rejected: ' + ok(strangerWrite))
+
+// 4b. Paid-club entry gate (relay-enforced). Owner marks the club paid (30101); the test
+//     controls the "zapper" key so it can mint valid/invalid receipts. Then a joiner must
+//     present a valid 9735 to join.
+const zsk = generateSecretKey(), zpub = getPublicKey(zsk) // the club's entry LNURL zapper
+await host.ev({ kind: 30101, created_at: now(), tags: [['h', G], ['d', G], ['access', 'paid'], ['price', '5'], ['lud16', 'club@test'], ['zapper', zpub]], content: '' })
+await sleep(500)
+const jsk = generateSecretKey(), joiner = await conn(jsk)
+// build a 9735 receipt: embeds a 9734 signed by `signWith`, receipt signed by `byZapper`.
+const receipt = (signWith, byZapper, amountMsat, clubTag) => {
+  const zr = finalizeEvent({ kind: 9734, created_at: now(), tags: [['amount', String(amountMsat)], ['p', zpub], ['h', clubTag], ['club_entry', clubTag]], content: '' }, signWith)
+  return finalizeEvent({ kind: 9735, created_at: now(), tags: [['p', zpub], ['bolt11', 'lnbcfake'], ['description', JSON.stringify(zr)]], content: '' }, byZapper)
+}
+const joinWith = (j, proof) => j.ev({ kind: 9021, created_at: now(), tags: proof ? [['h', G], ['proof', JSON.stringify(proof)]] : [['h', G]], content: '' })
+
+assert((await joinWith(joiner))[0] === false, 'paid join WITHOUT proof rejected')
+const wrongSigner = await joinWith(joiner, receipt(jsk, generateSecretKey(), 5000, G)) // receipt not by the zapper
+assert(wrongSigner[0] === false, 'paid join with non-zapper receipt rejected: ' + ok(wrongSigner))
+const tooLow = await joinWith(joiner, receipt(jsk, zsk, 4000, G)) // 4 sats < 5
+assert(tooLow[0] === false, 'paid join with too-low amount rejected: ' + ok(tooLow))
+const notMine = await joinWith(joiner, receipt(generateSecretKey(), zsk, 5000, G)) // 9734 signed by someone else
+assert(notMine[0] === false, 'paid join with someone else’s payment rejected: ' + ok(notMine))
+// Stale receipt (>10min old) rejected — limits post-restart replay of an old proof.
+const staleZr = finalizeEvent({ kind: 9734, created_at: now() - 700, tags: [['amount', '5000'], ['p', zpub], ['h', G], ['club_entry', G]], content: '' }, jsk)
+const staleRec = finalizeEvent({ kind: 9735, created_at: now() - 700, tags: [['p', zpub], ['bolt11', 'lnbcstale'], ['description', JSON.stringify(staleZr)]], content: '' }, zsk)
+const stale = await joinWith(joiner, staleRec)
+assert(stale[0] === false && /expired/i.test(stale[1] || ''), 'paid join with a stale (>10min) receipt rejected: ' + ok(stale))
+const good = receipt(jsk, zsk, 5000, G)
+const okJoin = await joinWith(joiner, good)
+assert(okJoin[0] === true, 'paid join with a valid receipt accepted: ' + ok(okJoin))
+await sleep(400)
+const paidMembers = (await host.query({ kinds: [39002], '#d': [G] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+assert(paidMembers.includes(joiner.pub), 'paid joiner is now a member')
+await joiner.ev({ kind: 9022, created_at: now(), tags: [['h', G]], content: '' }) // leave
+await sleep(400)
+const replay = await joinWith(joiner, good) // try to rejoin reusing the SAME receipt
+assert(replay[0] === false && /already used/i.test(replay[1] || ''), 'replayed entry proof rejected: ' + ok(replay))
+
+// 4c. Server conductor: with a DJ on stage and a non-empty queue, the RELAY itself (not any
+//     client) publishes now_playing and advances the round-robin — the autonomous-playback
+//     core. Also verifies the relay honors a skip-request (kind 30107). Long track durations
+//     keep it deterministic (no time-based auto-advance/loop during the test). Needs RELAY_PK.
+if (process.env.RELAY_PK) {
+  const RPK = process.env.RELAY_PK
+  const C = 'zc' + Math.random().toString(16).slice(2, 16)
+  await host.ev({ kind: 9007, created_at: now(), tags: [['h', C]], content: '' })
+  await host.ev({ kind: 9002, created_at: now(), tags: [['h', C], ['name', 'Conductor'], ['open'], ['public']], content: '' })
+  await sleep(500)
+  // The DJ's QUEUE is the single source of truth: round-robin plays the top ACTIVE (not-`off`)
+  // track; a played track is marked `off` (client does this in prod — simulated here) and drops
+  // out; a re-activated track plays again. NO hidden relay played-set. Long durations → only an
+  // explicit skip advances during the test window.
+  const TT = [['VIDfirst001', 'First'], ['VIDsecond02', 'Second'], ['VIDthird0003', 'Third'], ['VIDfourth004', 'Fourth']]
+  const postQueue = (off) =>
+    host.ev({
+      kind: 30103,
+      created_at: now(),
+      tags: [['h', C], ['d', C], ...TT.map(([id, t]) => (off.includes(id) ? ['track', `yt:${id}`, t, '300', 'off'] : ['track', `yt:${id}`, t, '300']))],
+      content: '',
+    })
+  const npNow = async () => (await host.query({ kinds: [30100], '#h': [C] })).find((e) => e.pubkey === RPK)
+  const trackOf = (np) => np && np.tags.find((t) => t[0] === 'track')?.[1]
+  const posOf = (np) => (np && np.tags.find((t) => t[0] === 'pos')?.[1]) || '0'
+  const skip = async (np) => { await host.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posOf(np)]], content: '' }); await sleep(4000) }
+
+  await host.ev({ kind: 30102, created_at: now(), tags: [['h', C], ['d', C], ['since', String(now())]], content: '' })
+  await postQueue([]) // all active
+  await sleep(4000) // conductor tick is 2.5s → it bootstraps now_playing within a tick
+  let np = await npNow()
+  const npRows = (await host.query({ kinds: [30100], '#h': [C] })).filter((e) => e.pubkey === RPK)
+  assert(!!np, 'conductor: the RELAY published now_playing')
+  assert(npRows.length === 1, `conductor: now_playing dedup — exactly 1 relay row (got ${npRows.length})`)
+  assert(!!np && np.tags.find((t) => t[0] === 'dj')?.[1] === host.pub, 'conductor: now_playing dj = the stage DJ')
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: plays the top track of the queue (position 1)')
+
+  // Played track marked `off` → skip advances to the next ACTIVE track (off track drops out).
+  await postQueue(['VIDfirst001'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDsecond02', 'conductor: skip → next ACTIVE track (the off track is skipped)')
+
+  // Queue order is the truth: mark Second off too → top active is now Third.
+  await postQueue(['VIDfirst001', 'VIDsecond02'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDthird0003', 'conductor: top active track is next (queue is the source of truth)')
+
+  // RE-ACTIVATION: put First back to active (off→on) + mark Third off → a skip plays First AGAIN.
+  // This is the key rule: a re-activated track at the top replays; the visible queue always wins.
+  await postQueue(['VIDsecond02', 'VIDthird0003'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a re-activated track replays (visible queue wins, no hidden played-set)')
+
+  // role validation: a plain MEMBER (not owner/mod, not the playing DJ) cannot skip.
+  await mem.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
+  await sleep(800)
+  await mem.ev({ kind: 30107, created_at: now(), tags: [['h', C], ['d', C], ['pos', posOf(np)]], content: '' })
+  await sleep(4000)
+  np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
+
+  // broken-track quorum: 2 members report the running track (First) unplayable → relay skips it.
+  // Active tracks now: First (current), Fourth. Second/Third off → next active is Fourth.
+  await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
+  await sleep(800)
+  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
+  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
+  await sleep(4000)
+  np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: broken-track quorum (2 members) skips to the next active track')
+
+  // All tracks off → the stream stops to the lobby (nothing active to play; no auto-loop).
+  await postQueue(['VIDfirst001', 'VIDsecond02', 'VIDthird0003', 'VIDfourth004'])
+  await skip(np); np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: all tracks off → stops to the lobby (no active track, no loop)')
+  await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
+}
+
+// 4c-bis. Anti-loop regression: a single ACTIVE track that the client NEVER marks `off` must play
+//     once then stop to the lobby — not loop. (stop() used to clear the last videoID, so the next
+//     bootstrap re-picked the just-played track → the last song looped.) A short duration makes the
+//     relay auto-advance on its own clock; we never mark it off, then assert `pos` didn't climb.
+if (process.env.RELAY_PK) {
+  const RPK = process.env.RELAY_PK
+  const L = 'zc' + Math.random().toString(16).slice(2, 16)
+  console.log('\n-- conductor anti-loop --')
+  await host.ev({ kind: 9007, created_at: now(), tags: [['h', L]], content: '' })
+  await host.ev({ kind: 9002, created_at: now(), tags: [['h', L], ['name', 'Loop'], ['open'], ['public']], content: '' })
+  await sleep(500)
+  await host.ev({ kind: 30102, created_at: now(), tags: [['h', L], ['d', L], ['since', String(now())]], content: '' })
+  // One ACTIVE track, 1s duration; never marked `off`.
+  await host.ev({ kind: 30103, created_at: now(), tags: [['h', L], ['d', L], ['track', 'yt:LOOPtrack01', 'Only', '1']], content: '' })
+  const npL = async () => (await host.query({ kinds: [30100], '#h': [L] })).find((e) => e.pubkey === RPK)
+  const posN = (np) => Number((np && np.tags.find((t) => t[0] === 'pos')?.[1]) || '0')
+  await sleep(4000) // relay plays the track (tick 2.5s)
+  const first = await npL()
+  assert(!!first && first.tags.find((t) => t[0] === 'track')?.[1] === 'yt:LOOPtrack01', 'anti-loop: the single track started')
+  const pos1 = posN(first)
+  await sleep(9000) // 1s track ends; several ticks pass — buggy code would re-pick and loop
+  assert(posN(await npL()) === pos1, `anti-loop: last track did NOT loop (pos stayed ${pos1}, got ${posN(await npL())})`)
+  await host.ev({ kind: 9008, created_at: now(), tags: [['h', L]], content: '' }) // cleanup
+}
+
+// 4e. Private / invite-only clubs (premium feature).
+//     - non-premium owner cannot set ['closed'] or ['private'] on a 9002
+//     - admin API grant-premium; premium owner CAN then set the flags
+//     - closed group: 9021 is stored but NOT auto-added to 39002 (no auto-join reactor)
+//     - owner approves via 9000 put-user → joiner appears in 39002
+//     - private club absent from global {kinds:[39000]} listing (no #d filter)
+//     Uses ADMIN_SK + ADMIN_URL (same as section 5) so adminReq isn't needed — inline auth.
+//     Uses a fresh key to avoid the 3-club cap (host has already created G, C, L).
+if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
+  const P_ADMIN_URL = process.env.ADMIN_URL
+  const P_ASK = Uint8Array.from(Buffer.from(process.env.ADMIN_SK, 'hex'))
+  const grantPremium = async (pubkey) => {
+    const urlStr = P_ADMIN_URL + '/admin/grant-premium'
+    const auth = 'Nostr ' + Buffer.from(JSON.stringify(
+      finalizeEvent({ kind: 27235, created_at: now(), tags: [['u', urlStr], ['method', 'POST']], content: '' }, P_ASK),
+    )).toString('base64')
+    return fetch(urlStr, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey, months: 1 }) }).then((r) => r.status)
+  }
+
+  const GP = 'zcp' + Math.random().toString(16).slice(2, 16)
+  const privHostSk = generateSecretKey() // fresh key: 0 clubs → no cap hit
+  const privHost = await conn(privHostSk)
+  const joinerP = await conn(generateSecretKey())
+  console.log('\n-- private clubs (premium) --')
+
+  await privHost.ev({ kind: 9007, created_at: now(), tags: [['h', GP]], content: '' })
+  await privHost.ev({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['open'], ['public']], content: '' })
+  await sleep(400)
+
+  // Non-premium owner tries to set closed → rejected.
+  const npremReject = await privHost.evRaw({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
+  assert(npremReject[0] === false && (npremReject[1] || '').includes('Premium'), 'private gate: non-premium 9002 with closed/private rejected: ' + ok(npremReject))
+
+  // Grant premium via admin API.
+  const grantStatus = await grantPremium(privHost.pub)
+  assert(grantStatus === 200, 'admin /grant-premium → 200 (got ' + grantStatus + ')')
+  await sleep(400)
+
+  // Premium owner sets closed + private → accepted.
+  const premOk = await privHost.evRaw({ kind: 9002, created_at: now() + 1, tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
+  assert(premOk[0] === true, 'private gate: premium owner can set closed+private: ' + ok(premOk))
+  await sleep(400)
+
+  // Private club must NOT appear in global {kinds:[39000]} listing for non-members.
+  // (relay29: private groups are hidden from non-members in global listings; members/owner see them)
+  const globalMetaStranger = await stranger.query({ kinds: [39000] })
+  assert(!globalMetaStranger.some((e) => e.tags.some((t) => t[0] === 'd' && t[1] === GP)), 'private club absent from global 39000 listing (non-member)')
+
+  // Private club IS findable by direct #d lookup (invite-link access) — no auth required.
+  const directMeta = await stranger.query({ kinds: [39000], '#d': [GP] })
+  assert(directMeta.some((e) => e.tags.some((t) => t[0] === 'd' && t[1] === GP)), 'private club found by direct #d lookup (non-member)')
+
+  // Joiner self-joins a closed club → 9021 accepted (stored), but no auto-add to 39002.
+  await joinerP.ev({ kind: 9021, created_at: now(), tags: [['h', GP]], content: '' })
+  await sleep(600)
+  const membersAfterJoin = (await privHost.query({ kinds: [39002], '#d': [GP] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+  assert(!membersAfterJoin.includes(joinerP.pub), 'closed club: 9021 does NOT auto-add (no auto-join)')
+
+  // Owner approves via 9000 put-user → joiner appears in 39002.
+  await privHost.ev({ kind: 9000, created_at: now(), tags: [['h', GP], ['p', joinerP.pub]], content: '' })
+  await sleep(500)
+  const membersAfterApprove = (await privHost.query({ kinds: [39002], '#d': [GP] })).flatMap((e) => e.tags.filter((t) => t[0] === 'p').map((t) => t[1]))
+  assert(membersAfterApprove.includes(joinerP.pub), 'closed club: owner 9000 put-user admits the joiner')
+
+  await privHost.ev({ kind: 9008, created_at: now(), tags: [['h', GP]], content: '' }) // cleanup
+}
+
+// 4d. Zap leaderboard: a member's kind-20101 zap broadcast is aggregated by the relay and
+//     surfaced at the public GET /leaderboard endpoint (relay/leaderboard.go). Deduped by
+//     bolt11, self-zaps ignored, distinct senders counted. Needs the HTTP base (ADMIN_URL).
+if (process.env.ADMIN_URL) {
+  const LB = process.env.ADMIN_URL
+  console.log('\n-- zap leaderboard --')
+  // mem zaps host 210 sats; a duplicate (same bolt11) must NOT double-count.
+  const zb = await mem.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
+  assert(zb[0] === true, 'leaderboard: member zap broadcast (20101) accepted: ' + ok(zb))
+  await mem.ev({ kind: 20101, created_at: now() + 1, tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
+  await sleep(900)
+  const r = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(r.ranked === true && r.sats === 210, `leaderboard: host ranked with 210 sats (bolt11 dedup) — got ${JSON.stringify(r)}`)
+  assert(r.zappers === 1, `leaderboard: 1 distinct zapper — got ${r.zappers}`)
+  // a self-zap (sender == recipient) must be ignored.
+  await host.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '9999'], ['bolt11', 'self_e2e']], content: '' })
+  await sleep(700)
+  const r2 = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(r2.sats === 210, `leaderboard: self-zap ignored (still 210) — got ${r2.sats}`)
+  // someone with no received zaps is unranked.
+  const r3 = await fetch(LB + '/leaderboard?pubkey=' + stranger.pub).then((x) => x.json())
+  assert(r3.ranked === false, 'leaderboard: a user with no received zaps is unranked')
+}
+
+// 5. Superadmin HTTP API (NIP-98): ban + purge + replay + unban + delete-club.
+//    Only runs when ADMIN_SK (whose pubkey the relay was booted with as RELAY_SUPERADMIN)
+//    and ADMIN_URL are set — see e2e.sh, which wires it all up.
+let cleaned = false
+if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
+  const ADMIN_URL = process.env.ADMIN_URL
+  const ASK = Uint8Array.from(Buffer.from(process.env.ADMIN_SK, 'hex'))
+  // Returns {status, auth, body}; pass reuseAuth to replay an existing NIP-98 header.
+  const adminReq = async (path, method, body, reuseAuth) => {
+    const url = ADMIN_URL + path
+    const auth = reuseAuth || ('Nostr ' + Buffer.from(JSON.stringify(
+      finalizeEvent({ kind: 27235, created_at: now(), tags: [['u', url], ['method', method]], content: '' }, ASK),
+    )).toString('base64'))
+    const headers = { Authorization: auth }
+    if (body) headers['Content-Type'] = 'application/json'
+    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
+    return { status: res.status, auth, body: await res.text() }
+  }
+  console.log('\n-- admin API (NIP-98) --')
+
+  const noAuth = await fetch(ADMIN_URL + '/admin/bans')
+  assert(noAuth.status === 401, 'admin without auth → 401 (got ' + noAuth.status + ')')
+
+  // Listener analytics: a member's presence beat (kind 20100) is recorded and surfaces in
+  // /admin/listeners as a live listener of the club.
+  await mem.ev({ kind: 20100, created_at: now(), tags: [['h', G]], content: '' })
+  await sleep(400)
+  const lis = await adminReq('/admin/listeners', 'GET')
+  let lj = {}
+  try { lj = JSON.parse(lis.body) } catch { /* ignore */ }
+  const clubL = (lj.clubs || []).find((c) => c.id === G)
+  assert(lis.status === 200 && !!clubL && clubL.live.includes(mem.pub), 'listeners: member shows as live in the club')
+  assert(!!clubL && clubL.seen.some((s) => s.pubkey === mem.pub), 'listeners: member appears in the 24h seen list')
+
+  const ban = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub, reason: 'e2e' })
+  assert(ban.status === 200, 'ban → 200 (got ' + ban.status + ' ' + ban.body.slice(0, 60) + ')')
+  await sleep(500)
+
+  const afterBan = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'still here?' })
+  assert(afterBan[0] === false, 'banned member write rejected: ' + ok(afterBan))
+
+  const replay = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub }, ban.auth)
+  assert(replay.status === 401, 'NIP-98 token replay rejected → 401 (got ' + replay.status + ')')
+
+  const unban = await adminReq('/admin/unban', 'POST', { pubkey: mem.pub })
+  assert(unban.status === 200, 'unban → 200 (got ' + unban.status + ')')
+  await sleep(400)
+  const afterUnban = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'back' })
+  assert(afterUnban[0] === true, 'unbanned member can write again: ' + ok(afterUnban))
+
+  const del = await adminReq('/admin/delete-club', 'POST', { groupId: G })
+  assert(del.status === 200, 'delete-club → 200 (got ' + del.status + ')')
+  await sleep(600)
+  const metaAfter = await host.query({ kinds: [39000], '#d': [G] })
+  assert(metaAfter.length === 0, 'club metadata gone after delete-club (got ' + metaAfter.length + ')')
+  cleaned = true
+}
+
+if (!cleaned) await host.ev({ kind: 9008, created_at: now(), tags: [['h', G]], content: '' }) // delete group (cleanup)
+console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
+process.exit(failures === 0 ? 0 : 1)

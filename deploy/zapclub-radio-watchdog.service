@@ -1,0 +1,7 @@
+[Unit]
+Description=zapclub radio watchdog (stream health check + self-heal)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/zapclub-radio-watchdog.sh

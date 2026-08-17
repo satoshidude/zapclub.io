@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36" role="img" aria-label="zapclub turntable">
+  <g transform="translate(16,20) scale(1) translate(-16,-20)">
+    <circle cx="16" cy="20" r="13" fill="#1b0b33" stroke="#8e30eb" stroke-width="1.6"/>
+    <circle cx="16" cy="20" r="9.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4"/>
+    <circle cx="16" cy="20" r="6.5" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.3"/>
+    <circle cx="16" cy="20" r="3.6" fill="#22c55e"/>
+    <circle cx="16" cy="11.5" r="1.1" fill="#d8b4fe"/>
+    <circle cx="16" cy="20" r="1" fill="#1b0b33"/>
+    <line x1="29" y1="7" x2="20.5" y2="15.5" stroke="#c084fc" stroke-width="1.7" stroke-linecap="round"/>
+    <circle cx="29" cy="7" r="1.9" fill="#c084fc"/>
+  </g>
+</svg>

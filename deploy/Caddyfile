@@ -1,0 +1,69 @@
+# zapclub.io — Caddy reverse proxy / static host
+# www.zapclub.io currently points to a different IP, so it is intentionally
+# NOT included here (ACME cert would fail). Add it once DNS points at this box.
+
+{
+	email admin@zapclub.io
+}
+
+zapclub.io {
+	encode zstd gzip
+
+	# LNURL-pay (LUD-16) + NIP-05 — proxied to lnurlp_proxy on 3335.
+	# Must come before the SPA handle block (handle blocks are ordered).
+	handle /.well-known/lnurlp/* {
+		reverse_proxy 127.0.0.1:3335
+	}
+	handle /.well-known/nostr.json* {
+		reverse_proxy 127.0.0.1:3335
+	}
+
+	# YouTube search/playlist proxy → relay (yt-dlp). Same-origin so the frontend
+	# avoids CORS; the relay rate-limits these per IP.
+	handle /yt-search* {
+		reverse_proxy 127.0.0.1:3334
+	}
+	handle /yt-playlist* {
+		reverse_proxy 127.0.0.1:3334
+	}
+
+	# Everything else: static SPA with history-router fallback.
+	handle {
+		root * /var/www/zapclub
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://www.youtube.com https://s.ytimg.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com; img-src 'self' data: https:; connect-src 'self' https: wss:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'"
+		-Server
+	}
+}
+
+relay.zapclub.io {
+	# Nostr relay — WebSocket upgrade is handled transparently by reverse_proxy.
+	reverse_proxy 127.0.0.1:3334
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+	}
+}
+
+live.zapclub.io {
+	# LiveKit SFU — WebSocket signaling + WHIP ingress (OBS).
+	# Media (WebRTC) goes directly via UDP 50000-60000, bypassing Caddy.
+	reverse_proxy 127.0.0.1:7880
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Access-Control-Allow-Origin "*"
+	}
+}

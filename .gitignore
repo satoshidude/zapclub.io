@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Relay (Go)
+relay/zapclub-relay
+relay/*.test
+relay/conductor.db*
+relay/db/
+relay/badger/
+relay/banned.json
+relay/listeners.json
+relay/listeners.json.tmp
+relay/leaderboard.json
+relay/leaderboard.json.tmp
+
+# Secrets — NEVER commit
+relay/relay.env
+*.env
+!*.env.example
+
+# Internal docs / AI tooling — not for the public repo
+CLAUDE.md
+.claude/
+zapclub_grobkonzept.md
+tasks/
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Local build artifacts (deploy copies, never for the repo)
+telegram-bot/telegram-bot
+telegram-bot/zapclub-*
+/zapclub-relay
+/zapclub-relay-linux
+/zapclub-bot-linux
+/zapclub-telegram-bot-linux

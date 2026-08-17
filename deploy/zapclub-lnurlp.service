@@ -1,0 +1,23 @@
+[Unit]
+Description=zapclub.io LNURL + NIP-05 proxy
+After=network.target
+
+[Service]
+Type=simple
+User=webmaster
+WorkingDirectory=/home/webmaster
+ExecStart=/usr/bin/python3 /opt/zapclub/lnurlp_proxy.py
+Restart=on-failure
+RestartSec=5
+
+Environment=LNURL_FALLBACK_DOMAIN=nsnip.io
+Environment=LNURL_DOMAIN=zapclub.io
+Environment=RELAY_PUBLIC_URL=wss://relay.zapclub.io
+Environment=PORT=3335
+
+# Minimal hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

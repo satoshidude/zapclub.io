@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: go vet
+        run: go vet ./...
+        working-directory: relay
+      - name: go test
+        run: go test ./...
+        working-directory: relay
+      # e2e.sh symlinks ../frontend/node_modules for nostr-tools, builds the relay,
+      # boots a throwaway instance, and runs the full grouptest.mjs (incl. admin API).
+      - name: install frontend deps (nostr-tools for e2e)
+        run: npm ci
+        working-directory: frontend
+      - name: relay e2e
+        run: ./e2e.sh
+        working-directory: relay

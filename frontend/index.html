@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Turntable favicon for all devices: SVG (modern), PNG fallback, Apple touch icon
+         (iOS home screen), and the web manifest (Android/PWA install). -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0b0a10" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      /* Reset any pinch-zoom to scale=1 on every page load — keeps the PWA tight in the display. */
+      ;(function () {
+        var vp = document.querySelector('meta[name="viewport"]')
+        if (!vp) return
+        var base = vp.content
+        vp.content = base + ', maximum-scale=1.0'
+        setTimeout(function () { vp.content = base }, 500)
+      })()
+    </script>
+    <meta name="description" content="zapclub.io — Decentralized social music streaming. Open a club that belongs to you · Share your playlists and zap your crew." />
+    <title>zapclub.io — Decentralized social music streaming</title>
+
+    <!-- Open Graph / Twitter card: the preview others see when the site is shared. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="zapclub.io" />
+    <meta property="og:url" content="https://zapclub.io/" />
+    <meta property="og:title" content="zapclub.io — Decentralized social music streaming" />
+    <meta property="og:description" content="Open a club that belongs to you · Share your playlists and zap your crew." />
+    <meta property="og:image" content="https://zapclub.io/og.png" />
+    <meta property="og:image:width" content="510" />
+    <meta property="og:image:height" content="218" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="zapclub.io — Decentralized social music streaming" />
+    <meta name="twitter:description" content="Open a club that belongs to you · Share your playlists and zap your crew." />
+    <meta name="twitter:image" content="https://zapclub.io/og.png" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
