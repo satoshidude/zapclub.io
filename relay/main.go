@@ -337,15 +337,6 @@ func main() {
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
 
-	// LiveKit AV spaces (NIP-29 spec): 204 probe + token endpoint.
-	lkHandler := newLivekitHandler(
-		db, state, os.Getenv("SUPERADMIN"),
-		os.Getenv("LIVEKIT_API_KEY"), os.Getenv("LIVEKIT_API_SECRET"),
-		env("LIVEKIT_URL", ""),
-	)
-	relay.Router().HandleFunc("/.well-known/nip29/livekit", lkHandler.handle)
-	relay.Router().HandleFunc("/.well-known/nip29/livekit/", lkHandler.handle)
-
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
 	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners}
