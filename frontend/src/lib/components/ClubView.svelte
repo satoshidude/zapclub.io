@@ -719,39 +719,36 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
   <div class="club-body">
-    <div class="main-col">
-      <!-- The floor: DJs up front, crowd behind. -->
-      <Dancefloor
-        {groupId}
-        {members}
-        canChat={isMember}
-        {canModerate}
-        {isOwner}
-        {isMember}
-        {owner}
-        currentDj={sync.live?.dj ?? ''}
-        onkick={kick}
-        onpromote={promote}
-        ondelete={(id) => void deleteEvent(groupId, id)}
-      />
-      <!-- The user's own live playlist — feeds the round-robin. -->
-      {#if isMember}
-        <Queue {groupId} {canModerate} {isOwner} clubName={club?.name ?? ''} />
-      {:else}
-        <section class="join-hint">Join the club to step on stage and queue tracks.</section>
-      {/if}
-    </div>
+    <!-- The floor: DJs up front, crowd behind. -->
+    <Dancefloor
+      {groupId}
+      {members}
+      canChat={isMember}
+      {canModerate}
+      {isOwner}
+      {isMember}
+      {owner}
+      currentDj={sync.live?.dj ?? ''}
+      onkick={kick}
+      onpromote={promote}
+      ondelete={(id) => void deleteEvent(groupId, id)}
+    />
 
-    <!-- Right column: links · wallet · share -->
-    <div class="right-col">
-      <a class="aside-block aside-tg" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
-        <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
-        {club?.link ? communityLinkLabel(club.link) : 'Join Telegram'}
-      </a>
-      {#if auth.pubkey}
-        <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
-      {/if}
-    </div>
+    <a class="aside-block aside-tg" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
+      <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
+      {club?.link ? communityLinkLabel(club.link) : 'Join Telegram'}
+    </a>
+
+    <!-- The user's own live playlist — feeds the round-robin. -->
+    {#if isMember}
+      <Queue {groupId} {canModerate} {isOwner} clubName={club?.name ?? ''} />
+    {:else}
+      <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+    {/if}
+
+    {#if auth.pubkey}
+      <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
+    {/if}
   </div>
 
 </div>
@@ -766,31 +763,12 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     gap: 1rem;
   }
 
-  /* Club body: main column (floor + queue) + right column */
+  /* Club body: one full-width flow from dancefloor to community and queue. */
   .club-body {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1rem;
-    align-items: start;
-  }
-  .main-col {
     display: flex;
     flex-direction: column;
     gap: 1rem;
     min-width: 0;
-  }
-  .right-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    min-width: 0;
-  }
-
-
-  @media (min-width: 700px) {
-    .club-body {
-      grid-template-columns: 60fr 40fr;
-    }
   }
   .hero {
     background: var(--bg-elev);
