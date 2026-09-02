@@ -37,7 +37,6 @@ export const KIND_MOOD           = 20104 // ephemeral vibe vote: h=club, pos=tra
 export const KIND_LIVE_SESSION = 30109 // replaceable per DJ/club: live A/V session state
 export const KIND_AUTODJ = 30105      // replaceable per club (d=club): owner-armed auto-dj playlist
 export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-signed disarm marker
-export const KIND_STREAM = 30110      // replaceable per author/club: RTMP or radio stream status
 
 const RELAYS = [CLUB_RELAY]
 
@@ -494,24 +493,6 @@ export async function fetchLiveClubIds(clubIds: string[]): Promise<Set<string>> 
   return live
 }
 
-/** Club ids that currently have an active webradio stream (polls relay HTTP /info endpoint). */
-export async function fetchRadioClubIds(clubIds: string[]): Promise<Set<string>> {
-  const on = new Set<string>()
-  if (clubIds.length === 0) return on
-  await Promise.all(
-    clubIds.map(async (id) => {
-      try {
-        const r = await fetch(`https://relay.zapclub.io/radio/${id}/info`)
-        if (r.ok) {
-          const d = await r.json()
-          if (d.active) on.add(id)
-        }
-      } catch {}
-    }),
-  )
-  return on
-}
-
 /**
  * Opens a live subscription for kind 20100 (presence beats) across all given clubs.
  * Calls `onBeat(clubId, pubkey, ms)` on every incoming beat.
@@ -728,7 +709,6 @@ export interface ClubSubHandlers {
   onEmote?: (ev: Event) => void
   onAutoDJ?: (ev: Event) => void
   onAutoDJCtrl?: (ev: Event) => void
-  onStream?: (ev: Event) => void
   onMood?: (ev: Event) => void
   /** Called once after all stored events have been delivered (EOSE). */
   onEose?: () => void
@@ -757,7 +737,6 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_MOOD,
       KIND_AUTODJ,
       KIND_AUTODJ_CTRL,
-      KIND_STREAM,
     ],
     '#h': [groupId],
   }
@@ -798,7 +777,6 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
       else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
       else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
-      else if (ev.kind === KIND_STREAM) h.onStream?.(ev)
       else if (ev.kind === KIND_MOOD) h.onMood?.(ev)
     },
   })

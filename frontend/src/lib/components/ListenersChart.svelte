@@ -2,7 +2,7 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { goUser } from '../router.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
-  import type { ListenersResp, ClubListeners, StreamInfo } from '../nostr/admin'
+  import type { ListenersResp, ClubListeners } from '../nostr/admin'
 
   let { data, clubName }: { data: ListenersResp; clubName: (id: string) => string } = $props()
 
@@ -75,13 +75,6 @@
     return ticks
   })
 
-  // Stream info indexed by clubId for O(1) lookup
-  const streamByClub = $derived.by(() => {
-    const m = new Map<string, StreamInfo>()
-    for (const s of data.streams ?? []) m.set(s.clubId, s)
-    return m
-  })
-
   let expanded = $state<Record<string, boolean>>({})
   const fmtTime = (ms: number) =>
     new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -123,10 +116,6 @@
               <path d={sparkPath(c)} class="line" />
             </svg>
             <span class="live-badge" class:on={(c.live?.length ?? 0) > 0}>{c.live?.length ?? 0} now</span>
-            {#if streamByClub.get(c.id)?.enabled}
-              {@const si = streamByClub.get(c.id)!}
-              <span class="stream-badge" class:on={si.listeners > 0} title={si.title || 'Stream active'}>📻 {si.listeners}</span>
-            {/if}
             <span class="seen-n">{c.seen?.length ?? 0}</span>
           </button>
           {#if expanded[c.id]}
@@ -274,19 +263,6 @@
   .live-badge.on {
     color: var(--accent);
     border-color: var(--accent);
-    font-weight: 700;
-  }
-  .stream-badge {
-    flex: 0 0 auto;
-    font-size: 0.68rem;
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.05rem 0.45rem;
-  }
-  .stream-badge.on {
-    color: var(--amber);
-    border-color: var(--amber);
     font-weight: 700;
   }
   .seen-n {

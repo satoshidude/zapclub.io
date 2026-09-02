@@ -85,11 +85,6 @@ func sqlInitSchema(db *sql.DB) error {
 			expires INTEGER NOT NULL DEFAULT 0
 		);
 
-		CREATE TABLE IF NOT EXISTS radio_state (
-			club    TEXT PRIMARY KEY,
-			enabled INTEGER NOT NULL DEFAULT 0
-		);
-
 	`)
 	if err != nil {
 		return err

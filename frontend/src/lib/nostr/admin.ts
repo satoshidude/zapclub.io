@@ -67,19 +67,11 @@ export interface ClubListeners {
   series: ListenerSample[] // 24h count buckets (incl. the open one)
   seen: SeenListener[] // who listened in the window + their span
 }
-export interface StreamInfo {
-  clubId: string
-  listeners: number
-  enabled: boolean
-  title?: string
-}
-
 export interface ListenersResp {
   generatedAt: number
   bucketMs: number
   windowMs: number
   clubs: ClubListeners[]
-  streams?: StreamInfo[]
 }
 
 /** Live + 24h listener history per club, recorded by the relay from presence beats. */

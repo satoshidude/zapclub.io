@@ -132,7 +132,7 @@ deploy/        Caddy and systemd configuration
 
 ## Local development
 
-Requirements: Node.js/npm, Go, `yt-dlp` and `ffmpeg`.
+Requirements: Node.js/npm, Go and `yt-dlp`.
 
 ```sh
 cd frontend
@@ -167,8 +167,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o zapclub-relay-linux .
 
 1. Build `frontend/dist` and serve it as the `zapclub.io` document root.
 2. Install the relay binary and `deploy/zapclub-relay.service`.
-3. Configure `RELAY_SECRET_KEY`, database paths, Lightning integration and
-   optional radio dependencies in the service environment.
+3. Configure `RELAY_SECRET_KEY`, database paths and Lightning integration in
+   the service environment.
 4. Configure Caddy from `deploy/Caddyfile` for the frontend, WebSocket relay and
    HTTP endpoints.
 5. Preserve BadgerDB and `conductor.db` across releases.

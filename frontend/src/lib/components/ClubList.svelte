@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listClubs, joinClub, fetchLiveClubIds, fetchRadioClubIds, subscribeClubPresence, type MyClub } from '../nostr/groups'
+  import { listClubs, joinClub, fetchLiveClubIds, subscribeClubPresence, type MyClub } from '../nostr/groups'
   import { fetchMyClubs } from '../nostr/groups'
   import { goClub, goUser, goLeaderboard } from '../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
@@ -14,7 +14,6 @@
   let clubs = $state<Club[]>([])
   let myClubs = $state<MyClub[]>([])
   let liveClubIds = $state<Set<string>>(new Set())
-  let radioClubIds = $state<Set<string>>(new Set())
   let loading = $state(true)
   let error = $state('')
   let lbEntries = $state<LeaderboardEntry[]>([])
@@ -61,7 +60,6 @@
     }
     const ids = clubs.map((c) => c.id)
     void fetchLiveClubIds(ids).then((s) => (liveClubIds = s))
-    void fetchRadioClubIds(ids).then((s) => (radioClubIds = s))
   }
 
   async function join(id: string, ev: MouseEvent) {
@@ -140,7 +138,6 @@
               {#if (onlineCounts[club.id] ?? 0) > 0}
                 <span class="tag online">● {onlineCounts[club.id]} online</span>
               {/if}
-              {#if radioClubIds.has(club.id)}<span class="tag radio">📻 webradio</span>{/if}
               {#if club.access === 'paid'}<span class="tag paid">🔒 {club.price} sats</span>{/if}
             </div>
             {#if club.owner}
@@ -408,11 +405,6 @@
     color: var(--amber);
     border-color: var(--amber);
     font-weight: 700;
-  }
-  .tag.radio {
-    color: #a855f7;
-    border-color: #a855f7;
-    font-weight: 600;
   }
   .tag.online {
     color: #4ade80;

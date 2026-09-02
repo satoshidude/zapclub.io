@@ -37,15 +37,15 @@ import (
 var condPrem *premiumStore
 
 const (
-	condMaxDJs            = 5            // absolute max (premium clubs)
-	condMaxDJsFree        = 2            // non-premium clubs
-	condMaxDJsOrig        = 5            // kept for reference
-	condStageStaleMS      = 300_000      // sticky stage: max 5 min after last heartbeat (STALE_MS; client beats every 2 min)
-	condOnlineMS          = 50_000       // a DJ is "present" within this of their last 20100 beat
-	condHeartbeatMS       = 15_000       // now_playing republish cadence (latecomers + drift)
-	condExhaustedBackoff  = 60_000       // retry delay when all DJ queues are empty/played-through
-	condMaxTrackFallbackS = 600          // duration<=0 → cap so a missing-duration track ends
-	condTickMS            = 2500         // scheduler granularity (precise enough track-end)
+	condMaxDJs            = 5       // absolute max (premium clubs)
+	condMaxDJsFree        = 2       // non-premium clubs
+	condMaxDJsOrig        = 5       // kept for reference
+	condStageStaleMS      = 300_000 // sticky stage: max 5 min after last heartbeat (STALE_MS; client beats every 2 min)
+	condOnlineMS          = 50_000  // a DJ is "present" within this of their last 20100 beat
+	condHeartbeatMS       = 15_000  // now_playing republish cadence (latecomers + drift)
+	condExhaustedBackoff  = 60_000  // retry delay when all DJ queues are empty/played-through
+	condMaxTrackFallbackS = 600     // duration<=0 → cap so a missing-duration track ends
+	condTickMS            = 2500    // scheduler granularity (precise enough track-end)
 	kindNowPlaying        = 30100
 	kindStage             = 30102
 	kindQueue             = 30103
@@ -59,7 +59,7 @@ const (
 	brokenWindowMS        = 120_000    // a broken-track report counts as fresh this long
 	brokenQuorum          = 2          // distinct members reporting a track broken → skip it
 	brokenVidBlockMS      = 21_600_000 // a broken-SKIPPED video stays out of the rotation this long (6 h)
-	moodSkipThreshold     = 3       // distinct "skip" votes → advance to next track
+	moodSkipThreshold     = 3          // distinct "skip" votes → advance to next track
 )
 
 type condDJ struct {
@@ -82,8 +82,8 @@ type condClub struct {
 	title      string
 	duration   int
 	startedAt  int64 // ms (relay clock)
-	lastBeat int64 // ms of the last now_playing publish
-	playing  bool
+	lastBeat   int64 // ms of the last now_playing publish
+	playing    bool
 	inTakeover bool // true while a live-session (kind 30109, mode=takeover) is active
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
 	autoOrder []int
@@ -132,8 +132,8 @@ type conductor struct {
 	presMu sync.Mutex
 	pres   map[string]map[string]int64 // club → pubkey → last presence beat (ms)
 
-	brokenMu    sync.Mutex
-	broken      map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
+	brokenMu sync.Mutex
+	broken   map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
 
 	moodMu     sync.Mutex
 	moods      map[string]map[int]map[string]string // club → pos → pubkey → "banger" (bangers only)
@@ -142,13 +142,13 @@ type conductor struct {
 	// Per-club throttle timestamps; guarded by mu.
 	// Stored at conductor level (not inside condClub) so they survive condClub being
 	// deleted and recreated by the tick cleanup loop.
-	bootstrapAt  map[string]int64 // club → last bootstrap attempt ms
+	bootstrapAt  map[string]int64            // club → last bootstrap attempt ms
 	brokenSkipAt map[string]int64            // club → last broken-skip ms
 	brokenVids   map[string]map[string]int64 // club → videoID → broken-skip ts (ms); matrix blocks these
 
-	qLogMu  sync.Mutex
-	qLogged map[string]string // club:dj → fingerprint of the last logged queue state (change-only logging)
-	moodSkipAt   map[string]int64 // club → last mood-skip ms
+	qLogMu     sync.Mutex
+	qLogged    map[string]string // club:dj → fingerprint of the last logged queue state (change-only logging)
+	moodSkipAt map[string]int64  // club → last mood-skip ms
 
 	// queueWakeup is set by idxQueue (OnEventSaved goroutine) when a DJ-authored 30103 with
 	// active tracks arrives. driveClub reads and clears it under c.mu to reset the exhausted
@@ -156,15 +156,10 @@ type conductor struct {
 	// sync.Map is used to avoid adding c.mu to the OnEventSaved hot path.
 	queueWakeup sync.Map // club → struct{}{}
 
-	// trackPlaying is written by the conductor tick (under c.mu) and read lock-free by
-	// idxStage (OnEventSaved goroutine). True while a real track is actively playing so
-	// idxStage can decide whether to stop the radio immediately or let the track finish.
-	trackPlaying sync.Map // club → bool
-
 	// Event-driven in-memory indexes (populated by warmIndexes + observeEvent). Replacing
 	// per-tick full-table DB scans with O(1) lookups. Guarded by idxMu.
 	idxMu         sync.Mutex
-	stageIdx      map[string]map[string]stageEntry  // club → pubkey → newest 30102
+	stageIdx      map[string]map[string]stageEntry   // club → pubkey → newest 30102
 	kickIdx       map[string]map[string]int64        // club → dj → newest kick ms
 	queueIdx      map[string]map[string]*nostr.Event // club → pubkey → newest 30103
 	skipIdx       map[string]*nostr.Event            // club → newest 30107
@@ -173,7 +168,6 @@ type conductor struct {
 	ownerCache    map[string]string                  // club → creator pubkey (permanent)
 	premCache     map[string]premCacheEntry          // club → {valid bool, t ms}
 
-	radioMgr *radioManager // set after construction; nil = no radio
 }
 
 func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.State, sk string) *conductor {
@@ -186,11 +180,11 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 		broken:        map[string]map[string]map[string]int64{},
 		moods:         map[string]map[int]map[string]string{},
 		skipCounts:    map[string]map[int]map[string]int{},
-		bootstrapAt:  map[string]int64{},
-		brokenSkipAt: map[string]int64{},
-		brokenVids:   map[string]map[string]int64{},
-		qLogged:      map[string]string{},
-		moodSkipAt:   map[string]int64{},
+		bootstrapAt:   map[string]int64{},
+		brokenSkipAt:  map[string]int64{},
+		brokenVids:    map[string]map[string]int64{},
+		qLogged:       map[string]string{},
+		moodSkipAt:    map[string]int64{},
 		stageIdx:      map[string]map[string]stageEntry{},
 		kickIdx:       map[string]map[string]int64{},
 		queueIdx:      map[string]map[string]*nostr.Event{},
@@ -216,12 +210,12 @@ func (c *conductor) warmIndexes(ctx context.Context) {
 	}
 	staleWindow := nostr.Timestamp(time.Now().Unix() - 7200) // 2 h
 	kinds := []kindFilter{
-		{kindStage, staleWindow},    // 30102: heartbeat, stale after ~1 h
+		{kindStage, staleWindow},     // 30102: heartbeat, stale after ~1 h
 		{kindStageKick, staleWindow}, // 30106: kick marker, similarly time-bound
-		{kindQueue, 0},              // 30103: replaceable per DJ/club — keep all
-		{kindSkip, 0},               // 30107: replaceable per club — keep latest
-		{kindAutoDJ, 0},             // 30105: replaceable per club
-		{kindAutoDJCtrl, 0},         // 30111: relay-signed replaceable
+		{kindQueue, 0},               // 30103: replaceable per DJ/club — keep all
+		{kindSkip, 0},                // 30107: replaceable per club — keep latest
+		{kindAutoDJ, 0},              // 30105: replaceable per club
+		{kindAutoDJCtrl, 0},          // 30111: relay-signed replaceable
 	}
 	var wg sync.WaitGroup
 	for _, kf := range kinds {
@@ -377,69 +371,11 @@ func (c *conductor) idxStage(ev *nostr.Event) {
 		m = map[string]stageEntry{}
 		c.stageIdx[club] = m
 	}
-	updated := false
 	if ex, ok := m[ev.PubKey]; !ok || lastSeen > ex.lastSeen {
 		m[ev.PubKey] = entry
-		updated = true
 		log.Printf("conductor [%.8s] stage dj=%.8s on=%v since=%d createdAt=%d", club, ev.PubKey, entry.on, since, ev.CreatedAt)
 	}
-	// Snapshot the stage map to check for remaining active DJs outside the lock.
-	var stageSnap map[string]stageEntry
-	if updated && !entry.on && c.radioMgr != nil {
-		stageSnap = make(map[string]stageEntry, len(m))
-		for k, v := range m {
-			stageSnap[k] = v
-		}
-	}
 	c.idxMu.Unlock()
-
-	// When a DJ goes on stage, prefetch their first active track immediately so it
-	// starts downloading before the conductor tick selects it via advance().
-	if updated && entry.on && c.radioMgr != nil && c.radioMgr.cache != nil {
-		var firstVID string
-		c.idxMu.Lock()
-		if m := c.queueIdx[club]; m != nil {
-			if qev := m[ev.PubKey]; qev != nil {
-				for _, t := range qev.Tags {
-					if len(t) >= 2 && t[0] == "track" && strings.HasPrefix(t[1], "yt:") &&
-						(len(t) < 5 || t[4] != "off") {
-						firstVID = strings.TrimPrefix(t[1], "yt:")
-						break
-					}
-				}
-			}
-		}
-		c.idxMu.Unlock()
-		if firstVID != "" {
-			c.radioMgr.cache.prefetch(firstVID)
-		}
-	}
-
-	// If this DJ just went off-stage and no other active DJs remain, stop the radio
-	// immediately — don't wait for the next driveClub tick (which may be delayed by
-	// the condExhaustedBackoff when queues were recently exhausted).
-	if stageSnap != nil {
-		staleThreshold := lastSeen - condStageStaleMS
-		anyOn := false
-		for pk, e := range stageSnap {
-			if pk == ev.PubKey {
-				continue // the DJ who just left
-			}
-			if e.on && e.lastSeen >= staleThreshold {
-				anyOn = true
-				break
-			}
-		}
-		if !anyOn {
-			playing, _ := c.trackPlaying.Load(club)
-			if playing == true {
-				log.Printf("conductor [%.8s] last DJ off stage — track still playing, radio continues", club)
-			} else {
-				log.Printf("conductor [%.8s] last DJ off stage — no track, stopping radio", club)
-				c.radioMgr.onNoDJs(club)
-			}
-		}
-	}
 }
 
 func (c *conductor) idxKick(ev *nostr.Event) {
@@ -499,19 +435,6 @@ func (c *conductor) idxQueue(ev *nostr.Event) {
 	// events only mark tracks off and never add new playable ones, so they're excluded.
 	if !relayAuthored && queueHasActiveTracks(ev) {
 		c.queueWakeup.Store(club, struct{}{})
-		// Eagerly prefetch the first active track so the download starts now —
-		// before the next conductor tick fires advance() → acquireStreaming().
-		// This gives the WARP download a head-start so streamOnce can begin reading
-		// immediately when the track is selected (≥256 KB already on disk).
-		if c.radioMgr != nil && c.radioMgr.cache != nil {
-			for _, t := range ev.Tags {
-				if len(t) >= 2 && t[0] == "track" && strings.HasPrefix(t[1], "yt:") &&
-					(len(t) < 5 || t[4] != "off") {
-					c.radioMgr.cache.prefetch(strings.TrimPrefix(t[1], "yt:"))
-					break
-				}
-			}
-		}
 	}
 }
 
@@ -1166,36 +1089,13 @@ func (c *conductor) tick() {
 				if now-pb.lastBeat >= condHeartbeatMS {
 					c.publishNowPlaying(ctx, club, pb, now)
 				}
-				// Keep the radio following the resumed track too: after a relay restart
-				// this branch may be the ONLY driver of the club (no active DJs → no
-				// driveClub → no notifyRadio), leaving an enabled radio idle-unpaused —
-				// zero bytes for listeners and a watchdog restart loop. Idempotent:
-				// startStream no-ops while the same video is already streaming.
-				c.notifyRadio(club, pb.videoID, pb.title, pb.dj)
 				continue // keep club state alive
 			}
 			// Track finished — stop and fall through to delete.
 			c.stop(ctx, club, pb, now)
 			c.sqSaveState(club, pb)
 		}
-		if c.radioMgr != nil {
-			c.radioMgr.onNoDJs(club)
-		}
 		delete(c.clubs, club)
-	}
-	// Radio reconcile: an enabled, unpaused stream whose club the conductor is not
-	// driving (no active DJs, no auto-DJ, no resumed playback state) has nothing
-	// feeding its station — pause it so listeners see "paused" instead of a dead
-	// pipe (and the watchdog doesn't restart the relay for it). onNoDJs is
-	// idempotent and auto-resumes on the next onTrackChange.
-	if c.radioMgr != nil {
-		for _, club := range c.radioMgr.enabledUnpausedClubs() {
-			_, isActive := active[club]
-			_, isAuto := auto[club]
-			if !isActive && !isAuto && c.clubs[club] == nil {
-				c.radioMgr.onNoDJs(club)
-			}
-		}
 	}
 	// Real DJs take full priority — Auto DJ is a fallback only, never injected alongside.
 	for club, djs := range active {
@@ -1219,9 +1119,9 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 	now := time.Now().UnixMilli()
 	// Snapshot indexes under lock, then process without holding it.
 	type djSnap struct {
-		pubkey  string
-		entry   stageEntry
-		kickMs  int64 // newest kick for this dj in this club, or 0
+		pubkey string
+		entry  stageEntry
+		kickMs int64 // newest kick for this dj in this club, or 0
 	}
 	c.idxMu.Lock()
 	type clubSnap struct{ djs []djSnap }
@@ -1358,11 +1258,6 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 	if pb == nil {
 		pb = c.resume(ctx, club)
 		c.clubs[club] = pb
-		// Notify the radio manager of the resumed track so streams restart immediately
-		// after a relay restart (notifyRadio is otherwise only called by advance/stop).
-		if pb.playing && pb.videoID != "" {
-			c.notifyRadio(club, pb.videoID, pb.title, pb.dj)
-		}
 	}
 	djPks := make([]string, len(djs))
 	for i, d := range djs {
@@ -1468,9 +1363,6 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		c.stop(ctx, club, pb, now)
 		delete(c.played, club)
 		c.sqStopState(club, pb)
-		if c.radioMgr != nil {
-			c.radioMgr.onNoDJs(club)
-		}
 		return
 	}
 	mat := c.matrix(djPks, queues, pb, club, now)
@@ -1496,7 +1388,6 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		// DJs are handled per-DJ by the loop-reset in matrix(). The club-wide delete belongs
 		// only in the len(djPks)==0 path above (true session end), not here.
 		c.sqSaveState(club, pb) // persist playing=false; keep played rows
-		c.notifyRadio(club, "", "", "")
 		// Back off: all queues are empty, so retry in condExhaustedBackoff instead of
 		// condHeartbeatMS. driveClub set bootstrapAt=now before calling advance(); override
 		// it to suppress rapid retries while still checking again after a reasonable delay.
@@ -1509,7 +1400,6 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 		log.Printf("conductor [%.8s] stop: track index out of range di=%d ti=%d", club, di, ti)
 		c.stop(ctx, club, pb, now)
 		c.sqStopState(club, pb)
-		c.notifyRadio(club, "", "", "")
 		return
 	}
 	t := tracks[ti]
@@ -1521,7 +1411,6 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	pb.duration = t.duration
 	pb.startedAt = now
 	pb.playing = true
-	c.trackPlaying.Store(club, true)
 	// Always mark the track off in the DJ's queue via a relay-signed event and record it in the
 	// played-set. For offline/throttled DJs (browser tab inactive), this drains the queue to the
 	// lobby — the browser never fires reactivateMyQueue so the exhausted queue stays exhausted.
@@ -1540,16 +1429,6 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	c.publishNowPlaying(ctx, club, pb, now)
 	c.publishPlay(ctx, club, pb, now)
 	c.sqSaveState(club, pb)
-	c.notifyRadio(club, t.videoID, t.title, pb.dj)
-	// Prefetch the next track into the radio cache while the current one plays.
-	// Reuses the already-computed mat (flip current slot to false so fairNext skips it).
-	if c.radioMgr != nil && c.radioMgr.cache != nil {
-		mat[di][ti] = false
-		nextDi, nextTi := fairNext(djPks, djPks[di], mat)
-		if nextDi >= 0 && nextTi < len(queues[djPks[nextDi]]) {
-			c.radioMgr.cache.prefetch(queues[djPks[nextDi]][nextTi].videoID)
-		}
-	}
 	// Prune mood votes older than 2 positions to keep the maps bounded.
 	c.moodMu.Lock()
 	if cm := c.moods[club]; cm != nil {
@@ -1699,25 +1578,6 @@ func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int
 		c.publishNowPlayingPaused(ctx, club, pb, now)
 	}
 	pb.playing = false
-	c.trackPlaying.Store(club, false)
-}
-
-// currentVideoID returns the currently playing video for a club, or "" if stopped/lobby.
-func (c *conductor) currentVideoID(clubID string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	pb := c.clubs[clubID]
-	if pb == nil || !pb.playing {
-		return ""
-	}
-	return pb.videoID
-}
-
-// notifyRadio forwards track changes to the radio manager (no-op if radio is not set up).
-func (c *conductor) notifyRadio(clubID, videoID, title, dj string) {
-	if c.radioMgr != nil {
-		c.radioMgr.onTrackChange(clubID, videoID, title, dj)
-	}
 }
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───
@@ -2170,7 +2030,6 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		pb.playing = true
 		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
 		c.publishPlay(ctx, club, pb, now)
-		c.notifyRadio(club, t.videoID, t.title, st.owner)
 	}
 
 	if !pb.playing {
@@ -2263,7 +2122,7 @@ type stageGate struct {
 	superadmin string
 	// Set after the conductor is initialized (main.go) so reject() reads
 	// the conductor's in-memory indexes instead of querying BadgerDB.
-	countFn      func(club, sender string) (active int, alreadyOnStage bool)
+	countFn       func(club, sender string) (active int, alreadyOnStage bool)
 	isPremOwnerFn func(ctx context.Context, club string, now int64) bool
 }
 
@@ -2384,37 +2243,4 @@ func clubOwnerFromDB(ctx context.Context, db *badger.BadgerBackend, club string)
 		return ""
 	}
 	return newest.PubKey
-}
-
-// isOnStage reports whether pk currently holds an active stage slot in club.
-// Reads from the in-memory indexes (no DB). Used by the RTMP HTTP handler.
-func (c *conductor) isOnStage(club, pk string) bool {
-	now := time.Now().UnixMilli()
-	c.idxMu.Lock()
-	entry, ok := c.stageIdx[club][pk]
-	kickMs := c.kickIdx[club][pk]
-	c.idxMu.Unlock()
-	if !ok || !entry.on {
-		return false
-	}
-	if entry.lastSeen < now-condStageStaleMS {
-		return false
-	}
-	if kickMs > 0 && entry.lastSeen <= kickMs {
-		return false
-	}
-	return true
-}
-
-// currentTrack returns the currently playing videoID and the elapsed seconds for club.
-// Returns ("", 0) when nothing is playing. Used by the RTMP HTTP handler.
-func (c *conductor) currentTrack(club string) (videoID string, seekSec int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	pb := c.clubs[club]
-	if pb == nil || !pb.playing || pb.videoID == "" {
-		return "", 0
-	}
-	elapsed := (time.Now().UnixMilli() - pb.startedAt) / 1000
-	return pb.videoID, int(elapsed)
 }

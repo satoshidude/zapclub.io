@@ -110,8 +110,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     configEvs = {}
     stageResumed = false
     stageEoseReady = false
-    radioServerActive = null
-    radioErr = ''
     const me = auth.pubkey
     untrack(() => seedStageFromCache(id))
     const stop = subscribeClub(id, {
@@ -152,7 +150,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       onMood: ingestMood,
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
-      onStream: () => { /* stream status is polled from relay HTTP, not inferred from Nostr events */ },
       onEose: () => { stageEoseReady = true },
       onDeleteEvent: (ev) => {
         // Only honor deletions from an admin/moderator (or the author themselves).
@@ -539,60 +536,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     }
   }
 
-  import { startRadioStream, stopRadioStream } from '../nostr/radiostream'
-
-  const radioURL = $derived(`https://stream.zapclub.io/${groupId}`)
-
-  // Radio stream state: poll the relay's /radio/info endpoint (server-of-truth).
-  // The Nostr KIND_STREAM event is NOT used for status because the relay auto-restores
-  // streams from SQLite on restart without re-publishing that event, causing stale state.
-  let radioServerActive = $state<boolean | null>(null)
-  const radioActive = $derived(radioServerActive === true)
-  let radioBusy = $state(false)
-  let radioErr = $state('')
-
-  $effect(() => {
-    const id = groupId
-    if (!id) return
-    let timer: ReturnType<typeof setInterval> | null = null
-    async function checkRadio() {
-      try {
-        const res = await fetch(`https://relay.zapclub.io/radio/${id}/info`)
-        if (res.ok) {
-          const d = await res.json()
-          radioServerActive = d.active === true
-        }
-      } catch { /* offline or unreachable — leave previous value */ }
-    }
-    checkRadio()
-    timer = setInterval(checkRadio, 15000)
-    return () => { if (timer) clearInterval(timer) }
-  })
-
-  async function toggleRadio() {
-    if (radioBusy) return
-    radioBusy = true
-    radioErr = ''
-    const wasActive = radioActive
-    try {
-      if (wasActive) {
-        await stopRadioStream(groupId)
-        radioServerActive = false
-      } else {
-        await startRadioStream(groupId)
-        radioServerActive = true
-      }
-    } catch (e) {
-      const msg = String((e as Error)?.message ?? e)
-      if (msg.includes('premium required')) {
-        showPremModal = true
-      } else {
-        radioErr = msg
-      }
-    } finally {
-      radioBusy = false
-    }
-  }
 </script>
 
 <div class="wrap">
@@ -677,7 +620,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
         </div>
       </div>
     </div>
-    {#if radioErr}<div class="radio-bar"><span class="radio-err">{radioErr}</span></div>{/if}
 
     {#if editing}
       <div class="edit-form">
@@ -816,16 +758,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
 
     <!-- Right column: links · wallet · share -->
     <div class="right-col">
-      <div class="aside-block aside-radio" class:online={radioActive}>
-        <a class="radio-label" href="https://stream.zapclub.io/{groupId}" target="_blank" rel="noopener noreferrer">
-          📻 Web Radio <span class="radio-status">{radioActive ? 'online' : 'offline'}</span>
-        </a>
-        {#if isOwner}
-          <button class="radio-tog" onclick={toggleRadio} disabled={radioBusy} title={radioActive ? 'Stop stream' : 'Start stream'}>
-            {radioBusy ? '…' : radioActive ? '⏹' : '▶'}
-          </button>
-        {/if}
-      </div>
       <a class="aside-block aside-tg" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
         <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
         {club?.link ? communityLinkLabel(club.link) : 'Join Telegram'}
@@ -1233,48 +1165,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     text-align: center;
     transition: border-color 0.15s, color 0.15s, background 0.15s;
   }
-  /* Web Radio: red border when offline, green when online */
-  .aside-radio {
-    border-color: #ef4444;
-    color: #ef4444;
-    justify-content: space-between;
-  }
-  .aside-radio.online {
-    border-color: #22c55e;
-    color: #22c55e;
-  }
-  .radio-label {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: inherit;
-    text-decoration: none;
-    flex: 1;
-  }
-  .radio-status {
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.85;
-  }
-  .radio-tog {
-    flex: 0 0 auto;
-    background: none;
-    border: 1px solid currentColor;
-    border-radius: 6px;
-    color: inherit;
-    font-size: 0.8rem;
-    padding: 0.15rem 0.5rem;
-    cursor: pointer;
-    opacity: 0.8;
-    transition: opacity 0.15s, background 0.15s;
-  }
-  .radio-tog:hover:not(:disabled) {
-    opacity: 1;
-    background: color-mix(in srgb, currentColor 15%, transparent);
-  }
-  .radio-tog:disabled { opacity: 0.4; cursor: default; }
   /* Telegram block */
   .aside-tg {
     border-color: #2CA5E0;
@@ -1293,50 +1183,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     font-size: 0.85rem;
   }
   /* Player inside the hero — divider separates it from club info. */
-  .stream-banner {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.6rem;
-  }
-  .radio-bar {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    padding: 0.4rem 0 0;
-  }
-  .radio-toggle {
-    flex: 0 0 auto;
-  }
-  .radio-upsell {
-    border-color: var(--amber);
-    color: var(--amber);
-  }
-  .radio-upsell:hover {
-    background: color-mix(in srgb, var(--amber) 10%, transparent);
-  }
-  .radio-err {
-    font-size: 0.75rem;
-    color: var(--danger);
-    flex: 1 1 100%;
-  }
-  .btn-copy {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-dim);
-    font-size: 0.78rem;
-    padding: 0.1rem 0.35rem;
-    cursor: pointer;
-    line-height: 1;
-    transition: border-color 0.15s, color 0.15s;
-  }
-  .btn-copy:hover {
-    border-color: var(--accent, #7c3aed);
-    color: var(--accent, #a78bfa);
-  }
 
 
   .player-section {

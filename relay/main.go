@@ -324,13 +324,6 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
-	radioMgr := newRadioManager()
-	cond.radioMgr = radioMgr
-	// Warm the lobby video into the cache at startup so the first idle club
-	// gets it from disk without waiting for a WARP download.
-	if radioMgr.cache != nil && lobbyVideoID != "" && lobbyMP3Path == "" {
-		radioMgr.cache.prefetch(lobbyVideoID)
-	}
 	// SQLite for persistent conductor state (played-set + track state survive restarts)
 	// and premium status cache (eliminates per-check BadgerDB scans).
 	// Writer: MaxOpenConns(1), all INSERT/UPDATE/DELETE.
@@ -340,9 +333,8 @@ func main() {
 	} else {
 		cond.sq = sqw
 		cond.sqr = sqr
-		prem.sq = sqw                 // writes (grant/invalidate) go through the writer
-		prem.sqr = sqr                // reads (valid checks from gates) use the reader
-		radioMgr.initFromSQLite(sqw) // restore enabled streams across restarts
+		prem.sq = sqw  // writes (grant/invalidate) go through the writer
+		prem.sqr = sqr // reads (valid checks from gates) use the reader
 	}
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
@@ -365,9 +357,6 @@ func main() {
 	board := newZapBoard(env("RELAY_LEADERBOARD", "./leaderboard.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
 
-	radioH := &radioHandler{mgr: radioMgr, cond: cond}
-	relay.Router().Handle("/radio/", radioH) // GET listen + POST start/stop
-
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
@@ -386,7 +375,7 @@ func main() {
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners, radio: radioMgr, prem: prem}
+	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners, prem: prem}
 	relay.Router().HandleFunc("/admin/logs", handleLogs)
 	relay.Router().HandleFunc("/admin/access-logs", handleAccessLogs)
 	relay.Router().HandleFunc("/admin/bans", admin.handle)

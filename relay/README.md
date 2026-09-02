@@ -77,8 +77,3 @@ not a relay role.
 All gates live: `entryfee.go` (sats entry fee), `privategate.go` (closed/private
 clubs), `clubcap.go` (club count limit), `playlistgate.go` (playlist count limit),
 `stageGate` in `conductor.go` (DJ slot cap). All relay-enforced.
-
-Webradio live: `radiostream.go` fans out yt-dlp → ffmpeg audio per club at
-`/radio/<clubid>`; served via `stream.zapclub.io` (Caddy). Requires `yt-dlp`,
-`ffmpeg`, and `YTDLP_PROXY` pointing to a WARP SOCKS5 proxy (Hetzner IPs are
-IP-blocked by YouTube's InnerTube API).

@@ -190,19 +190,11 @@ type clubListeners struct {
 	Seen   []seenListener   `json:"seen"`   // who listened in the window + their span
 }
 
-type streamInfo struct {
-	ClubID    string `json:"clubId"`
-	Listeners int    `json:"listeners"`
-	Enabled   bool   `json:"enabled"`
-	Title     string `json:"title,omitempty"`
-}
-
 type listenersResp struct {
 	GeneratedAt int64           `json:"generatedAt"`
 	BucketMs    int64           `json:"bucketMs"`
 	WindowMs    int64           `json:"windowMs"`
 	Clubs       []clubListeners `json:"clubs"`
-	Streams     []streamInfo    `json:"streams,omitempty"`
 }
 
 func (s *listenerStats) snapshot(now int64) listenersResp {

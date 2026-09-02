@@ -61,7 +61,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter noise: drop high-frequency heartbeat/presence/radio-stream lines.
+	// Filter noise: drop high-frequency heartbeat and presence lines.
 	var lines []string
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
@@ -102,19 +102,19 @@ func normalizeSince(s string) string {
 // ── /admin/access-logs — Caddy HTTP access log summary ───────────────────────
 
 type accessSummary struct {
-	Since        string              `json:"since"`
-	GeneratedAt  string              `json:"generated_at"`
-	TotalReqs    int                 `json:"total_requests"`
-	UniqueIPs    int                 `json:"unique_ips"`
-	ByHost       map[string]hostStat `json:"by_host"`
-	TopIPs       []ipStat            `json:"top_ips"`
-	Bots         []uaStat            `json:"bots"`
-	Errors       []errorEntry        `json:"errors"`
+	Since       string              `json:"since"`
+	GeneratedAt string              `json:"generated_at"`
+	TotalReqs   int                 `json:"total_requests"`
+	UniqueIPs   int                 `json:"unique_ips"`
+	ByHost      map[string]hostStat `json:"by_host"`
+	TopIPs      []ipStat            `json:"top_ips"`
+	Bots        []uaStat            `json:"bots"`
+	Errors      []errorEntry        `json:"errors"`
 }
 
 type hostStat struct {
-	Count   int         `json:"count"`
-	TopURIs []uriCount  `json:"top_uris"`
+	Count    int            `json:"count"`
+	TopURIs  []uriCount     `json:"top_uris"`
 	Statuses map[string]int `json:"statuses"`
 }
 
@@ -123,8 +123,14 @@ type uriCount struct {
 	Count int    `json:"count"`
 }
 
-type ipStat  struct { IP string `json:"ip"`;  Count int `json:"count"` }
-type uaStat  struct { UA string `json:"ua"`;  Count int `json:"count"` }
+type ipStat struct {
+	IP    string `json:"ip"`
+	Count int    `json:"count"`
+}
+type uaStat struct {
+	UA    string `json:"ua"`
+	Count int    `json:"count"`
+}
 type errorEntry struct {
 	Status int    `json:"status"`
 	Host   string `json:"host"`
@@ -166,7 +172,7 @@ func handleAccessLogs(w http.ResponseWriter, r *http.Request) {
 
 	type entry struct {
 		host, uri, ip, ua string
-		status             int
+		status            int
 	}
 	var hits []entry
 	scanner := bufio.NewScanner(f)
@@ -215,7 +221,7 @@ func handleAccessLogs(w http.ResponseWriter, r *http.Request) {
 	// Build summary
 	ipCounts := map[string]int{}
 	uaCounts := map[string]int{}
-	hostMap  := map[string]*struct {
+	hostMap := map[string]*struct {
 		count    int
 		uris     map[string]int
 		statuses map[string]int
@@ -253,17 +259,23 @@ func handleAccessLogs(w http.ResponseWriter, r *http.Request) {
 		topIPs = append(topIPs, ipStat{ip, n})
 	}
 	sort.Slice(topIPs, func(i, j int) bool { return topIPs[i].Count > topIPs[j].Count })
-	if len(topIPs) > 10 { topIPs = topIPs[:10] }
+	if len(topIPs) > 10 {
+		topIPs = topIPs[:10]
+	}
 
 	// Top bots
 	topBots := make([]uaStat, 0, len(uaCounts))
 	for ua, n := range uaCounts {
 		s := ua
-		if len(s) > 80 { s = s[:80] }
+		if len(s) > 80 {
+			s = s[:80]
+		}
 		topBots = append(topBots, uaStat{s, n})
 	}
 	sort.Slice(topBots, func(i, j int) bool { return topBots[i].Count > topBots[j].Count })
-	if len(topBots) > 5 { topBots = topBots[:5] }
+	if len(topBots) > 5 {
+		topBots = topBots[:5]
+	}
 
 	// Per-host stats
 	byHost := map[string]hostStat{}
@@ -273,13 +285,19 @@ func handleAccessLogs(w http.ResponseWriter, r *http.Request) {
 			uris = append(uris, uriCount{u, n})
 		}
 		sort.Slice(uris, func(i, j int) bool { return uris[i].Count > uris[j].Count })
-		if len(uris) > 8 { uris = uris[:8] }
+		if len(uris) > 8 {
+			uris = uris[:8]
+		}
 		statuses := map[string]int{}
-		for k, v := range hm.statuses { statuses[k] = v }
+		for k, v := range hm.statuses {
+			statuses[k] = v
+		}
 		byHost[host] = hostStat{hm.count, uris, statuses}
 	}
 
-	if len(errors) > 15 { errors = errors[:15] }
+	if len(errors) > 15 {
+		errors = errors[:15]
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(accessSummary{
@@ -320,7 +338,6 @@ func parseDuration(s string) time.Duration {
 func shouldKeepLine(line string) bool {
 	noisy := []string{
 		"heartbeat", " hb ", "30102", "20100",
-		"radio [", "stream start", "stream end",
 		"BrokenPipeError", "Exception ignored",
 		"flushing sys.stdout",
 	}

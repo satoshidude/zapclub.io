@@ -168,7 +168,6 @@ type adminAPI struct {
 	bans      *banStore
 	state     *relay29.State
 	listeners *listenerStats
-	radio     *radioManager
 	prem      *premiumStore // may be nil before prem is wired
 }
 
@@ -196,9 +195,6 @@ func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
 		a.deleteClub(w, r)
 	case "/admin/listeners":
 		snap := a.listeners.snapshot(time.Now().UnixMilli())
-		if a.radio != nil {
-			snap.Streams = a.radio.streamStats()
-		}
 		a.writeJSON(w, snap)
 	case "/admin/grant-premium":
 		a.grantPremium(w, r)
