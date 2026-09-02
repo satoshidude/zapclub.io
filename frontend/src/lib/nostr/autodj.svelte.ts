@@ -105,7 +105,15 @@ export async function armAutoDJ(clubId: string, playlist: Playlist): Promise<voi
   // Optimistic update so the UI responds immediately.
   state.config = {
     ...state.config,
-    [clubId]: { clubId, armed: true, srcId: playlist.id, name: playlist.name, updatedAt: now() },
+    [clubId]: {
+      clubId,
+      armed: true,
+      srcId: playlist.id,
+      name: playlist.name,
+      ownerPubkey: '',
+      tracks: playlist.tracks,
+      updatedAt: now(),
+    },
   }
   // Clear the local disarm so the re-arm wins immediately.
   if (state.ctrl[clubId]) {

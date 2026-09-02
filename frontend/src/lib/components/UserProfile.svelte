@@ -28,8 +28,6 @@
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
-  import { ownPremium, isPremium, loadNwcConnection, saveNwcConnection, clearNwcConnection } from '../nostr/premium.svelte'
-  import PremiumModal from './PremiumModal.svelte'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
 
   let { npub }: { npub: string } = $props()
@@ -50,7 +48,6 @@
 
   let othersPlaylists = $state<Playlist[]>([])
   let loading = $state(true)
-  let viewedIsPremium = $state(false)
   let memberOf = $state<Club[]>([])
   let djingIn = $state<Club[]>([])
   let topClubId = $state<string | null>(null)
@@ -109,8 +106,6 @@
     zapRank = null
     void fetchZapRank(pk).then((r) => (zapRank = r))
     if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
-    viewedIsPremium = false
-    void isPremium(pk).then((v) => (viewedIsPremium = v))
   })
 
   // ── Create-club form (own profile only) ─────────────────────────────────
@@ -146,46 +141,7 @@
 
   // ── Profile editor (own profile only) ──────────────────────────────────
   let editing = $state(false)
-  let showPremModal = $state(false)
 
-  // ── NWC wallet state ──────────────────────────────────────────────────────
-  let nwcStored   = $state(!!loadNwcConnection())
-  let nwcBalance  = $state<number | null>(null)  // sats, null = not loaded
-  let nwcLoading  = $state(false)
-  let nwcEditOpen = $state(false)
-  let nwcInput    = $state('')
-  let nwcError    = $state('')
-
-  async function fetchNwcBalance() {
-    const conn = loadNwcConnection()
-    if (!conn) return
-    nwcLoading = true
-    nwcBalance = null
-    try {
-      const { NWCClient } = await import('@getalby/sdk/nwc')
-      const client = new NWCClient({ nostrWalletConnectUrl: conn })
-      const { balance } = await client.getBalance()
-      client.close()
-      nwcBalance = Math.round(balance / 1000) // msats → sats
-    } catch {
-      nwcBalance = null
-    } finally {
-      nwcLoading = false
-    }
-  }
-
-  function saveNwc() {
-    const s = nwcInput.trim()
-    if (!s.startsWith('nostr+walletconnect://')) { nwcError = 'Must start with nostr+walletconnect://'; return }
-    saveNwcConnection(s)
-    nwcStored = true; nwcEditOpen = false; nwcInput = ''; nwcError = ''
-    fetchNwcBalance()
-  }
-
-  function removeNwc() {
-    clearNwcConnection()
-    nwcStored = false; nwcBalance = null; nwcEditOpen = false
-  }
   let eName = $state('')
   let eAbout = $state('')
   let ePic = $state('')
@@ -408,14 +364,7 @@
 
   {#if isMe}
     <div class="profile-topbar">
-      <button class="prem-btn" class:prem-active={ownPremium.active} onclick={() => (showPremModal = true)} title="zapclub Premium">
-        {#if ownPremium.active}★ Premium{:else}⚡ Get Premium{/if}
-      </button>
       <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
-    </div>
-  {:else if viewedIsPremium}
-    <div class="profile-topbar">
-      <span class="prem-btn prem-active">★ Premium</span>
     </div>
   {/if}
   <header class="phead">
@@ -423,8 +372,6 @@
     <div class="pinfo">
       <h1>
         {displayName(pubkey, profile)}
-        {#if isMe && ownPremium.active}<span class="prem-inline">★</span>
-        {:else if !isMe && viewedIsPremium}<span class="prem-inline">★</span>{/if}
       </h1>
       <div class="pid">
         <span class="npub">{npub.slice(0, 18)}…</span>
@@ -537,58 +484,6 @@
     </section>
   {/if}
 
-  {#if isMe}
-    <section class="card wallet-card">
-      <div class="wallet-head">
-        <h2>⚡ Wallet (NWC)</h2>
-        {#if nwcStored}
-          <button class="wallet-refresh" onclick={fetchNwcBalance} disabled={nwcLoading} title="Refresh balance">
-            {nwcLoading ? '…' : '↻'}
-          </button>
-        {/if}
-      </div>
-
-      {#if nwcStored && !nwcEditOpen}
-        <div class="wallet-status">
-          <span class="wallet-dot connected"></span>
-          <span class="wallet-label">Connected</span>
-          {#if nwcBalance !== null}
-            <span class="wallet-balance">{nwcBalance.toLocaleString()} sats</span>
-          {:else if !nwcLoading}
-            <button class="wallet-load-bal" onclick={fetchNwcBalance}>Check balance</button>
-          {/if}
-        </div>
-        <p class="wallet-hint">Auto-renews premium · pays 1-sat VibeMeter votes in background</p>
-        <div class="wallet-actions">
-          <button class="btn-sm-ghost" onclick={() => (nwcEditOpen = true)}>Change connection</button>
-          <button class="btn-sm-danger" onclick={removeNwc}>Remove</button>
-        </div>
-      {:else if nwcEditOpen || !nwcStored}
-        {#if !nwcStored}
-          <div class="wallet-status">
-            <span class="wallet-dot"></span>
-            <span class="wallet-label dim">Not connected</span>
-          </div>
-          <p class="wallet-hint">Connect a NWC wallet (e.g. Alby Hub) to enable auto-renew and 1-tap zapping from the Vibe Meter.</p>
-        {/if}
-        <input
-          class="nwc-input"
-          type="password"
-          placeholder="nostr+walletconnect://..."
-          bind:value={nwcInput}
-          onkeydown={(e) => e.key === 'Enter' && saveNwc()}
-        />
-        {#if nwcError}<p class="nwc-err">{nwcError}</p>{/if}
-        <div class="wallet-actions">
-          <button class="btn-sm-primary" onclick={saveNwc} disabled={!nwcInput.trim()}>Save</button>
-          {#if nwcEditOpen}
-            <button class="btn-sm-ghost" onclick={() => { nwcEditOpen = false; nwcInput = ''; nwcError = '' }}>Cancel</button>
-          {/if}
-        </div>
-      {/if}
-    </section>
-  {/if}
-
   {#if canSeePrivate && likedTracks.length > 0}
     <section class="card liked">
       <h2>🔥 {isMe ? 'Tracks you liked' : 'Liked tracks'} <span class="count">{likedTracks.length}</span></h2>
@@ -644,13 +539,9 @@
     <div class="clubs-head">
       <h2>Clubs {#if memberOf.length}<span class="count">{memberOf.length}</span>{/if}</h2>
       {#if isMe && auth.canSign}
-        {#if ownedClubCount < 1 || ownPremium.active && ownedClubCount < 3}
+        {#if ownedClubCount < 3}
           <button class="btn btn-ghost btn-sm" onclick={() => (showClubCreate = !showClubCreate)}>
             {showClubCreate ? 'Cancel' : '+ New club'}
-          </button>
-        {:else}
-          <button class="prem-btn" onclick={() => (showPremModal = true)} title="Upgrade for more clubs">
-            ⚡ More clubs — Premium
           </button>
         {/if}
       {/if}
@@ -664,16 +555,10 @@
           <textarea class="in" bind:value={clubAbout} rows="2" maxlength="280" placeholder="What's this club about?"></textarea>
         </label>
         <div class="field-row">
-          {#if ownPremium.active}
-            <label class="toggle-label">
-              <input type="checkbox" bind:checked={createPrivate} />
-              🔒 Private (invite-only, hidden from non-members)
-            </label>
-          {:else}
-            <button type="button" class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
-              🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
-            </button>
-          {/if}
+          <label class="toggle-label">
+            <input type="checkbox" bind:checked={createPrivate} />
+            🔒 Private (invite-only, hidden from non-members)
+          </label>
         </div>
         {#if clubCreateErr}<p class="err">{clubCreateErr}</p>{/if}
         <button class="btn btn-primary btn-sm" disabled={!clubName.trim() || clubCreating}>
@@ -698,14 +583,10 @@
     <div class="pls-head">
       <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
       {#if isMe}
-        {#if ownPremium.active || list.length < 1}
-          <form class="new-pl" onsubmit={(e) => { e.preventDefault(); void doCreate() }}>
-            <input class="in" bind:value={newName} placeholder="New playlist name…" maxlength="60" />
-            <button class="btn btn-primary btn-sm" disabled={!newName.trim() || creating}>＋ New</button>
-          </form>
-        {:else}
-          <button class="prem-btn" onclick={() => (showPremModal = true)} title="Upgrade for unlimited playlists">⚡ More playlists — Premium</button>
-        {/if}
+        <form class="new-pl" onsubmit={(e) => { e.preventDefault(); void doCreate() }}>
+          <input class="in" bind:value={newName} placeholder="New playlist name…" maxlength="60" />
+          <button class="btn btn-primary btn-sm" disabled={!newName.trim() || creating}>＋ New</button>
+        </form>
       {/if}
     </div>
 
@@ -810,10 +691,6 @@
   />
 {/if}
 
-{#if showPremModal}
-  <PremiumModal onClose={() => (showPremModal = false)} />
-{/if}
-
 <style>
   .wrap {
     max-width: 680px;
@@ -906,12 +783,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.2rem;
-  }
-  .prem-inline {
-    font-size: 0.7em;
-    color: var(--amber, #f59e0b);
-    vertical-align: middle;
-    margin-left: 0.25em;
   }
   .pavatar {
     width: 64px;
@@ -1072,26 +943,6 @@
   .logout-btn:hover {
     border-color: var(--danger);
     color: var(--danger);
-  }
-  .prem-btn {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--amber, #f59e0b);
-    color: var(--amber, #f59e0b);
-    border-radius: 999px;
-    padding: 0.3rem 0.7rem;
-    font-size: 0.78rem;
-    cursor: pointer;
-  }
-  .prem-btn.prem-active {
-    border-color: #22c55e;
-    color: #22c55e;
-    background: color-mix(in srgb, #22c55e 10%, var(--bg-elev-2));
-  }
-  .prem-btn.prem-active:hover {
-    background: color-mix(in srgb, #22c55e 18%, var(--bg-elev-2));
-  }
-  .prem-btn:hover {
-    background: color-mix(in srgb, var(--amber, #f59e0b) 12%, transparent);
   }
   .editor {
     display: flex;
@@ -1403,26 +1254,6 @@
   .toggle-label input[type="checkbox"] {
     accent-color: var(--accent-2);
     cursor: pointer;
-  }
-  .toggle-upsell {
-    background: none;
-    border: none;
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    opacity: 0.6;
-  }
-  .toggle-upsell:hover { opacity: 1; }
-  .prem-tag {
-    font-size: 0.75rem;
-    color: var(--amber);
-    background: color-mix(in srgb, var(--amber) 12%, transparent);
-    border-radius: 4px;
-    padding: 0.1rem 0.4rem;
   }
   .club-list {
     display: flex;
@@ -1755,59 +1586,4 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* ── Wallet card ── */
-  .wallet-card { display: flex; flex-direction: column; gap: 0.55rem; }
-  .wallet-head { display: flex; align-items: center; gap: 0.5rem; }
-  .wallet-head h2 { margin: 0; }
-  .wallet-refresh {
-    background: none; border: none; color: var(--text-dim);
-    font-size: 1rem; cursor: pointer; padding: 0 0.2rem;
-  }
-  .wallet-refresh:hover { color: var(--text); }
-  .wallet-status { display: flex; align-items: center; gap: 0.5rem; }
-  .wallet-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #444; flex-shrink: 0;
-  }
-  .wallet-dot.connected { background: #4caf50; box-shadow: 0 0 6px #4caf5088; }
-  .wallet-label { font-size: 0.85rem; }
-  .wallet-label.dim { color: var(--text-dim); }
-  .wallet-balance {
-    margin-left: auto;
-    font-size: 0.9rem; font-weight: 700; color: var(--amber);
-    font-variant-numeric: tabular-nums;
-  }
-  .wallet-load-bal {
-    margin-left: auto;
-    background: none; border: none; color: var(--accent);
-    font-size: 0.8rem; cursor: pointer; padding: 0;
-    text-decoration: underline;
-  }
-  .wallet-hint { margin: 0; font-size: 0.78rem; color: var(--text-dim); }
-  .wallet-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .nwc-input {
-    width: 100%; box-sizing: border-box;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
-    color: var(--text); font-size: 0.82rem; font-family: monospace;
-  }
-  .nwc-input:focus { outline: none; border-color: var(--accent-2); }
-  .nwc-err { margin: 0; font-size: 0.75rem; color: var(--danger); }
-  .btn-sm-primary {
-    background: var(--accent); border: none; border-radius: 6px;
-    color: #fff; font-size: 0.78rem; font-weight: 600;
-    padding: 0.3rem 0.75rem; cursor: pointer;
-  }
-  .btn-sm-primary:disabled { opacity: 0.4; cursor: default; }
-  .btn-sm-ghost {
-    background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text-dim); font-size: 0.78rem;
-    padding: 0.3rem 0.75rem; cursor: pointer;
-  }
-  .btn-sm-ghost:hover { border-color: var(--text-dim); color: var(--text); }
-  .btn-sm-danger {
-    background: none; border: 1px solid var(--danger); border-radius: 6px;
-    color: var(--danger); font-size: 0.78rem;
-    padding: 0.3rem 0.75rem; cursor: pointer;
-  }
 </style>

@@ -11,7 +11,6 @@
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
-  import { ownPremium } from '../../nostr/premium.svelte'
   import VibeMeter from './VibeMeter.svelte'
   import ComingNext from './ComingNext.svelte'
 

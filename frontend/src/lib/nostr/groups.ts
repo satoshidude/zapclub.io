@@ -119,7 +119,7 @@ export async function createClub(
 /**
  * Edits club metadata (name/about/picture/visibility). Only the host/admin may do this —
  * the relay enforces the role. Pass `isPrivate:true` to make a club invite-only and hidden
- * from non-members (requires premium on the relay side).
+ * from non-members.
  */
 export async function editClub(
   groupId: string,
@@ -439,14 +439,6 @@ export async function listClubs(): Promise<Club[]> {
     configAt.set(id, ev.created_at)
     configs.set(id, parseClubConfig(ev))
   }
-  // Check premium status for all owners to gate featured listing.
-  const { isPremium } = await import('./premium.svelte')
-  const ownerPubs = [...new Set([...owners.values()])]
-  const premiumSet = new Set<string>()
-  await Promise.all(ownerPubs.map(async (pk) => {
-    if (await isPremium(pk)) premiumSet.add(pk)
-  }))
-
   const clubs = metaEvents
     .map(parseClubMetadata)
     .filter((c) => c.id)
@@ -456,11 +448,11 @@ export async function listClubs(): Promise<Club[]> {
       owner: owners.get(c.id) || undefined,
       access: configs.get(c.id)?.access ?? 'open',
       price: configs.get(c.id)?.price ?? 0,
-      featured: !!(configs.get(c.id)?.featured && owners.get(c.id) && premiumSet.has(owners.get(c.id)!)),
+      featured: !!configs.get(c.id)?.featured,
     }))
     .filter((c) => (c.memberCount ?? 0) > 0)
 
-  // Featured clubs (owner has active premium) sort first, then by member count.
+  // Featured clubs sort first, then by member count.
   clubs.sort((a, b) => {
     if (a.featured !== b.featured) return a.featured ? -1 : 1
     return (b.memberCount ?? 0) - (a.memberCount ?? 0)
@@ -505,7 +497,7 @@ export function subscribeClubPresence(
   if (clubIds.length === 0) return () => {}
   const sub = pool.subscribeMany(
     RELAYS,
-    [{ kinds: [KIND_PRESENCE], '#h': clubIds }],
+    { kinds: [KIND_PRESENCE], '#h': clubIds },
     {
       onevent(ev) {
         const h = ev.tags.find((t) => t[0] === 'h')?.[1]

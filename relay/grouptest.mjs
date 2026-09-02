@@ -238,47 +238,26 @@ if (process.env.RELAY_PK) {
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', L]], content: '' }) // cleanup
 }
 
-// 4e. Private / invite-only clubs (premium feature).
-//     - non-premium owner cannot set ['closed'] or ['private'] on a 9002
-//     - admin API grant-premium; premium owner CAN then set the flags
+// 4e. Private / invite-only clubs.
+//     - every owner can set ['closed'] and ['private'] on a 9002
 //     - closed group: 9021 is stored but NOT auto-added to 39002 (no auto-join reactor)
 //     - owner approves via 9000 put-user → joiner appears in 39002
 //     - private club absent from global {kinds:[39000]} listing (no #d filter)
-//     Uses ADMIN_SK + ADMIN_URL (same as section 5) so adminReq isn't needed — inline auth.
 //     Uses a fresh key to avoid the 3-club cap (host has already created G, C, L).
-if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
-  const P_ADMIN_URL = process.env.ADMIN_URL
-  const P_ASK = Uint8Array.from(Buffer.from(process.env.ADMIN_SK, 'hex'))
-  const grantPremium = async (pubkey) => {
-    const urlStr = P_ADMIN_URL + '/admin/grant-premium'
-    const auth = 'Nostr ' + Buffer.from(JSON.stringify(
-      finalizeEvent({ kind: 27235, created_at: now(), tags: [['u', urlStr], ['method', 'POST']], content: '' }, P_ASK),
-    )).toString('base64')
-    return fetch(urlStr, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ pubkey, months: 1 }) }).then((r) => r.status)
-  }
-
+{
   const GP = 'zcp' + Math.random().toString(16).slice(2, 16)
   const privHostSk = generateSecretKey() // fresh key: 0 clubs → no cap hit
   const privHost = await conn(privHostSk)
   const joinerP = await conn(generateSecretKey())
-  console.log('\n-- private clubs (premium) --')
+  console.log('\n-- private clubs --')
 
   await privHost.ev({ kind: 9007, created_at: now(), tags: [['h', GP]], content: '' })
   await privHost.ev({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['open'], ['public']], content: '' })
   await sleep(400)
 
-  // Non-premium owner tries to set closed → rejected.
-  const npremReject = await privHost.evRaw({ kind: 9002, created_at: now(), tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
-  assert(npremReject[0] === false && (npremReject[1] || '').includes('Premium'), 'private gate: non-premium 9002 with closed/private rejected: ' + ok(npremReject))
-
-  // Grant premium via admin API.
-  const grantStatus = await grantPremium(privHost.pub)
-  assert(grantStatus === 200, 'admin /grant-premium → 200 (got ' + grantStatus + ')')
-  await sleep(400)
-
-  // Premium owner sets closed + private → accepted.
-  const premOk = await privHost.evRaw({ kind: 9002, created_at: now() + 1, tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
-  assert(premOk[0] === true, 'private gate: premium owner can set closed+private: ' + ok(premOk))
+  // Owner sets closed + private → accepted without an account tier.
+  const privateOK = await privHost.evRaw({ kind: 9002, created_at: now() + 1, tags: [['h', GP], ['name', 'PrvTest'], ['closed'], ['private']], content: '' })
+  assert(privateOK[0] === true, 'private gate: owner can set closed+private: ' + ok(privateOK))
   await sleep(400)
 
   // Private club must NOT appear in global {kinds:[39000]} listing for non-members.

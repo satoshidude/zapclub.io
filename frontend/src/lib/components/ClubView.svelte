@@ -22,8 +22,6 @@
   import { auth } from '../nostr/auth.svelte'
   import { launchLogin } from '../nostr/nostrLogin'
   import { npubEncode, decode } from 'nostr-tools/nip19'
-  import { ownPremium } from '../nostr/premium.svelte'
-  import PremiumModal from './PremiumModal.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import {
     stage,
@@ -52,7 +50,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
   import ShareBlock from './club/ShareBlock.svelte'
-  import NwcBlock from './club/NwcBlock.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -72,7 +69,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   let pendingRequests = $state<{ pubkey: string; createdAt: number }[]>([])
   let inviteNpub = $state('')
   let inviteError = $state('')
-  let showPremModal = $state(false)
 
   // Owner = the 'owner'-role admin, NOT admins[0] (tag order isn't owner-first).
   const owner = $derived(ownerPk)
@@ -658,16 +654,10 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
           <p class="paid-note">Guests hear nothing until they pay. Defaults to your profile address.</p>
         {/if}
         <div class="field-row">
-          {#if ownPremium.active}
-            <label class="toggle-label">
-              <input type="checkbox" bind:checked={ePrivate} />
-              🔒 Private (invite-only, hidden from non-members)
-            </label>
-          {:else}
-            <button class="toggle-upsell" onclick={() => (showPremModal = true)} title="Requires zapclub Premium">
-              🔒 Private (invite-only) <span class="prem-tag">⚡ Premium</span>
-            </button>
-          {/if}
+          <label class="toggle-label">
+            <input type="checkbox" bind:checked={ePrivate} />
+            🔒 Private (invite-only, hidden from non-members)
+          </label>
         </div>
         <div class="edit-actions">
           <button class="btn btn-primary btn-sm" onclick={saveEdit} disabled={!eName.trim()}>Save</button>
@@ -726,10 +716,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     </div>
   </header>
 
-  {#if showPremModal}
-    <PremiumModal onClose={() => (showPremModal = false)} />
-  {/if}
-
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
   <div class="club-body">
@@ -762,7 +748,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
         <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
         {club?.link ? communityLinkLabel(club.link) : 'Join Telegram'}
       </a>
-      <NwcBlock />
       {#if auth.pubkey}
         <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
       {/if}
@@ -936,26 +921,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   .toggle-label input[type="checkbox"] {
     accent-color: var(--accent-2);
     cursor: pointer;
-  }
-  .toggle-upsell {
-    background: none;
-    border: none;
-    font-size: 0.88rem;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    opacity: 0.6;
-  }
-  .toggle-upsell:hover { opacity: 1; }
-  .prem-tag {
-    font-size: 0.75rem;
-    color: var(--amber);
-    background: color-mix(in srgb, var(--amber) 12%, transparent);
-    border-radius: 4px;
-    padding: 0.1rem 0.4rem;
   }
   /* Owner invite panel */
   .invite-panel {

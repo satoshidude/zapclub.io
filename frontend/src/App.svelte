@@ -20,17 +20,9 @@
   import PayModal from './lib/components/PayModal.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
-  import { watchOwnPremium } from './lib/nostr/premium.svelte'
-  import { auth } from './lib/nostr/auth.svelte'
 
   startConnectionWatch()
   startAccountWatch()
-
-  // Keep the logged-in user's premium status live. Start on login, stop on logout.
-  $effect(() => {
-    if (!auth.pubkey) return
-    return watchOwnPremium()
-  })
 
   // Extension switched to a different account than we're logged in as → re-login as it.
   function reloginExtension() {

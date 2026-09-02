@@ -32,14 +32,8 @@ import (
 // and write straight to the store — the relay's signed events are trusted and need no rate-limit
 // / membership / PoW gating.
 
-// condPrem is set by main.go after premiumStore is initialized.
-// The conductor uses it to determine per-club DJ slot limits.
-var condPrem *premiumStore
-
 const (
-	condMaxDJs            = 5       // absolute max (premium clubs)
-	condMaxDJsFree        = 2       // non-premium clubs
-	condMaxDJsOrig        = 5       // kept for reference
+	condMaxDJs            = 5       // maximum DJs per club
 	condStageStaleMS      = 300_000 // sticky stage: max 5 min after last heartbeat (STALE_MS; client beats every 2 min)
 	condOnlineMS          = 50_000  // a DJ is "present" within this of their last 20100 beat
 	condHeartbeatMS       = 15_000  // now_playing republish cadence (latecomers + drift)
@@ -104,15 +98,6 @@ type stageEntry struct {
 	on       bool
 }
 
-// premCacheEntry caches a per-club premium-owner check with a TTL so we avoid
-// hitting the premium store on every tick.
-type premCacheEntry struct {
-	valid bool
-	t     int64 // time.Now().UnixMilli() when cached
-}
-
-const premCacheTTL = 60_000 // ms
-
 type conductor struct {
 	db    *badger.BadgerBackend
 	sq    *sql.DB // SQLite writer; nil = disabled (graceful degradation)
@@ -166,7 +151,6 @@ type conductor struct {
 	autoDJIdx     map[string]*nostr.Event            // club → newest 30105
 	autoDJCtrlIdx map[string]nostr.Timestamp         // club → newest relay-signed 30111
 	ownerCache    map[string]string                  // club → creator pubkey (permanent)
-	premCache     map[string]premCacheEntry          // club → {valid bool, t ms}
 
 }
 
@@ -192,7 +176,6 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 		autoDJIdx:     map[string]*nostr.Event{},
 		autoDJCtrlIdx: map[string]nostr.Timestamp{},
 		ownerCache:    map[string]string{},
-		premCache:     map[string]premCacheEntry{},
 	}
 }
 
@@ -498,29 +481,6 @@ func (c *conductor) idxAutoDJCtrl(ev *nostr.Event) {
 		c.autoDJCtrlIdx[club] = ev.CreatedAt
 	}
 	c.idxMu.Unlock()
-}
-
-// isPremiumOwner returns whether the club's creator has an active premium subscription,
-// using a short-TTL cache (premCacheTTL) to avoid hitting the premium store every tick.
-func (c *conductor) isPremiumOwner(ctx context.Context, club string, now int64) bool {
-	if condPrem == nil {
-		return false
-	}
-	c.idxMu.Lock()
-	if entry, ok := c.premCache[club]; ok && now-entry.t < premCacheTTL {
-		c.idxMu.Unlock()
-		return entry.valid
-	}
-	c.idxMu.Unlock()
-	owner := c.clubOwner(ctx, club)
-	if owner == "" {
-		return false
-	}
-	valid := condPrem.valid(ctx, owner)
-	c.idxMu.Lock()
-	c.premCache[club] = premCacheEntry{valid: valid, t: now}
-	c.idxMu.Unlock()
-	return valid
 }
 
 // clubOwner returns the pubkey of the club's creator (author of its 9007 create-group event).
@@ -1056,7 +1016,7 @@ func (c *conductor) tick() {
 	}()
 	ctx := context.Background()
 	active := c.activeClubs(ctx)
-	// Auto DJ: clubs with a premium owner-armed playlist. Included regardless of real DJs.
+	// Auto DJ: clubs whose owner armed a playlist. Included regardless of real DJs.
 	auto := c.armedAutoClubs(ctx)
 
 	c.mu.Lock()
@@ -1157,12 +1117,8 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 			}
 			return list[i].pubkey < list[j].pubkey
 		})
-		cap := condMaxDJsFree
-		if c.isPremiumOwner(ctx, club, now) {
-			cap = condMaxDJs
-		}
-		if len(list) > cap {
-			list = list[:cap]
+		if len(list) > condMaxDJs {
+			list = list[:condMaxDJs]
 		}
 		out[club] = list
 	}
@@ -2118,16 +2074,14 @@ func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
 
 type stageGate struct {
 	db         *badger.BadgerBackend
-	prem       *premiumStore
 	superadmin string
 	// Set after the conductor is initialized (main.go) so reject() reads
 	// the conductor's in-memory indexes instead of querying BadgerDB.
-	countFn       func(club, sender string) (active int, alreadyOnStage bool)
-	isPremOwnerFn func(ctx context.Context, club string, now int64) bool
+	countFn func(club, sender string) (active int, alreadyOnStage bool)
 }
 
 // reject blocks a stage-join (kind 30102, content != "off") if the club is
-// already at its DJ cap (2 for free owners, 5 for premium owners).
+// already at its DJ cap of 5.
 // Heartbeats from DJs already on stage are always allowed through.
 func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
 	if evt.Kind != kindStage {
@@ -2209,17 +2163,7 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 		return false, "" // heartbeat from existing DJ
 	}
 
-	cap := condMaxDJsFree
-	if g.isPremOwnerFn != nil {
-		if g.isPremOwnerFn(ctx, club, time.Now().UnixMilli()) {
-			cap = condMaxDJs
-		}
-	} else if owner := clubOwnerFromDB(ctx, g.db, club); owner != "" {
-		if (g.superadmin != "" && owner == g.superadmin) || (g.prem != nil && g.prem.valid(ctx, owner)) {
-			cap = condMaxDJs
-		}
-	}
-	if active >= cap {
+	if active >= condMaxDJs {
 		return true, "restricted: stage is full"
 	}
 	return false, ""

@@ -5,9 +5,7 @@
   import { auth } from '../../nostr/auth.svelte'
   import { sync } from '../../nostr/sync.svelte'
   import { useProfile } from '../../nostr/profiles.svelte'
-  import { requestZapInvoice, creditZap, recordMyZap } from '../../nostr/zaps.svelte'
-  import { loadNwcConnection, saveNwcConnection, clearNwcConnection, payViaBackground } from '../../nostr/premium.svelte'
-  import { publishZapBroadcast } from '../../nostr/groups'
+  import { requestZapInvoice } from '../../nostr/zaps.svelte'
   import { showPay } from '../../nostr/payModal.svelte'
   import Fireworks from './Fireworks.svelte'
 
@@ -147,14 +145,7 @@
     try {
       const comment = v === 'banger' ? '🔥 banger' : '⏭ skip'
       const { invoice, verify } = await requestZapInvoice(targetPk, lud16, 1, comment)
-      if (loadNwcConnection()) {
-        await payViaBackground(invoice)
-        creditZap(targetPk, 1, invoice)
-        recordMyZap(targetPk, 1)
-        if (clubId && auth.canSign) void publishZapBroadcast(clubId, targetPk, 1, invoice)
-      } else {
-        showPay(invoice, 1, v === 'banger' ? '🔥 Banger — 1 sat to DJ' : '⏭ Skip — 1 sat to club', { verify, dj: targetPk, club: clubId })
-      }
+      showPay(invoice, 1, v === 'banger' ? '🔥 Banger — 1 sat to DJ' : '⏭ Skip — 1 sat to club', { verify, dj: targetPk, club: clubId })
     } catch (e) {
       console.warn('[vibe] payment failed:', e)
     } finally {

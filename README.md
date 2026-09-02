@@ -17,11 +17,11 @@ Browser (Svelte 5) ── NIP-07/46 ── Nostr signer
         ├── WebSocket ── NIP-29 relay (khatru + relay29 + BadgerDB)
         │                         └── conductor + SQLite hot-path state
         ├── YouTube IFrame API
-        └── NIP-57 / NWC ── Lightning wallet
+        └── NIP-57 ── Lightning zaps to DJs
 ```
 
 The relay is the only central component. It manages group membership and roles,
-enforces write permissions and premium limits, and acts as the always-on playback
+enforces write permissions and service limits, and acts as the always-on playback
 conductor. Profiles and zap receipts remain on public Nostr relays.
 
 ## Event model
@@ -96,7 +96,6 @@ state for constant-time hot-path lookups:
 | `conductor_state` | Current position, video, DJ and start time per club |
 | `played` | Offline-DJ played-set |
 | `club_owners` | Immutable club creator lookup |
-| `premium_cache` | Premium status with one-hour cache TTL |
 
 `modernc.org/sqlite` is pure Go, so Linux binaries remain static without CGO.
 The SQLite database can be rebuilt from events, but `SQLITE_PATH` should persist

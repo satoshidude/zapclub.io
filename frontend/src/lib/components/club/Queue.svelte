@@ -2,9 +2,7 @@
   import { queues, addTrack, addTracks, removeTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, enrichQueueTitles, reactivateMyQueue } from '../../nostr/queue.svelte'
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
-  import { ownPremium } from '../../nostr/premium.svelte'
-  import { autodj, armAutoDJ, disarmAutoDJ } from '../../nostr/autodj.svelte'
-  import PremiumModal from '../PremiumModal.svelte'
+	import { autodj, armAutoDJ, disarmAutoDJ } from '../../nostr/autodj.svelte'
   import { searchYouTube, fetchYouTubePlaylist, parseYouTubePlaylistId, type SearchHit } from '../../player/youtube'
   import { auth } from '../../nostr/auth.svelte'
   import { stage } from '../../nostr/stage.svelte'
@@ -37,7 +35,6 @@
   let saving = $state(false)
   let saveName = $state('')
   let showLib = $state(false)
-  let showPremModal = $state(false)
 
   async function doSave() {
     if (!saveName.trim() || tracks.length === 0) return
@@ -72,7 +69,7 @@
     showLib = false
   }
 
-  // Auto DJ (owner-only, premium) — arms the relay conductor with a playlist.
+  // Auto DJ (owner-only) — arms the relay conductor with a playlist.
   // Arming also loads the playlist into the live queue so it's immediately visible.
   let autoDJBusy = $state(false)
   let autoDJError = $state('')
@@ -226,7 +223,7 @@
       {#if autodj.isArmed(groupId)}
         <span class="autodj-on">⚡ Auto DJ — {autodj.name(groupId)}</span>
         <button class="mini" onclick={doDisarmAutoDJ} disabled={autoDJBusy}>Stop</button>
-      {:else if ownPremium.active}
+      {:else}
         {#if playlists.mine.length === 0}
           <span class="autodj-hint">Auto DJ: save a playlist first</span>
         {:else}
@@ -240,28 +237,23 @@
             {autoDJBusy ? '…' : 'Arm'}
           </button>
         {/if}
-      {:else}
-        <button class="mini amber" onclick={() => (showPremModal = true)}>⚡ Auto DJ — Premium</button>
       {/if}
       {#if autoDJError}<span class="autodj-err">{autoDJError}</span>{/if}
     </div>
   {/if}
 
-  <!-- Save / load playlists. Free: 1 playlist. Premium: unlimited. -->
+  <!-- Save / load playlists. -->
   <div class="lib">
     {#if saving}
       <input class="lib-name" bind:value={saveName} placeholder="Playlist name…" maxlength="60" autocomplete="off" />
       <button class="btn btn-primary btn-sm" onclick={doSave} disabled={!saveName.trim() || tracks.length === 0}>Save</button>
       <button class="mini" onclick={() => { saving = false; saveName = '' }} title="Cancel">✕</button>
     {:else}
-      {#if tracks.length > 0 && (ownPremium.active || playlists.mine.length < 1)}
+      {#if tracks.length > 0}
         <button class="mini wide" onclick={() => (saving = true)}>💾 Save as playlist</button>
       {/if}
       {#if playlists.mine.length > 0}
         <button class="mini wide" onclick={() => (showLib = !showLib)}>📚 My playlists ({playlists.mine.length})</button>
-      {/if}
-      {#if !ownPremium.active && playlists.mine.length >= 1 && tracks.length > 0}
-        <button class="mini wide prem-upsell" onclick={() => (showPremModal = true)} title="Upgrade for unlimited playlists">⚡ More playlists — Premium</button>
       {/if}
     {/if}
   </div>
@@ -278,8 +270,6 @@
       {/each}
     </ul>
   {/if}
-
-  {#if showPremModal}<PremiumModal onClose={() => (showPremModal = false)} />{/if}
 
   {#if tracks.length > 0}
     <ul class="tracks" data-queue>
@@ -586,13 +576,6 @@
   .mini.wide {
     padding: 0.35rem 0.65rem;
   }
-  .prem-upsell {
-    border-color: var(--amber);
-    color: var(--amber);
-  }
-  .prem-upsell:hover {
-    background: color-mix(in srgb, var(--amber) 10%, transparent);
-  }
   .lib {
     display: flex;
     gap: 0.4rem;
@@ -685,12 +668,5 @@
     flex: 1 1 100%;
     color: var(--danger);
     font-size: 0.78rem;
-  }
-  .mini.amber {
-    border-color: var(--amber);
-    color: var(--amber);
-  }
-  .mini.amber:hover {
-    background: color-mix(in srgb, var(--amber) 10%, transparent);
   }
 </style>

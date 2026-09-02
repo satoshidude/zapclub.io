@@ -1,4 +1,4 @@
-import { pollPaid, creditZap, watchInvoicePaid, recordMyZap } from './zaps.svelte'
+import { pollPaid, creditZap, watchInvoicePaid } from './zaps.svelte'
 import { publishZapBroadcast } from './groups'
 import { auth } from './auth.svelte'
 
@@ -75,7 +75,6 @@ export function markPaid(): void {
   state.paid = true
   if (state.dj && state.invoice) {
     creditZap(state.dj, state.sats, state.invoice)
-    recordMyZap(state.dj, state.sats)
     if (state.club && auth.canSign) void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
   }
   if (onPaidCb) {

@@ -1,11 +1,9 @@
 <script lang="ts">
   import { sync } from '../../nostr/sync.svelte'
-  import { requestZapInvoice, zaps, creditZap, recordMyZap } from '../../nostr/zaps.svelte'
+  import { requestZapInvoice, zaps } from '../../nostr/zaps.svelte'
   import { showPay } from '../../nostr/payModal.svelte'
-  import { publishZapBroadcast } from '../../nostr/groups'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
-  import { loadNwcConnection } from '../../nostr/premium.svelte'
 
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
@@ -34,7 +32,6 @@
   let custom = $state('')
   let busy = $state(false)
   let error = $state('')
-  let nwcPaid = $state(false)
 
   async function zapNow(sats: number) {
     if (busy || sats <= 0) return
@@ -42,30 +39,10 @@
     error = ''
     try {
       const { invoice, verify } = await requestZapInvoice(dj, lud16, sats, comment.trim())
-      const connStr = loadNwcConnection()
-      if (connStr) {
-        // NWC connected → pay automatically, no modal
-        const { NWCClient } = await import('@getalby/sdk/nwc')
-        const client = new NWCClient({ nostrWalletConnectUrl: connStr })
-        try {
-          await client.payInvoice({ invoice })
-          creditZap(dj, sats, invoice)
-          recordMyZap(dj, sats)
-          if (club && auth.canSign) void publishZapBroadcast(club, dj, sats, invoice)
-          open = false
-          comment = ''
-          custom = ''
-          nwcPaid = true
-          setTimeout(() => (nwcPaid = false), 2000)
-        } finally {
-          client.close()
-        }
-      } else {
-        open = false
-        comment = ''
-        custom = ''
-        showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj, club })
-      }
+      open = false
+      comment = ''
+      custom = ''
+      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj, club })
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {
@@ -75,18 +52,16 @@
 </script>
 
 {#if show}
-  <button class="zap-mini" class:with-dj={showDj} class:nwc-paid={nwcPaid} onclick={() => nwcPaid ? null : (open = !open)} title="Zap {displayName(dj, djProfile)}">
+  <button class="zap-mini" class:with-dj={showDj} onclick={() => (open = !open)} title="Zap {displayName(dj, djProfile)}">
     <span class="bolt">⚡</span>
-    {#if nwcPaid}
-      <span class="lbl">Paid!</span>
-    {:else if showDj}
+    {#if showDj}
       <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
       <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
     {:else}
       <span class="lbl">zap</span>
       <span class="lbl dj-name divided">{displayName(dj, djProfile)}</span>
     {/if}
-    {#if !nwcPaid && total > 0}
+    {#if total > 0}
       <span class="score">{total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}</span>
     {/if}
   </button>
@@ -96,9 +71,6 @@
     <div class="backdrop" role="presentation" onclick={() => (open = false)}>
       <div class="sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
         <h3>⚡ Zap {displayName(dj, djProfile)}</h3>
-        {#if loadNwcConnection()}
-          <p class="nwc-hint">⚡ NWC connected — pays instantly</p>
-        {/if}
         <div class="presets">
           {#each PRESETS as amt (amt)}
             <button class="amt" onclick={() => zapNow(amt)} disabled={busy}>{amt}</button>
@@ -145,12 +117,6 @@
   .zap-mini:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-  .zap-mini.nwc-paid {
-    border-color: #4ec94e;
-    color: #4ec94e;
-    background: rgba(78, 201, 78, 0.12);
-    cursor: default;
   }
   .bolt {
     font-size: 0.95rem;
@@ -247,12 +213,6 @@
   }
   .msg.err {
     color: var(--danger);
-  }
-  .nwc-hint {
-    margin: 0;
-    font-size: 0.72rem;
-    color: #4ec94e;
-    font-weight: 600;
   }
   .cancel {
     background: none;

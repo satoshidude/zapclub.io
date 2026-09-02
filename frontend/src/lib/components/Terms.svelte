@@ -19,7 +19,6 @@
   </section>
 
   <section class="card">
-    <p>Premium features may be modified or discontinued at any time.</p>
     <p>The service is provided without guarantees regarding availability or uptime.</p>
     <button class="home" onclick={goHome}>← Back to the clubs</button>
   </section>

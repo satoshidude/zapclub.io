@@ -41,7 +41,7 @@ export interface Club {
   access?: 'open' | 'paid'
   /** Entry price in sats (paid clubs). */
   price?: number
-  /** Whether this club is featured in the directory (owner has active premium). */
+  /** Whether this club is featured in the directory. */
   featured?: boolean
   /** Optional community link (e.g. Telegram invite). Set by the owner in kind 9002. */
   link?: string
@@ -60,7 +60,7 @@ export interface ClubConfig {
   lud16: string
   /** Resolved NIP-57 zapper pubkey of `lud16` — for relay-side receipt verification. */
   zapper: string
-  /** Whether the club is featured in the directory (premium owners only). */
+  /** Whether the club is featured in the directory. */
   featured: boolean
 }
 

@@ -239,13 +239,8 @@ func main() {
 	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
 
-	// Club creation cap: free=1, premium=3. Existing clubs are grandfathered.
-	// prem is wired in below once the premiumStore is initialized.
+	// Club creation cap: at most 3 per account. Existing clubs are grandfathered.
 	cap := newClubCap(db, os.Getenv("SUPERADMIN"))
-
-	// Private-club gate: setting ['closed'] or ['private'] on a 9002/9007 requires Premium.
-	// Wired here so prem is available; prem is assigned below after newPremiumStore.
-	var privGate *privateGate
 
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
@@ -295,37 +290,22 @@ func main() {
 	// even when no client is in the foreground. Single always-on writer → no client election/
 	// failover/rescue. See conductor.go. It also observes presence (20100) to tell present DJs
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
-	// Premium subscription system: relay-authored kind-30108 status events + LNbits invoicing.
-	prem := newPremiumStore(db, relay, sk, relayPub)
-	pg := newPremiumGate(prem, env("LNBITS_URL", ""), os.Getenv("LNBITS_INVOICE_KEY"), "./pending_invoices.json")
-	entryPrem = prem // gate paid-entry behind premium check
-	condPrem = prem  // per-club DJ slot cap (free=2 / premium=5)
-	cap.prem = prem  // club creation cap (free=1 / premium=3)
 	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
-	// Wire private-gate now that prem is available (declared above near cap).
-	privGate = newPrivateGate(prem, os.Getenv("SUPERADMIN"))
-	relay.RejectEvent = append(relay.RejectEvent, privGate.reject)
-
-	// Stage cap: free clubs may have at most 2 DJs on stage, premium clubs up to 5.
-	stageG := &stageGate{db: db, prem: prem, superadmin: os.Getenv("SUPERADMIN")}
+	// Stage cap: every club may have at most 5 DJs on stage.
+	stageG := &stageGate{db: db, superadmin: os.Getenv("SUPERADMIN")}
 	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
-
-	// Playlist library (kind 30104): free accounts may save 1 playlist, premium unlimited.
-	playlistG := newPlaylistGate(db, prem, os.Getenv("SUPERADMIN"))
-	relay.RejectEvent = append(relay.RejectEvent, playlistG.reject)
 
 	// Live A/V session gate (kind 30109): only staged DJs + owner/mod may go live.
 	liveG := newLiveGate(db, state, os.Getenv("SUPERADMIN"))
 	relay.RejectEvent = append(relay.RejectEvent, liveG.reject)
 
-	// Auto DJ config (kind 30105): only the club's premium owner may arm/disarm.
-	autoDJG := newAutoDJGate(db, prem, os.Getenv("SUPERADMIN"))
+	// Auto DJ config (kind 30105): only the club owner may arm/disarm.
+	autoDJG := newAutoDJGate(db, os.Getenv("SUPERADMIN"))
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)
-	// SQLite for persistent conductor state (played-set + track state survive restarts)
-	// and premium status cache (eliminates per-check BadgerDB scans).
+	// SQLite for persistent conductor state (played-set + track state survive restarts).
 	// Writer: MaxOpenConns(1), all INSERT/UPDATE/DELETE.
 	// Reader: MaxOpenConns(4), query_only — WAL allows concurrent reads alongside the writer.
 	if sqw, sqr, err := openSQLite(env("SQLITE_PATH", "./conductor.db")); err != nil {
@@ -333,8 +313,6 @@ func main() {
 	} else {
 		cond.sq = sqw
 		cond.sqr = sqr
-		prem.sq = sqw  // writes (grant/invalidate) go through the writer
-		prem.sqr = sqr // reads (valid checks from gates) use the reader
 	}
 	// One-time cleanup of pre-migration foreign now_playing tombstones (idempotent — see fn).
 	if n := purgeForeignNowPlaying(db, relayPub); n > 0 {
@@ -344,12 +322,10 @@ func main() {
 	// After this, the OnEventSaved observers keep everything current — no per-tick DB reads.
 	cond.warmIndexes(context.Background())
 	cap.warmCount(context.Background())
-	playlistG.warmList(context.Background())
-	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent, playlistG.observeEvent)
+	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken, cond.observeMood)
 	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
-	stageG.isPremOwnerFn = cond.isPremiumOwner
 	autoDJG.ownerFn = cond.clubOwner
 	go cond.run()
 
@@ -360,9 +336,6 @@ func main() {
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
-	relay.Router().HandleFunc("/premium/invoice", pg.handle)
-	relay.Router().HandleFunc("/premium/status", pg.handle)
-	relay.Router().HandleFunc("/premium/check", pg.handle)
 
 	// LiveKit AV spaces (NIP-29 spec): 204 probe + token endpoint.
 	lkHandler := newLivekitHandler(
@@ -375,7 +348,7 @@ func main() {
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners, prem: prem}
+	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners}
 	relay.Router().HandleFunc("/admin/logs", handleLogs)
 	relay.Router().HandleFunc("/admin/access-logs", handleAccessLogs)
 	relay.Router().HandleFunc("/admin/bans", admin.handle)
@@ -383,18 +356,10 @@ func main() {
 	relay.Router().HandleFunc("/admin/unban", admin.handle)
 	relay.Router().HandleFunc("/admin/delete-club", admin.handle)
 	relay.Router().HandleFunc("/admin/listeners", admin.handle)
-	relay.Router().HandleFunc("/admin/grant-premium", admin.handle)
 
 	relay.Router().HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "zapclub relay — NIP-29. Use a zapclub/nostr client to connect.")
 	})
-
-	// NIP-17 DM sender for premium payment confirmation + expiry reminders.
-	dm, dmErr := newDMSender(sk)
-	if dmErr != nil {
-		log.Fatalf("dm sender init: %v", dmErr)
-	}
-	_ = pg // pg holds premiumGate, used via routes above; dm is used in sweep below
 
 	// Hintergrund-Sweep: abgelaufene Such-Cache-Einträge + inaktive IP-Limiter-Buckets
 	// entfernen, damit die Maps nicht unbegrenzt wachsen (Memory-DoS-Schutz).
@@ -420,8 +385,6 @@ func main() {
 			board.save()
 			// Drop play-log records older than 24h (client reads only a ≤6h window).
 			pruneOldPlays(db, time.Now().Add(-24*time.Hour).Unix())
-			// Send renewal reminders for subscriptions expiring within 3 days.
-			sendRenewalReminders(context.Background(), prem, dm)
 		}
 	}()
 

@@ -10,7 +10,8 @@
 //
 // Required env vars: BOT_TOKEN, TELEGRAM_CHAT_ID, BOT_NSEC, BOT_CLUB_ID
 // Optional:          RELAY_URL (default wss://relay.zapclub.io)
-//                    RELAY_API (default https://relay.zapclub.io)
+//
+//	RELAY_API (default https://relay.zapclub.io)
 package main
 
 import (
@@ -38,31 +39,23 @@ import (
 // ── Config ───────────────────────────────────────────────────────────────────
 
 type Config struct {
-	TGToken    string
-	TGChatID   int64
-	Nsec       string
-	ClubID     string
-	RelayURL   string
-	RelayAPI   string
-	NWCUrl     string // optional: nostr+walletconnect://... — enables payment gate
-	TrackPrice int64  // sats per track (default 10), used when NWCUrl is set
+	TGToken  string
+	TGChatID int64
+	Nsec     string
+	ClubID   string
+	RelayURL string
+	RelayAPI string
 }
 
 func loadConfig() Config {
 	chatID, _ := strconv.ParseInt(mustEnv("TELEGRAM_CHAT_ID"), 10, 64)
-	price, _ := strconv.ParseInt(envOr("TRACK_PRICE", "10"), 10, 64)
-	if price <= 0 {
-		price = 10
-	}
 	return Config{
-		TGToken:    mustEnv("BOT_TOKEN"),
-		TGChatID:   chatID,
-		Nsec:       mustEnv("BOT_NSEC"),
-		ClubID:     mustEnv("BOT_CLUB_ID"),
-		RelayURL:   envOr("RELAY_URL", "wss://relay.zapclub.io"),
-		RelayAPI:   envOr("RELAY_API", "https://relay.zapclub.io"),
-		NWCUrl:     os.Getenv("BOT_NWC"),
-		TrackPrice: price,
+		TGToken:  mustEnv("BOT_TOKEN"),
+		TGChatID: chatID,
+		Nsec:     mustEnv("BOT_NSEC"),
+		ClubID:   mustEnv("BOT_CLUB_ID"),
+		RelayURL: envOr("RELAY_URL", "wss://relay.zapclub.io"),
+		RelayAPI: envOr("RELAY_API", "https://relay.zapclub.io"),
 	}
 }
 
@@ -75,14 +68,6 @@ type Track struct {
 }
 
 // ── Bridge ────────────────────────────────────────────────────────────────────
-
-// PendingPayment holds tracks queued behind a Lightning invoice awaiting payment.
-type PendingPayment struct {
-	ChatID int64
-	From   string
-	Tracks []Track
-	Hash   string
-}
 
 type Bridge struct {
 	cfg             Config
@@ -100,8 +85,6 @@ type Bridge struct {
 	onStage         bool
 	pendingSearches map[int64][]Track
 	pendingFrom     map[int64]string
-	nwc             *NWCClient
-	pendingPayments map[string]*PendingPayment // keyed by payment_hash
 }
 
 func newBridge(cfg Config) *Bridge {
@@ -122,16 +105,6 @@ func newBridge(cfg Config) *Bridge {
 	}
 	log.Printf("[bot] telegram: @%s", tg.Self.UserName)
 
-	var nwcClient *NWCClient
-	if cfg.NWCUrl != "" {
-		c, err := parseNWCURL(cfg.NWCUrl)
-		if err != nil {
-			log.Fatalf("invalid BOT_NWC: %v", err)
-		}
-		nwcClient = c
-		log.Printf("[bot] NWC payment gate: %d sats/track", cfg.TrackPrice)
-	}
-
 	return &Bridge{
 		cfg:             cfg,
 		sk:              sk,
@@ -142,8 +115,6 @@ func newBridge(cfg Config) *Bridge {
 		onStage:         true,
 		pendingSearches: make(map[int64][]Track),
 		pendingFrom:     make(map[int64]string),
-		nwc:             nwcClient,
-		pendingPayments: make(map[string]*PendingPayment),
 	}
 }
 
@@ -426,11 +397,7 @@ func (b *Bridge) cmdAdd(ctx context.Context, relay *nostr.Relay, chatID int64, f
 			b.send(chatID, "❌ Could not fetch video info.")
 			return
 		}
-		if b.nwc != nil {
-			b.requestPayment(ctx, chatID, from, []Track{tracks[0]})
-		} else {
-			b.addTrack(ctx, relay, chatID, from, tracks[0], true)
-		}
+		b.addTrack(ctx, relay, chatID, from, tracks[0], true)
 		return
 	}
 
@@ -463,11 +430,7 @@ func (b *Bridge) cmdAdd(ctx context.Context, relay *nostr.Relay, chatID int64, f
 			tgbotapi.NewInlineKeyboardButtonData(label, fmt.Sprintf("add:%d", i)),
 		))
 	}
-	prompt := "Pick a track:"
-	if b.nwc != nil {
-		prompt = fmt.Sprintf("Pick a track (%d sats):", b.cfg.TrackPrice)
-	}
-	msg := tgbotapi.NewMessage(chatID, prompt)
+	msg := tgbotapi.NewMessage(chatID, "Pick a track:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	_, _ = b.tg.Send(msg)
 }
@@ -499,15 +462,6 @@ func (b *Bridge) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery)
 	delete(b.pendingSearches, chatID)
 	delete(b.pendingFrom, chatID)
 	b.mu.Unlock()
-
-	if b.nwc != nil {
-		// Edit message to show we're generating the invoice, then send payment request.
-		editText := fmt.Sprintf("⚡ Creating invoice for:\n%s", results[idx].Title)
-		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, editText)
-		_, _ = b.tg.Send(edit)
-		b.requestPayment(ctx, chatID, from, []Track{results[idx]})
-		return
-	}
 
 	relay := b.getRelay()
 	if relay == nil {
@@ -596,13 +550,6 @@ func (b *Bridge) cmdAddPlaylist(ctx context.Context, relay *nostr.Relay, chatID 
 		return
 	}
 
-	if b.nwc != nil {
-		sats := int64(len(tracks)) * b.cfg.TrackPrice
-		b.send(chatID, fmt.Sprintf("📋 %d tracks found — costs %d sats total.", len(tracks), sats))
-		b.requestPayment(ctx, chatID, from, tracks)
-		return
-	}
-
 	current, _ := b.fetchCurrentTracks(ctx, relay)
 	b.mu.Lock()
 	if current != nil {
@@ -626,164 +573,6 @@ func (b *Bridge) cmdAddPlaylist(ctx context.Context, relay *nostr.Relay, chatID 
 	}
 	b.send(chatID, fmt.Sprintf("✅ Added %d tracks by %s\n\n📍 %s\nhttps://zapclub.io/club/%s",
 		len(tracks), from, club, b.cfg.ClubID))
-}
-
-// ── NWC payment gate ──────────────────────────────────────────────────────────
-
-// requestPayment creates a Lightning invoice via NWC, sends it to the chat,
-// and starts a background goroutine polling for payment confirmation.
-func (b *Bridge) requestPayment(ctx context.Context, chatID int64, from string, tracks []Track) {
-	sats := int64(len(tracks)) * b.cfg.TrackPrice
-	desc := fmt.Sprintf("zapclub: %s adding %d track(s)", from, len(tracks))
-
-	invoice, hash, err := b.nwc.MakeInvoice(ctx, sats, desc)
-	if err != nil {
-		b.send(chatID, "❌ Could not create invoice: "+err.Error())
-		return
-	}
-	log.Printf("[nwc] invoice created hash=%.8s… sats=%d from=%s tracks=%d", hash, sats, from, len(tracks))
-
-	var lines strings.Builder
-	for i, t := range tracks {
-		if i >= 3 {
-			fmt.Fprintf(&lines, "… and %d more", len(tracks)-3)
-			break
-		}
-		if i > 0 {
-			lines.WriteByte('\n')
-		}
-		lines.WriteString("• " + t.Title)
-	}
-
-	noun := "track"
-	if len(tracks) > 1 {
-		noun = fmt.Sprintf("%d tracks", len(tracks))
-	}
-	text := fmt.Sprintf("⚡ Pay <b>%d sats</b> to add %s:\n%s\n\n⏰ Expires in 5 minutes.",
-		sats, noun, lines.String())
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonURL("⚡ Pay with Alby Go", "alby:"+invoice),
-		),
-	)
-	_, _ = b.tg.Send(msg)
-
-	// Send invoice as a separate message for easy copy-paste.
-	inv := tgbotapi.NewMessage(chatID, "<code>"+invoice+"</code>")
-	inv.ParseMode = "HTML"
-	inv.DisableWebPagePreview = true
-	_, _ = b.tg.Send(inv)
-
-	b.mu.Lock()
-	b.pendingPayments[hash] = &PendingPayment{ChatID: chatID, From: from, Tracks: tracks, Hash: hash}
-	b.mu.Unlock()
-
-	go b.pollPayment(ctx, hash)
-}
-
-// pollPayment checks every 5 s whether the invoice has been paid, times out after 5 min.
-func (b *Bridge) pollPayment(ctx context.Context, hash string) {
-	timeout := time.After(5 * time.Minute)
-	tick := time.NewTicker(5 * time.Second)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timeout:
-			b.mu.Lock()
-			pp := b.pendingPayments[hash]
-			delete(b.pendingPayments, hash)
-			b.mu.Unlock()
-			if pp != nil {
-				b.send(pp.ChatID, "⏰ Payment timed out. Use /add again to retry.")
-			}
-			return
-		case <-tick.C:
-			settled, err := b.nwc.LookupInvoice(ctx, hash)
-			if err != nil {
-				log.Printf("[nwc] poll hash=%.8s… err=%v", hash, err)
-				continue
-			}
-			log.Printf("[nwc] poll hash=%.8s… settled=%v", hash, settled)
-			if !settled {
-				continue
-			}
-			log.Printf("[nwc] payment confirmed hash=%.8s…", hash)
-			b.onPaymentReceived(ctx, hash)
-			return
-		}
-	}
-}
-
-// onPaymentReceived fires when a pending invoice is confirmed paid.
-func (b *Bridge) onPaymentReceived(ctx context.Context, hash string) {
-	b.mu.Lock()
-	pp := b.pendingPayments[hash]
-	delete(b.pendingPayments, hash)
-	b.mu.Unlock()
-	if pp == nil {
-		return
-	}
-	log.Printf("[nwc] payment received: %d sats from %s (%d tracks)", int64(len(pp.Tracks))*b.cfg.TrackPrice, pp.From, len(pp.Tracks))
-
-	relay := b.getRelay()
-	if relay == nil {
-		b.send(pp.ChatID, "⚡ Paid! Relay is reconnecting — tracks will be added shortly.")
-		return
-	}
-
-	if len(pp.Tracks) == 1 {
-		b.addTrack(ctx, relay, pp.ChatID, pp.From, pp.Tracks[0], false)
-	} else {
-		// Batch: sync from relay first, then append all tracks at once.
-		b.mu.Lock()
-		wasOffStage := !b.onStage
-		b.mu.Unlock()
-		var current []Track
-		if !wasOffStage {
-			current, _ = b.fetchCurrentTracks(ctx, relay)
-		}
-		b.mu.Lock()
-		if wasOffStage {
-			b.queue = nil
-		} else if current != nil {
-			b.queue = current
-		}
-		b.queue = append(b.queue, pp.Tracks...)
-		b.onStage = true
-		q := make([]Track, len(b.queue))
-		copy(q, b.queue)
-		b.mu.Unlock()
-		if err := b.publishQueue(ctx, relay, q); err != nil {
-			b.send(pp.ChatID, "❌ Relay error: "+err.Error())
-			return
-		}
-		if wasOffStage {
-			b.publishStage(ctx, relay)
-		}
-	}
-
-	b.mu.Lock()
-	clubName := b.clubName
-	b.mu.Unlock()
-	club := clubName
-	if club == "" {
-		club = b.cfg.ClubID
-	}
-	var confirm string
-	if len(pp.Tracks) == 1 {
-		confirm = fmt.Sprintf("✅ Added by %s:\n%s\n\n📍 %s\nhttps://zapclub.io/club/%s",
-			pp.From, pp.Tracks[0].Title, club, b.cfg.ClubID)
-	} else {
-		confirm = fmt.Sprintf("✅ Added %d tracks by %s\n\n📍 %s\nhttps://zapclub.io/club/%s",
-			len(pp.Tracks), pp.From, club, b.cfg.ClubID)
-	}
-	b.send(pp.ChatID, confirm)
 }
 
 func (b *Bridge) cmdRemove(ctx context.Context, relay *nostr.Relay, chatID int64, arg string) {
@@ -865,13 +654,9 @@ func (b *Bridge) cmdQueue(chatID int64) {
 }
 
 func (b *Bridge) cmdHelp(chatID int64) {
-	addNote := ""
-	if b.nwc != nil {
-		addNote = fmt.Sprintf(" \\(%d sats per track\\)", b.cfg.TrackPrice)
-	}
 	help := "I'm the club DJ\\. Everyone in this chat can add tracks — I'll play them all in a shared mix\\.\n\n" +
 		"*How to add a track:*\n" +
-		"• */add* _search query_ — search YouTube and pick a track" + addNote + "\n" +
+		"• */add* _search query_ — search YouTube and pick a track\n" +
 		"  _Example:_ `/add boards of canada`\n" +
 		"• */add* _YouTube URL_ — add a specific video directly\n" +
 		"  _Example:_ `/add https://youtu\\.be/abc123`\n" +
@@ -1182,7 +967,7 @@ func (b *Bridge) loadQueue(ctx context.Context, relay *nostr.Relay) {
 
 // ── YouTube search ────────────────────────────────────────────────────────────
 
-var ytIDRe   = regexp.MustCompile(`(?:v=|youtu\.be/|shorts/|embed/)([a-zA-Z0-9_-]{11})`)
+var ytIDRe = regexp.MustCompile(`(?:v=|youtu\.be/|shorts/|embed/)([a-zA-Z0-9_-]{11})`)
 var ytListRe = regexp.MustCompile(`[?&]list=([A-Za-z0-9_-]{10,64})`)
 
 type searchResult struct {

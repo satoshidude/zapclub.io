@@ -47,7 +47,6 @@
     muted: true, // muted autoplay (always allowed); the "Tap for sound" overlay unmutes.
     onStateChange(s) {
       if (s === 1) {
-        lobbyFailed = false // playing → reset lobby error flag
         // Surface the embed's channel + title (no extraction → no bot gate) for a real track.
         if (!idleMode && player) {
           const d = player.getVideoData()

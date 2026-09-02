@@ -21,35 +21,11 @@
     </p>
     <ul class="feat-list">
       <li><strong>Synchronized playback</strong> — relay conductor drives the clock; everyone hears the same moment.</li>
-      <li><strong>DJ stage &amp; round-robin</strong> — up to 2 (Free) or 5 (Premium) DJs; queues interleaved track-by-track.</li>
-      <li><strong>VibeMeter</strong> — live arc-gauge showing the room's mood; vote skip or banger, needle swings to the active segment, resets per track.</li>
+      <li><strong>DJ stage &amp; round-robin</strong> — up to 5 DJs; queues interleaved track-by-track.</li>
+      <li><strong>VibeMeter</strong> — zap the live DJ with a banger vote or nudge the room to skip; the meter resets per track.</li>
       <li><strong>Zaps (NIP-57)</strong> — pay the live DJ directly with Lightning; sats go straight to their wallet.</li>
       <li><strong>Chat, avatars &amp; moderation</strong> — ephemeral Nostr events; relay-enforced bans and roles.</li>
     </ul>
-  </section>
-
-  <section class="card tier-grid">
-    <div class="tier">
-      <h2>Free</h2>
-      <ul class="list">
-        <li>1 club</li>
-        <li>1 saved playlist</li>
-        <li>Up to 2 DJs on stage</li>
-        <li>Join any club, chat &amp; listen</li>
-        <li>Zap DJs with Lightning</li>
-      </ul>
-    </div>
-    <div class="tier tier-prem">
-      <h2>⚡ Premium <span class="price">2,100 sats / month</span></h2>
-      <ul class="list">
-        <li>Up to 3 clubs</li>
-        <li>Unlimited playlists &amp; playlist management</li>
-        <li>Up to 5 DJs on stage</li>
-        <li>Private / invite-only clubs</li>
-        <li>Entry-fee clubs (Sats gate)</li>
-        <li>Featured listing in the directory</li>
-      </ul>
-    </div>
   </section>
 
   <section class="card">
@@ -110,35 +86,6 @@
     gap: 0.35rem;
     font-size: 0.9rem;
     line-height: 1.5;
-    color: var(--text);
-  }
-  .tier-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    align-items: start;
-  }
-  @media (max-width: 480px) {
-    .tier-grid { grid-template-columns: 1fr; }
-  }
-  .tier h2 { color: var(--text-dim); }
-  .tier-prem h2 { color: var(--amber); }
-  .price {
-    display: block;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--text-dim);
-    margin-top: 0.1rem;
-  }
-  .list {
-    margin: 0;
-    padding-left: 1.2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-  .list li {
-    font-size: 0.92rem;
     color: var(--text);
   }
   a {

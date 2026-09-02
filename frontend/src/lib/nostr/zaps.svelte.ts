@@ -6,29 +6,13 @@ import { auth } from './auth.svelte'
 
 const KIND_ZAP_RECEIPT = 9735
 
-export interface MyZap { dj: string; sats: number; at: number }
-
 interface ZapState {
   /** Sats per DJ pubkey (running session) — voting becomes economic. */
   scoreByDj: Record<string, number>
   /** Last incoming zap — triggers the animation. */
   lastZap: { dj: string; sats: number; at: number } | null
-  /** Last 5 zaps sent by the current user (persisted across reloads). */
-  myRecent: MyZap[]
 }
-
-const MY_ZAPS_KEY = 'zapclub:myZaps'
-
-function loadMyZaps(): MyZap[] {
-  try {
-    const raw = localStorage.getItem(MY_ZAPS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as MyZap[]
-    return Array.isArray(parsed) ? parsed.slice(0, 5) : []
-  } catch { return [] }
-}
-
-const state = $state<ZapState>({ scoreByDj: {}, lastZap: null, myRecent: loadMyZaps() })
+const state = $state<ZapState>({ scoreByDj: {}, lastZap: null })
 
 export const zaps = {
   get scoreByDj() {
@@ -37,20 +21,9 @@ export const zaps = {
   get lastZap() {
     return state.lastZap
   },
-  get myRecent(): MyZap[] {
-    return state.myRecent
-  },
   score(dj: string): number {
     return state.scoreByDj[dj] ?? 0
   },
-}
-
-/** Records a zap sent by the current user — shown in the NWC wallet block, persisted to localStorage. */
-export function recordMyZap(dj: string, sats: number): void {
-  if (!dj || sats <= 0) return
-  const updated = [{ dj, sats, at: Date.now() }, ...state.myRecent].slice(0, 5)
-  state.myRecent = updated
-  try { localStorage.setItem(MY_ZAPS_KEY, JSON.stringify(updated)) } catch { /* ignore */ }
 }
 
 function nowSec(): number {
@@ -415,7 +388,7 @@ export function creditZap(dj: string, sats: number, invoice?: string): void {
 /**
  * Watches for the 9735 zap RECEIPT of a specific invoice and fires onPaid when it lands.
  * This is the only automatic payment signal when the LNURL server provides no LUD-21 verify
- * URL (e.g. nsnip.io / many LNbits) — the receipt the server publishes on payment doubles as
+ * URL (e.g. nsnip.io and many LNURL providers) — the receipt the server publishes on payment doubles as
  * the "paid" confirmation. Matches by bolt11 (exact). Returns a close function.
  */
 export function watchInvoicePaid(

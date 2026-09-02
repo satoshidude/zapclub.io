@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 //   GET /.well-known/nip29/livekit              → 204 (support-discovery probe)
 //   GET /.well-known/nip29/livekit/<group-id>   → { url, token }
 //
-// Auth: NIP-98 kind-27235 Authorization header (same pattern as /premium/invoice).
+// Auth: NIP-98 kind-27235 Authorization header.
 // Membership: group must exist and caller must be a member; only staged DJs (+ owner/mod)
 // receive canPublish:true. Everyone else is subscribe-only.
 //
@@ -36,6 +37,40 @@ type livekitHandler struct {
 	apiKey     string
 	apiSecret  string
 	serverURL  string // e.g. wss://live.zapclub.io
+}
+
+func verifyNIP98Pubkey(r *http.Request) (pubkey string, ok bool) {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Nostr ") {
+		return "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Nostr "))
+	if err != nil {
+		return "", false
+	}
+	var ev nostr.Event
+	if err := json.Unmarshal(raw, &ev); err != nil || ev.Kind != 27235 {
+		return "", false
+	}
+	if sigOK, err := ev.CheckSignature(); !sigOK || err != nil {
+		return "", false
+	}
+	now := time.Now()
+	if signedAt := ev.CreatedAt.Time(); signedAt.Before(now.Add(-60*time.Second)) || signedAt.After(now.Add(60*time.Second)) {
+		return "", false
+	}
+	if method := ev.Tags.GetFirst([]string{"method"}); method == nil || !strings.EqualFold(method.Value(), r.Method) {
+		return "", false
+	}
+	eventURL := ev.Tags.GetFirst([]string{"u"})
+	if eventURL == nil {
+		return "", false
+	}
+	parsed, err := url.Parse(eventURL.Value())
+	if err != nil || parsed.Path != r.URL.Path {
+		return "", false
+	}
+	return ev.PubKey, true
 }
 
 func newLivekitHandler(db *badger.BadgerBackend, state *relay29.State, superadmin, apiKey, apiSecret, serverURL string) *livekitHandler {
@@ -187,18 +222,18 @@ func (h *livekitHandler) mintToken(room, pubkey string, canPublish bool) (string
 		"nbf": now,
 		"exp": now + 6*3600, // 6 hours
 		"video": map[string]interface{}{
-			"room":             room,
-			"roomJoin":         true,
-			"canPublish":       canPublish,
-			"canSubscribe":     true,
-			"canPublishData":   true,
-			"roomCreate":       false,
-			"roomList":         false,
-			"roomRecord":       false,
-			"roomAdmin":        false,
-			"ingressAdmin":     false,
-			"hidden":           false,
-			"recorder":         false,
+			"room":           room,
+			"roomJoin":       true,
+			"canPublish":     canPublish,
+			"canSubscribe":   true,
+			"canPublishData": true,
+			"roomCreate":     false,
+			"roomList":       false,
+			"roomRecord":     false,
+			"roomAdmin":      false,
+			"ingressAdmin":   false,
+			"hidden":         false,
+			"recorder":       false,
 		},
 	}
 

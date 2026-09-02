@@ -11,7 +11,7 @@ import {
 import { NostrConnectSigner } from 'applesauce-signers'
 import { RelayPool } from 'applesauce-relay'
 import { auth, setLoggedIn, setLoggedOut, setProfile, setProfileLoading } from './auth.svelte'
-import { fetchProfile } from './pool'
+import { fetchProfile, pool, PROFILE_RELAYS } from './pool'
 import { goHome } from '../router.svelte'
 import { openLoginDialog, closeLoginDialog } from './loginDialog.svelte'
 import { resetSync } from './sync.svelte'
@@ -89,7 +89,34 @@ function persist(): void {
 // Proven against iOS-Safari reload-logout: the UI counts as logged in IMMEDIATELY from
 // this {pubkey, method}, regardless of whether/when applesauce restores account+signer.
 const LITE_KEY = 'zapclub:session'
+const LEGACY_WALLET_EVENT_KIND = 30078
+const LEGACY_WALLET_DTAG = 'zapclub:nwc'
 let intentionalLogout = false
+
+/** Removes credentials left by the retired wallet integration, locally and on profile relays. */
+async function clearLegacyWallet(pubkey: string): Promise<void> {
+  const marker = `zapclub:wallet-cleaned:${pubkey}`
+  try {
+    localStorage.removeItem(`zapclub:nwc:${pubkey}`)
+    localStorage.removeItem('zapclub:myZaps')
+    if (localStorage.getItem(marker)) return
+  } catch {
+    return
+  }
+  try {
+    const event = await signEvent({
+      kind: LEGACY_WALLET_EVENT_KIND,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['d', LEGACY_WALLET_DTAG]],
+      content: '',
+    })
+    const results = await Promise.allSettled(pool.publish(PROFILE_RELAYS, event))
+    if (!results.some((result) => result.status === 'fulfilled')) return
+    localStorage.setItem(marker, '1')
+  } catch (e) {
+    console.warn('[wallet cleanup] could not clear legacy relay record:', e)
+  }
+}
 
 function writeLite(pubkey: string, method: LoginMethod): void {
   try {
@@ -170,6 +197,7 @@ export function initAuth(): void {
     setLoggedIn(acc.pubkey, methodOf(acc.type))
     writeLite(acc.pubkey, methodOf(acc.type))
     void loadProfile(acc.pubkey)
+    void clearLegacyWallet(acc.pubkey)
     persist()
   })
   // Persist when the account list changes.
