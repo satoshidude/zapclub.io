@@ -34,7 +34,7 @@ function releaseManifest(buildInfo: { commit: string; version: string }): Plugin
       this.emitFile({
         type: 'asset',
         fileName: 'release.json',
-        source: `${JSON.stringify({ project: 'zapclub.io', footerContract: '1.1.0', ...buildInfo }, null, 2)}\n`,
+        source: `${JSON.stringify({ project: 'zapclub.io', footerContract: '1.2.0', ...buildInfo }, null, 2)}\n`,
       })
     },
   }
