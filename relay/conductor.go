@@ -79,8 +79,9 @@ type condClub struct {
 	lastBeat  int64 // ms of the last now_playing publish
 	playing   bool
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
-	autoOrder []int
-	autoIdx   int
+	autoOrder     []int
+	autoNextOrder []int // preplanned next cycle so clients can see the real upcoming track
+	autoIdx       int
 }
 
 // autoState carries the owner + parsed tracks for a club in Auto DJ mode.
@@ -1817,6 +1818,48 @@ func makeShuffledOrder(n int) []int {
 	return order
 }
 
+// advanceAutoOrder moves to the next shuffled Auto-DJ slot. At the cycle boundary it consumes
+// the order that was preplanned for the now_playing preview, so the relay always plays what it
+// announced to clients.
+func advanceAutoOrder(pb *condClub, trackCount int) {
+	pb.autoIdx++
+	if pb.autoIdx < trackCount {
+		return
+	}
+	if len(pb.autoNextOrder) == trackCount {
+		pb.autoOrder = pb.autoNextOrder
+	} else {
+		pb.autoOrder = makeShuffledOrder(trackCount)
+	}
+	pb.autoNextOrder = nil
+	pb.autoIdx = 0
+}
+
+// autoUpcomingTracks returns the exact upcoming Auto-DJ sequence. When the preview crosses the
+// current shuffle boundary, the next shuffle is generated once and retained by advanceAutoOrder.
+func autoUpcomingTracks(pb *condClub, tracks []condTrack, max int) []condTrack {
+	if max <= 0 || len(tracks) == 0 || len(pb.autoOrder) != len(tracks) || pb.autoIdx < 0 || pb.autoIdx >= len(tracks) {
+		return nil
+	}
+	out := make([]condTrack, 0, max)
+	for i := pb.autoIdx + 1; i < len(pb.autoOrder) && len(out) < max; i++ {
+		out = append(out, tracks[pb.autoOrder[i]])
+	}
+	if len(out) >= max {
+		return out
+	}
+	if len(pb.autoNextOrder) != len(tracks) {
+		pb.autoNextOrder = makeShuffledOrder(len(tracks))
+	}
+	for _, trackIndex := range pb.autoNextOrder {
+		if len(out) >= max {
+			break
+		}
+		out = append(out, tracks[trackIndex])
+	}
+	return out
+}
+
 // armedAutoClubs returns all clubs with an owner-armed Auto DJ playlist, regardless of whether
 // real DJs are on stage. The caller decides how to integrate auto-DJ (round-robin vs solo).
 // Reads from the in-memory indexes (no DB).
@@ -1879,15 +1922,12 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 	// (Re)initialize the shuffle order when the playlist changes or on cold start.
 	if len(pb.autoOrder) != len(tracks) {
 		pb.autoOrder = makeShuffledOrder(len(tracks))
+		pb.autoNextOrder = nil
 		pb.autoIdx = 0
 	}
 
 	nextTrack := func() {
-		pb.autoIdx++
-		if pb.autoIdx >= len(tracks) {
-			pb.autoOrder = makeShuffledOrder(len(tracks))
-			pb.autoIdx = 0
-		}
+		advanceAutoOrder(pb, len(tracks))
 	}
 
 	startTrack := func() {
@@ -1899,7 +1939,7 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		pb.duration = t.duration
 		pb.startedAt = now
 		pb.playing = true
-		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
+		c.publishNowPlayingAuto(ctx, club, pb, st.owner, tracks, now)
 		c.publishPlay(ctx, club, pb, now)
 	}
 
@@ -1933,30 +1973,35 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 	}
 
 	if now-pb.lastBeat >= condHeartbeatMS {
-		c.publishNowPlayingAuto(ctx, club, pb, st.owner, now)
+		c.publishNowPlayingAuto(ctx, club, pb, st.owner, tracks, now)
 	}
 }
 
 // publishNowPlayingAuto emits now_playing with p=owner (zap target) and auto=1 tags,
-// used when Auto DJ drives the club with no real DJ on stage.
-func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *condClub, owner string, now int64) {
+// used when Auto DJ drives the club with no real DJ on stage. Repeated "next" tags expose the
+// conductor's authoritative shuffled preview; clients must not guess this server-only order.
+func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *condClub, owner string, tracks []condTrack, now int64) {
+	tags := nostr.Tags{
+		{"h", club},
+		{"d", club},
+		{"track", "yt:" + pb.videoID},
+		{"dj", pb.dj},
+		{"pos", strconv.Itoa(pb.pos)},
+		{"started_at", strconv.FormatInt(pb.startedAt, 10)},
+		{"sent_at", strconv.FormatInt(now, 10)},
+		{"duration", strconv.Itoa(pb.duration)},
+		{"status", "playing"},
+		{"p", owner},
+		{"auto", "1"},
+	}
+	for _, track := range autoUpcomingTracks(pb, tracks, 6) {
+		tags = append(tags, nostr.Tag{"next", "yt:" + track.videoID, track.title})
+	}
 	ev := &nostr.Event{
 		Kind:      kindNowPlaying,
 		CreatedAt: nostr.Timestamp(now / 1000),
-		Tags: nostr.Tags{
-			{"h", club},
-			{"d", club},
-			{"track", "yt:" + pb.videoID},
-			{"dj", pb.dj},
-			{"pos", strconv.Itoa(pb.pos)},
-			{"started_at", strconv.FormatInt(pb.startedAt, 10)},
-			{"sent_at", strconv.FormatInt(now, 10)},
-			{"duration", strconv.Itoa(pb.duration)},
-			{"status", "playing"},
-			{"p", owner},
-			{"auto", "1"},
-		},
-		Content: pb.title,
+		Tags:      tags,
+		Content:   pb.title,
 	}
 	pb.lastBeat = now
 	c.publish(ctx, ev, true)

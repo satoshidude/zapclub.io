@@ -127,4 +127,6 @@ export interface NowPlaying {
   writer?: string
   /** true when the Auto DJ (owner-armed playlist) is playing — no real DJ on stage. */
   auto?: boolean
+  /** Relay-authoritative shuffled preview for Auto DJ. */
+  upNext?: { videoId: string; title: string }[]
 }

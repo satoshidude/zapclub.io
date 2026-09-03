@@ -98,6 +98,10 @@ targetMs = Date.now() + offsetMs - started_at
 The player loads at `targetMs`. Every five seconds it compares local playback
 with the target and seeks when absolute drift exceeds three seconds.
 
+Auto-DJ `now_playing` heartbeats also carry repeated `next` tags. They expose
+the relay's preplanned shuffled order so every client's “Up next” preview
+matches the tracks the conductor will actually play.
+
 ## Storage
 
 BadgerDB is the Nostr event store and source of truth. SQLite contains derived

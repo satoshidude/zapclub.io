@@ -74,6 +74,10 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
   if (!track.startsWith('yt:')) return null
   const videoId = track.slice(3)
   if (!isValidVideoId(videoId)) return null // drop a foreign event with a malformed id
+  const upNext = ev.tags
+    .filter((t) => t[0] === 'next' && typeof t[1] === 'string' && t[1].startsWith('yt:'))
+    .map((t) => ({ videoId: t[1].slice(3), title: t[2] ?? t[1] }))
+    .filter((t) => isValidVideoId(t.videoId))
   return {
     videoId,
     startedAt: Number(tag('started_at')) || 0,
@@ -85,6 +89,7 @@ function parseNowPlaying(ev: Event): NowPlaying | null {
     title: ev.content,
     writer: ev.pubkey,
     auto: tag('auto') === '1' || undefined,
+    upNext: upNext.length > 0 ? upNext : undefined,
   }
 }
 
@@ -143,6 +148,14 @@ function playableMatrix(djs: string[]): boolean[][] {
  *  interleave alternates fairly per DJ regardless of where off tracks sit). Off tracks drop out.
  *  If an Auto DJ is armed for the club and not already on stage, it is injected as an extra slot. */
 export function upcomingTracks(clubId: string, max = 5): { dj: string; videoId: string; title: string }[] {
+  // Auto DJ shuffles exclusively inside the relay. Its repeated `next` tags are therefore the
+  // only preview that can match what will actually play. Older relay events without those tags
+  // fall through to the legacy playlist-order approximation below during rolling upgrades.
+  const np = state.np
+  if (np?.auto && np.upNext?.length) {
+    return np.upNext.slice(0, max).map((track) => ({ dj: np.dj, ...track }))
+  }
+
   const stageDjPks = stage.djs.map((d) => d.pubkey)
 
   // Inject armed Auto DJ if it's not already a real stage DJ.
