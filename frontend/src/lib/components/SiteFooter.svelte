@@ -14,7 +14,7 @@
 
 <footer
   class="site-footer"
-  data-project-footer="1.2.0"
+  data-sunnyhill-footer="1.1.0"
   data-project-version={build.version}
   data-build-commit={build.commit}
 >
@@ -31,6 +31,8 @@
     {:else}
       <a class="revision" href={`${repository}/commit/${build.commit}`} target="_blank" rel="noopener noreferrer">{revision}</a>
     {/if}
+    <span aria-hidden="true">/</span>
+    <span class="site-footer__attribution">made by sunnyhill.io</span>
   </small>
 </footer>
 
@@ -65,14 +67,14 @@
 
   a {
     color: inherit;
-    text-decoration-color: transparent;
-    text-underline-offset: 0.3rem;
-    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+    text-decoration: none;
+    transition: color 0.15s ease;
   }
 
-  a:hover {
+  a:hover,
+  a:focus-visible {
     color: var(--accent);
-    text-decoration-color: currentColor;
+    font-weight: 800;
   }
 
   a:focus-visible {
@@ -97,13 +99,19 @@
     text-decoration: none;
   }
 
+  .site-footer__attribution {
+    margin-inline: 0;
+    color: inherit;
+    white-space: nowrap;
+  }
+
   @media (max-width: 560px) {
     .site-footer {
       min-height: 0;
       align-items: flex-start;
       flex-direction: column;
-      gap: 0.8rem;
-      padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
+      gap: 0.55rem;
+      padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
     }
 
     nav {

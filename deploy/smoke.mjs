@@ -18,7 +18,7 @@ await request('https://zapclub.io/release.json', (body) => {
   try {
     const release = JSON.parse(body)
     return release.project === 'zapclub.io'
-      && release.footerContract === '1.2.0'
+      && release.footerContract === '1.1.0'
       && (!expectedCommit || release.commit === expectedCommit)
   } catch {
     return false
