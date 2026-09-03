@@ -1,28 +1,43 @@
 # Zapclub – verbindlicher Projektkontext
 
-Dieses Repository ist die einzige Quelle für Zapclub-Anwendungscode und die
-projektspezifischen Produktionsdateien unter `deploy/`. Hostweite Firewall-,
-SSH- und Caddy-Importer-Konfiguration gehört in das Repository `sunnyhill.io`.
+## Quellen der Wahrheit
 
-## Produktion und Deployment
+- Dieses Repository enthält ausschließlich Zapclub-bezogene Quellen:
+  Anwendungscode, Tests, Dokumentation und projektspezifische
+  Produktionsdateien unter `deploy/`.
+- `README.md` beschreibt Produkt und Architektur, `deploy/README.md` den
+  verbindlichen Betrieb und `release.sh` den ausführbaren Releaseprozess.
+- Hostweite Firewall-, SSH-, Kernel-, Caddy-Importer- und Dispatcher-Logik sowie
+  der gemeinsame Footer-Vertrag gehören in das Repository `sunnyhill.io`.
+  Dieses Repository enthält nur die dazu kompatible Zapclub-Implementierung.
 
-- Ziel: `sunnyhill.io`, öffentliche Hosts `zapclub.io` und `relay.zapclub.io`
-- Einstieg: `./release.sh` ausschließlich aus einem sauberen lokalen `main`
-- Runtime: `zapclub:zapclub`
-- Units: `zapclub-relay`, `zapclub-lnurlp`, `zapclub-telegram-bot`
-- Releases: `/srv/zapclub/releases/<commit>`, aktiv über `/srv/zapclub/current`
-- State: `/var/lib/zapclub-relay`; Secrets: `/etc/zapclub`
-- Prüfungen: Frontend check/test/build, Go vet/test, Relay-E2E und
-  `node deploy/smoke.mjs`
+## Aktuelle Produktion
 
-Der Release wird vor dem Push vollständig geprüft, als exaktes Git-Bundle über
-`webmaster` übertragen und vom root-eigenen Validator gebaut und atomar
-aktiviert. Direkte Serveränderungen im aktiven Release, `git pull` in Produktion
-oder ein Deployment durch das Runtime-Konto sind verboten. Caddy erhält nur
-lesenden ACL-Zugriff auf `frontend/dist` und ist kein Mitglied der Gruppe
-`zapclub`.
+- Zielsystem: `sunnyhill.io`; öffentliche Hosts: `zapclub.io` und
+  `relay.zapclub.io`.
+- Runtime: `zapclub:zapclub`; persistenter State: `/var/lib/zapclub-relay`;
+  Secrets: `/etc/zapclub`.
+- Anwendungs-Units: `zapclub-relay`, `zapclub-lnurlp` und
+  `zapclub-telegram-bot`.
+- Betriebs-Units: `zapclub-backup.service/.timer`,
+  `zapclub-monitor.service/.timer` und `zapclub-alert@.service`.
+- Releases liegen unter `/srv/zapclub/releases/<commit>`; `current` zeigt auf
+  den aktiven Commit. Neben diesem bleibt höchstens ein geprüfter
+  Rückfall-Release erhalten.
+- Caddy erhält ausschließlich lesenden ACL-Zugriff auf `frontend/dist` und ist
+  kein Mitglied von `zapclub`. Nur der Relay-Prozess erhält die Zusatzgruppe
+  `caddy`, um das pseudonymisierte Zugriffslog zu lesen.
 
-Infrastrukturdateien unter `deploy/` werden bei einem App-Release nicht als root
-installiert. Änderungen daran separat validieren, explizit installieren und
-danach Units, Backup, Monitor und öffentliche Endpunkte prüfen. Das vollständige
-Runbook steht in `deploy/README.md`.
+## Projektlokaler Releasevertrag
+
+- Einstieg ist `./release.sh` aus einem sauberen lokalen `main`.
+- Vor dem Push laufen `npm audit`, Frontend-Check/-Tests/-Build, Go Vet/-Tests,
+  Relay-E2E und statische Linux-amd64-Builds. Nach der Aktivierung prüft
+  `node deploy/smoke.mjs` die öffentlichen Endpunkte und den erwarteten Commit.
+- Der Commit wird als exaktes Git-Bundle über `webmaster` übertragen. Der
+  hostweite root-eigene Dispatcher validiert, baut und aktiviert ihn atomar;
+  seine Implementierung wird nicht in diesem Repository dupliziert.
+- Änderungen unter `deploy/` werden nicht automatisch als root installiert.
+  Sie sind separat zu validieren und explizit zu installieren; anschließend
+  müssen Units, Backup, Monitor, Alarmtransport und öffentliche Endpunkte
+  geprüft werden.
