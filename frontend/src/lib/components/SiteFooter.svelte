@@ -65,14 +65,14 @@
 
   a {
     color: inherit;
-    text-decoration-color: transparent;
-    text-underline-offset: 0.3rem;
-    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+    text-decoration: none;
+    transition: color 0.15s ease;
   }
 
-  a:hover {
+  a:hover,
+  a:focus-visible {
     color: var(--accent);
-    text-decoration-color: currentColor;
+    font-weight: 800;
   }
 
   a:focus-visible {
@@ -102,8 +102,8 @@
       min-height: 0;
       align-items: flex-start;
       flex-direction: column;
-      gap: 0.8rem;
-      padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
+      gap: 0.55rem;
+      padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
     }
 
     nav {

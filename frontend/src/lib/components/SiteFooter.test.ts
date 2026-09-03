@@ -21,5 +21,7 @@ describe('project footer contract', () => {
   it('ends its metadata after version and revision', () => {
     expect(source).toMatch(/v\{build\.version\}[\s\S]*\{revision\}[\s\S]*<\/small>/)
     expect(source).not.toMatch(/attribution/i)
+    expect(source).toMatch(/a:hover,[\s\S]*?font-weight:\s*800;/)
+    expect(source).not.toMatch(/text-decoration-color/)
   })
 })
