@@ -32,7 +32,7 @@ sqlite3 /var/lib/zapclub-relay/conductor.db \
   | tail -1 \
   | grep -qx 'ok'
 
-install -d -m 0700 "$DEST"
+install -d -o root -g zapclub -m 0750 "$DEST"
 tar -czf "$OUT" -C / var/lib/zapclub-relay etc/zapclub
 chmod 0600 "$OUT"
 tar -tzf "$OUT" >/dev/null

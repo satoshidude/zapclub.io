@@ -5,6 +5,9 @@
 Decentralized social music streaming with Nostr identities, NIP-29 clubs,
 Lightning zaps and synchronized YouTube playback.
 
+This README is the authoritative product and architecture concept. The current
+production and release plan lives in [`deploy/README.md`](deploy/README.md).
+
 - Frontend: `https://zapclub.io`
 - Relay: `wss://relay.zapclub.io`
 - UI language: English only
@@ -137,7 +140,7 @@ Important relay29 constraints:
 frontend/      Svelte 5 / TypeScript client
 relay/         Go NIP-29 relay and conductor
 telegram-bot/  Telegram integration
-deploy/        sunnyhill Caddy, systemd and backup configuration
+deploy/        sunnyhill Caddy, systemd, monitoring and backup configuration
 ```
 
 ## Local development
@@ -198,6 +201,13 @@ the active release. Caddy serves the frontend directly from that symlink; the
 relay, LNURL/NIP-05 proxy and Telegram bot are systemd services. Persistent data
 lives in `/var/lib/zapclub-relay`, secrets in `/etc/zapclub` and backups in
 `/var/backups/zapclub`.
+
+Run `./release.sh` from a clean local `main` for a complete release. It performs
+all local checks, pushes the exact commit, transfers a Git bundle to the VPS,
+invokes the restricted root validator and finishes with public HTTP, NIP-05 and
+Nostr WebSocket smoke tests. Production is checked every five minutes by
+`zapclub-monitor.timer`; failures trigger a rate-limited mail alert. Daily
+backups are independently managed by `zapclub-backup.timer`.
 
 See [`deploy/README.md`](deploy/README.md) for the authoritative file mapping,
 release procedure, rollback and verification checklist.

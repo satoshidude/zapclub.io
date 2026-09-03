@@ -1,0 +1,40 @@
+[Unit]
+Description=zapclub.io production health monitor
+After=network-online.target zapclub-relay.service zapclub-lnurlp.service zapclub-telegram-bot.service
+Wants=network-online.target
+OnFailure=zapclub-alert@%n.service
+
+[Service]
+Type=oneshot
+User=zapclub
+Group=zapclub
+ExecStart=/usr/local/sbin/zapclub-monitor.sh
+StateDirectory=zapclub-monitor
+StateDirectoryMode=0750
+UMask=0027
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/srv/zapclub /var/lib/zapclub-relay /var/backups/zapclub /etc/zapclub
+ReadWritePaths=/var/lib/zapclub-monitor
+
+MemoryHigh=128M
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=4096

@@ -1,0 +1,34 @@
+[Unit]
+Description=zapclub.io monitor alert for %i
+
+[Service]
+Type=oneshot
+Environment=ZAPCLUB_ALERT_TO=webmaster@kasper.digital
+Environment=ZAPCLUB_MONITOR_STATE_DIR=/var/lib/zapclub-monitor
+Environment=MSMTP_CONFIG=/etc/zapclub/msmtprc
+ExecStart=/usr/local/sbin/zapclub-alert.sh %i
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/zapclub
+ReadWritePaths=/var/lib/zapclub-monitor
+
+MemoryMax=128M
+TasksMax=32
+LimitNOFILE=1024
