@@ -7,6 +7,7 @@ frontend/.vite/
 
 # Relay (Go)
 relay/zapclub-relay
+relay/zapclub-relay-linux
 relay/*.test
 relay/conductor.db*
 relay/db/
@@ -22,20 +23,14 @@ relay/relay.env
 *.env
 !*.env.example
 
-# Internal docs / AI tooling — not for the public repo
-CLAUDE.md
-.claude/
-zapclub_grobkonzept.md
+# Local task state — not for the public repo
 tasks/
 
 # OS / editor
 .DS_Store
 *.swp
+__pycache__/
 
-# Local build artifacts (deploy copies, never for the repo)
+# Local build artifacts
 telegram-bot/telegram-bot
-telegram-bot/zapclub-*
-/zapclub-relay
-/zapclub-relay-linux
-/zapclub-bot-linux
-/zapclub-telegram-bot-linux
+telegram-bot/zapclub-telegram-bot*

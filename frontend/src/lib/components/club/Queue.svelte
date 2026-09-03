@@ -280,7 +280,7 @@
           class:dragging={drag?.from === i}
           class:drop={dropIndex === i && drag?.from !== i}
         >
-          <span class="grip" onpointerdown={(e) => dragStart(e, i)} title="Drag to reorder">⠿</span>
+          <button type="button" class="grip" onpointerdown={(e) => dragStart(e, i)} title="Drag to reorder" aria-label="Drag to reorder">⠿</button>
           <button class="play" onclick={() => (preview = { track, context: 'queue' })} title="Preview / edit details">▶</button>
           <span class="t-idx">{i + 1}</span>
           <span class="t-title" use:marquee><span class="mq-inner">{track.title}</span></span>
@@ -476,12 +476,12 @@
     display: inline-block;
   }
   /* Scroll on row hover (desktop); always on touch */
-  .tracks li:hover .t-title[data-mq] .mq-inner,
-  .lib-list li:hover .t-title[data-mq] .mq-inner {
+  .tracks li:hover .t-title:global([data-mq]) .mq-inner,
+  .lib-list li:hover .t-title:global([data-mq]) .mq-inner {
     animation: t-scroll 4s ease-in-out infinite;
   }
   @media (hover: none) {
-    .t-title[data-mq] .mq-inner {
+    .t-title:global([data-mq]) .mq-inner {
       animation: t-scroll 5s ease-in-out 0.5s infinite;
     }
   }
@@ -495,6 +495,10 @@
   }
   .grip {
     flex: 0 0 auto;
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
     color: var(--text-dim);
     font-size: 1rem;
     cursor: grab;

@@ -50,3 +50,18 @@ jobs:
       - name: relay e2e
         run: ./e2e.sh
         working-directory: relay
+
+  telegram-bot:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: telegram-bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: telegram-bot/go.mod
+          cache-dependency-path: telegram-bot/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: CGO_ENABLED=0 go build ./...

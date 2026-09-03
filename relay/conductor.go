@@ -70,15 +70,14 @@ type condTrack struct {
 
 // per-club authoritative playback state (in-memory; rebuilt from the store on cold start).
 type condClub struct {
-	pos        int
-	videoID    string
-	dj         string
-	title      string
-	duration   int
-	startedAt  int64 // ms (relay clock)
-	lastBeat   int64 // ms of the last now_playing publish
-	playing    bool
-	inTakeover bool // true while a live-session (kind 30109, mode=takeover) is active
+	pos       int
+	videoID   string
+	dj        string
+	title     string
+	duration  int
+	startedAt int64 // ms (relay clock)
+	lastBeat  int64 // ms of the last now_playing publish
+	playing   bool
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
 	autoOrder []int
 	autoIdx   int
@@ -1254,17 +1253,6 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 		c.advance(ctx, club, djPks, queues, pb, now)
 		return
 	}
-	// Takeover freeze: a staged DJ is live (kind 30109, mode=takeover, status=live).
-	// Freeze the round-robin and publish a paused now_playing so clients stop the YT clock.
-	// When the session ends/goes stale, resume with one advance() from the current position.
-	if wasTakeover, resuming := c.takeoverState(ctx, club, djPks, pb, now); wasTakeover {
-		if resuming {
-			log.Printf("conductor [%.8s] advance reason=takeover-end", club)
-			// Session just ended → clean resume from current round-robin position.
-			c.advance(ctx, club, djPks, queues, pb, now)
-		}
-		return
-	}
 	// Skip requested (kind 30107, owner/mod/playing-DJ — validated in skipRequested).
 	if c.skipRequested(ctx, club, pb) {
 		log.Printf("conductor [%.8s] advance reason=skip pos=%d", club, pb.pos)
@@ -1538,6 +1526,31 @@ func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───
 
+// publishNowPlayingPaused republishes the current state as paused so clients switch to
+// the lobby immediately. A fresh wall-clock timestamp avoids a same-second collision with
+// the last playing heartbeat, which ReplaceEvent would reject as not newer.
+func (c *conductor) publishNowPlayingPaused(ctx context.Context, club string, pb *condClub, _ int64) {
+	now := time.Now().UnixMilli()
+	ev := &nostr.Event{
+		Kind:      kindNowPlaying,
+		CreatedAt: nostr.Timestamp(now / 1000),
+		Tags: nostr.Tags{
+			{"h", club},
+			{"d", club},
+			{"track", "yt:" + pb.videoID},
+			{"dj", pb.dj},
+			{"pos", strconv.Itoa(pb.pos)},
+			{"started_at", strconv.FormatInt(pb.startedAt, 10)},
+			{"sent_at", strconv.FormatInt(now, 10)},
+			{"duration", strconv.Itoa(pb.duration)},
+			{"status", "paused"},
+		},
+		Content: pb.title,
+	}
+	pb.lastBeat = now
+	c.publish(ctx, ev, true)
+}
+
 func (c *conductor) publishNowPlaying(ctx context.Context, club string, pb *condClub, now int64) {
 	bangers, skips := c.moodCounts(club, pb.pos)
 	ev := &nostr.Event{
@@ -1790,104 +1803,6 @@ func atoiDefault(s string, def int) int {
 		return n
 	}
 	return def
-}
-
-// ── takeover (live A/V session) ───────────────────────────────────────────────
-
-const liveSessionStaleMS = 300_000 // 5 min; a live-session heartbeat must arrive within this
-
-// takeoverState checks whether a kind-30109 takeover live-session is active for the club.
-// Returns (wasTakeover bool, resuming bool):
-//   - wasTakeover=true, resuming=false  → session is still live; freeze the round-robin.
-//   - wasTakeover=true, resuming=true   → session just ended; caller should call advance().
-//   - wasTakeover=false, resuming=false → no live session; normal flow.
-//
-// Side-effects: on the first tick of a live takeover, publishes now_playing with
-// status=paused so clients immediately stop the YT clock.
-func (c *conductor) takeoverState(ctx context.Context, club string, djPks []string, pb *condClub, now int64) (wasTakeover, resuming bool) {
-	// Check for a fresh, live takeover event from any current staged DJ.
-	active := c.activeTakeover(ctx, club, djPks, now)
-	if active {
-		if !pb.inTakeover {
-			// Transition into takeover: publish paused now_playing once.
-			pb.inTakeover = true
-			c.publishNowPlayingPaused(ctx, club, pb, now)
-		} else if now-pb.lastBeat >= condHeartbeatMS {
-			// Already in takeover: keep heartbeating so late joiners get the paused state.
-			c.publishNowPlayingPaused(ctx, club, pb, now)
-		}
-		return true, false
-	}
-	if pb.inTakeover {
-		// Session just ended → signal the caller to resume.
-		pb.inTakeover = false
-		return true, true
-	}
-	return false, false
-}
-
-// activeTakeover returns true when there is a fresh kind-30109 takeover event authored by
-// an active staged DJ with status=live.
-func (c *conductor) activeTakeover(ctx context.Context, club string, djPks []string, now int64) bool {
-	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
-		Kinds: []int{kindLiveSession},
-		Tags:  nostr.TagMap{"h": []string{club}},
-	})
-	if err != nil {
-		return false
-	}
-	// Collect newest per author.
-	newest := map[string]*nostr.Event{}
-	for ev := range ch {
-		existing, ok := newest[ev.PubKey]
-		if !ok || ev.CreatedAt > existing.CreatedAt {
-			newest[ev.PubKey] = ev
-		}
-	}
-	stale := now - liveSessionStaleMS
-	for _, ev := range newest {
-		if tagVal(ev, "mode") != "takeover" {
-			continue
-		}
-		if tagVal(ev, "status") != "live" {
-			continue
-		}
-		if int64(ev.CreatedAt)*1000 < stale {
-			continue
-		}
-		// Author must be an active staged DJ (still on stage, not just any member).
-		if indexOf(djPks, ev.PubKey) >= 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// publishNowPlayingPaused republishes now_playing with status=paused so clients stop the
-// YT clock. pos/startedAt are frozen so the position is preserved for when we resume.
-func (c *conductor) publishNowPlayingPaused(ctx context.Context, club string, pb *condClub, _ int64) {
-	// Always use the real wall-clock time so the created_at is strictly newer than the last
-	// playing heartbeat. If we used the tick's `now` they could collide (same second) and
-	// ReplaceEvent would reject the paused event as "not newer", leaving clients stuck.
-	now := time.Now().UnixMilli()
-	ev := &nostr.Event{
-		Kind:      kindNowPlaying,
-		CreatedAt: nostr.Timestamp(now / 1000),
-		Tags: nostr.Tags{
-			{"h", club},
-			{"d", club},
-			{"track", "yt:" + pb.videoID},
-			{"dj", pb.dj},
-			{"pos", strconv.Itoa(pb.pos)},
-			{"started_at", strconv.FormatInt(pb.startedAt, 10)},
-			{"sent_at", strconv.FormatInt(now, 10)},
-			{"duration", strconv.Itoa(pb.duration)},
-			{"status", "paused"},
-		},
-		Content: pb.title,
-	}
-	pb.lastBeat = now
-	c.publish(ctx, ev, true)
 }
 
 // ── Auto DJ ───────────────────────────────────────────────────────────────────

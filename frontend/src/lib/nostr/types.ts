@@ -6,7 +6,7 @@ export interface ProfileMetadata {
   picture?: string
   banner?: string
   nip05?: string
-  /** Lightning address (LNURL) — basis for later NIP-57 zaps. */
+  /** Lightning address (LNURL), used for NIP-57 zaps. */
   lud16?: string
   website?: string
   /** Set to true in bot profiles — suppresses the DJ ring on the dancefloor. */
@@ -31,7 +31,7 @@ export interface Club {
   isPublic: boolean
   /** Invite-only: 9021 is not auto-accepted; owner must approve (relay-enforced). */
   closed?: boolean
-  /** Hidden from non-members: stream/chat require auth + membership (relay-enforced). */
+  /** Hidden from non-members: playback and club activity require membership (relay-enforced). */
   isPrivate?: boolean
   /** Member count (only filled in club lists, for sorting/display). */
   memberCount?: number
@@ -50,7 +50,7 @@ export interface Club {
 /**
  * Club access config (kind 30101, addressable, authored by the OWNER). Separate from NIP-29
  * metadata (39000) because relay29 doesn't carry custom tags. 'open' = anyone hears for free,
- * join only to DJ/chat. 'paid' = entry costs `price` sats to `lud16`; the relay enforces it.
+ * join only to DJ. 'paid' = entry costs `price` sats to `lud16`; the relay enforces it.
  */
 export interface ClubConfig {
   access: 'open' | 'paid'
@@ -70,14 +70,7 @@ export interface ClubMember {
   roles: string[]
 }
 
-export interface ChatMessage {
-  id: string
-  pubkey: string
-  content: string
-  createdAt: number
-}
-
-// ── Phase 3: stage / queue / sync ─────────────────────────────────────────
+// ── Stage / queue / sync ───────────────────────────────────────────────────
 
 /** A DJ on the stage (from kind:30102). */
 export interface StageDj {

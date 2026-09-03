@@ -1,0 +1,23 @@
+[Unit]
+Description=zapclub Telegram bridge bot
+After=network-online.target zapclub-relay.service
+Wants=network-online.target zapclub-relay.service
+
+[Service]
+Type=simple
+User=zapclub
+Group=zapclub
+WorkingDirectory=/srv/zapclub/current/telegram-bot
+EnvironmentFile=/etc/zapclub/telegram.env
+ExecStart=/srv/zapclub/current/bin/zapclub-telegram-bot
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

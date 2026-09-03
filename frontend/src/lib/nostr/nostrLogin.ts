@@ -1,6 +1,5 @@
 import type { Event, EventTemplate } from 'nostr-tools/pure'
 import { decode } from 'nostr-tools/nip19'
-import { minePow } from 'nostr-tools/nip13'
 import { AccountManager } from 'applesauce-accounts'
 import {
   ExtensionAccount,
@@ -11,13 +10,12 @@ import {
 import { NostrConnectSigner } from 'applesauce-signers'
 import { RelayPool } from 'applesauce-relay'
 import { auth, setLoggedIn, setLoggedOut, setProfile, setProfileLoading } from './auth.svelte'
-import { fetchProfile, pool, PROFILE_RELAYS } from './pool'
+import { fetchProfile } from './pool'
 import { goHome } from '../router.svelte'
 import { openLoginDialog, closeLoginDialog } from './loginDialog.svelte'
 import { resetSync } from './sync.svelte'
 import { resetStage, leaveStage } from './stage.svelte'
 import { resetQueues } from './queue.svelte'
-import { resetChat } from './chat.svelte'
 import { resetPlaylists } from './playlists.svelte'
 import { resetZaps } from './zaps.svelte'
 import type { LoginMethod } from './types'
@@ -43,7 +41,6 @@ function resetSession(): void {
   resetSync()
   resetStage()
   resetQueues()
-  resetChat()
   resetPlaylists()
   resetZaps()
   goHome()
@@ -89,34 +86,7 @@ function persist(): void {
 // Proven against iOS-Safari reload-logout: the UI counts as logged in IMMEDIATELY from
 // this {pubkey, method}, regardless of whether/when applesauce restores account+signer.
 const LITE_KEY = 'zapclub:session'
-const LEGACY_WALLET_EVENT_KIND = 30078
-const LEGACY_WALLET_DTAG = 'zapclub:nwc'
 let intentionalLogout = false
-
-/** Removes credentials left by the retired wallet integration, locally and on profile relays. */
-async function clearLegacyWallet(pubkey: string): Promise<void> {
-  const marker = `zapclub:wallet-cleaned:${pubkey}`
-  try {
-    localStorage.removeItem(`zapclub:nwc:${pubkey}`)
-    localStorage.removeItem('zapclub:myZaps')
-    if (localStorage.getItem(marker)) return
-  } catch {
-    return
-  }
-  try {
-    const event = await signEvent({
-      kind: LEGACY_WALLET_EVENT_KIND,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['d', LEGACY_WALLET_DTAG]],
-      content: '',
-    })
-    const results = await Promise.allSettled(pool.publish(PROFILE_RELAYS, event))
-    if (!results.some((result) => result.status === 'fulfilled')) return
-    localStorage.setItem(marker, '1')
-  } catch (e) {
-    console.warn('[wallet cleanup] could not clear legacy relay record:', e)
-  }
-}
 
 function writeLite(pubkey: string, method: LoginMethod): void {
   try {
@@ -197,7 +167,6 @@ export function initAuth(): void {
     setLoggedIn(acc.pubkey, methodOf(acc.type))
     writeLite(acc.pubkey, methodOf(acc.type))
     void loadProfile(acc.pubkey)
-    void clearLegacyWallet(acc.pubkey)
     persist()
   })
   // Persist when the account list changes.
@@ -344,29 +313,8 @@ function warmSigner(): void {
  *  – NIP-46 bunker that must connect first after reload → the first sign triggers the
  *    connect() round-trip; a generous timeout per attempt, else it would hang forever.
  */
-// NIP-13 anti-spam proof-of-work. Mine chat (kind 9) — the spam vector — so mass/throwaway-key
-// posting costs CPU. (Join is intentionally NOT gated: PoW on join breaks slightly-stale
-// clients and adds friction to a core action; join-floods are covered by the relay's per-IP
-// limiter.) Bits are slightly above the relay's minimum. Mining is synchronous but ~ms at this
-// difficulty and runs once per chat message.
-const POW_BITS: Record<number, number> = { 9: 12 }
-
-/** Adds a mined NIP-13 nonce to join/chat events before signing (no-op for other kinds). The
- *  signer re-derives the same id from these exact fields, so the proof-of-work survives. */
-function withPow(template: EventTemplate): EventTemplate {
-  const bits = POW_BITS[template.kind]
-  const pubkey = auth.pubkey
-  if (!bits || !pubkey) return template
-  const mined = minePow(
-    { pubkey, created_at: template.created_at, kind: template.kind, tags: [...template.tags], content: template.content },
-    bits,
-  )
-  return { kind: mined.kind, created_at: mined.created_at, tags: mined.tags, content: mined.content }
-}
-
 export async function signEvent(template: EventTemplate): Promise<Event> {
   if (!manager.active) throw new Error('No signer available — please sign in again.')
-  template = withPow(template)
   let lastErr: unknown
   for (let i = 0; i < 4; i++) {
     try {

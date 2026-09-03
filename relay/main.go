@@ -240,7 +240,7 @@ func main() {
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
 
 	// Club creation cap: at most 3 per account. Existing clubs are grandfathered.
-	cap := newClubCap(db, os.Getenv("SUPERADMIN"))
+	cap := newClubCap(db, superadmin)
 
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
@@ -293,15 +293,11 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
 	// Stage cap: every club may have at most 5 DJs on stage.
-	stageG := &stageGate{db: db, superadmin: os.Getenv("SUPERADMIN")}
+	stageG := &stageGate{db: db, superadmin: superadmin}
 	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
 
-	// Live A/V session gate (kind 30109): only staged DJs + owner/mod may go live.
-	liveG := newLiveGate(db, state, os.Getenv("SUPERADMIN"))
-	relay.RejectEvent = append(relay.RejectEvent, liveG.reject)
-
 	// Auto DJ config (kind 30105): only the club owner may arm/disarm.
-	autoDJG := newAutoDJGate(db, os.Getenv("SUPERADMIN"))
+	autoDJG := newAutoDJGate(db, superadmin)
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
 	cond := newConductor(db, relay, state, sk)

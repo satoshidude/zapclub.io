@@ -15,15 +15,14 @@ Built on **khatru + relay29** (Go, badger eventstore). Listens only on
   Only visible via E2E test, not code review.
 - **Never mix metadata kinds (39000–39003) with other kinds in one subscription** —
   the relay rejects it. Use two separate subs.
-- **`go.mod`/`go.sum` committed.** Never run `go get` / `go mod tidy` on the
-  server (breaks `git pull`, silent no-op deploys). After deploy verify the
-  feature is actually in the binary (`grep <feature> <binary>`), not just "build ok".
+- **`go.mod`/`go.sum` committed.** Never run `go get` / `go mod tidy` during a
+  release. Build from the pinned module files before switching the active release.
 
 ## Write protection
 
-Only group members may write content events (kinds 9, 30100, 30102, 30103,
-20100); the relay checks membership against the `h`-tag group. NIP-42 AUTH
-challenge on connect; public clubs stay readable without AUTH.
+Only group members may write club content; the relay checks membership against
+the `h`-tag group. `30100` and `1313` are relay-authored only. NIP-42 AUTH runs
+on connect; public clubs stay readable without AUTH.
 
 ## Secrets
 
@@ -69,11 +68,11 @@ selects the `d`-address client-side.
 
 ## Status
 
-Live at `wss://relay.zapclub.io`. Builds, boots, E2E green (Go 1.26).
+Live at `wss://relay.zapclub.io` on the `sunnyhill` release deployment.
 
 Roles: `owner` (creator) + `moderator`. DJ/stage is a content event (30102),
 not a relay role.
 
-All gates live: `entryfee.go` (sats entry fee), `privategate.go` (closed/private
-clubs), `clubcap.go` (club count limit), `playlistgate.go` (playlist count limit),
-`stageGate` in `conductor.go` (DJ slot cap). All relay-enforced.
+Relay-enforced gates cover paid entry (`entryfee.go`), club count
+(`clubcap.go`), owner-only Auto DJ (`autodjgate.go`) and the DJ slot cap in
+`conductor.go`. Closed-club membership is enforced by relay29.

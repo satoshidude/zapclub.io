@@ -1,12 +1,23 @@
-# zapclub.io — Caddy reverse proxy / static host
-# www.zapclub.io currently points to a different IP, so it is intentionally
-# NOT included here (ACME cert would fail). Add it once DNS points at this box.
+# Imported by /etc/caddy/Caddyfile on sunnyhill as /etc/caddy/zapclub.caddy.
 
-{
-	email admin@zapclub.io
+(zapclub_access_log) {
+	log {
+		output file /var/log/caddy/zapclub-access.log {
+			mode 0640
+			roll_size 5MiB
+			roll_keep 2
+			roll_keep_for 336h
+		}
+		format filter {
+			request>remote_ip ip_mask 24 48
+			request>client_ip ip_mask 24 48
+			wrap json
+		}
+	}
 }
 
 zapclub.io {
+	import zapclub_access_log
 	encode zstd gzip
 
 	# LNURL-pay (LUD-16) + NIP-05 — proxied to lnurlp_proxy on 3335.
@@ -27,9 +38,8 @@ zapclub.io {
 		reverse_proxy 127.0.0.1:3334
 	}
 
-	# Everything else: static SPA with history-router fallback.
 	handle {
-		root * /var/www/zapclub
+		root * /srv/zapclub/current/frontend/dist
 		try_files {path} /index.html
 		file_server
 	}
@@ -45,13 +55,15 @@ zapclub.io {
 }
 
 relay.zapclub.io {
-	# Nostr relay — WebSocket upgrade is handled transparently by reverse_proxy.
-	reverse_proxy 127.0.0.1:3334
+	import zapclub_access_log
+	reverse_proxy 127.0.0.1:3334 {
+		flush_interval -1
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
-		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https://zapclub.io; connect-src 'self' wss://relay.nostr.band wss://nos.lol https:; frame-ancestors 'none'"
 	}
 }

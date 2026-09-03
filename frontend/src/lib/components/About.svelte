@@ -24,7 +24,7 @@
       <li><strong>DJ stage &amp; round-robin</strong> — up to 5 DJs; queues interleaved track-by-track.</li>
       <li><strong>VibeMeter</strong> — zap the live DJ with a banger vote or nudge the room to skip; the meter resets per track.</li>
       <li><strong>Zaps (NIP-57)</strong> — pay the live DJ directly with Lightning; sats go straight to their wallet.</li>
-      <li><strong>Chat, avatars &amp; moderation</strong> — ephemeral Nostr events; relay-enforced bans and roles.</li>
+      <li><strong>Avatars &amp; moderation</strong> — Nostr profiles with relay-enforced bans and roles.</li>
     </ul>
   </section>
 

@@ -7,7 +7,6 @@
     addModerator,
     addMember,
     fetchJoinRequests,
-    deleteEvent,
     editClub,
     setClubConfig,
     parseClubConfig,
@@ -147,12 +146,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
       onEose: () => { stageEoseReady = true },
-      onDeleteEvent: (ev) => {
-        // Only honor deletions from an admin/moderator (or the author themselves).
-        const target = ev.tags.find((t) => t[0] === 'e')?.[1]
-        if (!target) return
-        // chat removed
-      },
     })
 
     // Reliable round-robin preview: besides the live push subscription above, periodically
@@ -638,7 +631,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
         <div class="field">
           <label for="e-access">Access</label>
           <select id="e-access" bind:value={eAccess}>
-            <option value="open">Open — anyone listens free; join to DJ/chat</option>
+            <option value="open">Open — anyone listens free; join to DJ</option>
             <option value="paid">Paid — pay sats to enter</option>
           </select>
         </div>
@@ -723,7 +716,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     <Dancefloor
       {groupId}
       {members}
-      canChat={isMember}
       {canModerate}
       {isOwner}
       {isMember}
@@ -731,7 +723,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       currentDj={sync.live?.dj ?? ''}
       onkick={kick}
       onpromote={promote}
-      ondelete={(id) => void deleteEvent(groupId, id)}
     />
 
     <a class="aside-block aside-tg" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">

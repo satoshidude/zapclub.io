@@ -4,7 +4,7 @@ import { pool, PROFILE_RELAYS } from './pool'
 import { safeImageUrl } from '../util'
 import type { ProfileMetadata } from './types'
 
-// Reactive profile cache for member/chat/DJ display. Profiles (kind 0) are loaded in
+// Reactive profile cache for member/DJ display. Profiles (kind 0) are loaded in
 // BATCHES (one {kinds:[0], authors:[…]} query per ~250 ms window across all relays)
 // instead of one query per pubkey — far fewer connections, far more reliable. A miss is
 // NOT cached permanently: it's retried after a cooldown so a transient relay timeout
