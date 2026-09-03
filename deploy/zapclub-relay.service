@@ -14,6 +14,7 @@ ExecStart=/srv/zapclub/current/bin/zapclub-relay
 WorkingDirectory=/var/lib/zapclub-relay
 Restart=on-failure
 RestartSec=3
+UMask=0027
 
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -22,12 +23,24 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true
 LockPersonality=true
+SystemCallArchitectures=native
 MemoryDenyWriteExecute=false
 ReadWritePaths=/var/lib/zapclub-relay
+
+MemoryHigh=1G
+MemoryMax=1536M
+TasksMax=256
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

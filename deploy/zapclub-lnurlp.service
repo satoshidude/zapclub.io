@@ -10,6 +10,7 @@ WorkingDirectory=/srv/zapclub/current/deploy
 ExecStart=/usr/bin/python3 /srv/zapclub/current/deploy/lnurlp_proxy.py
 Restart=on-failure
 RestartSec=5
+UMask=0027
 
 Environment=LNURL_FALLBACK_DOMAIN=nsnip.io
 Environment=LNURL_DOMAIN=zapclub.io
@@ -21,7 +22,24 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-RestrictAddressFamilies=AF_INET AF_INET6
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+MemoryHigh=128M
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target

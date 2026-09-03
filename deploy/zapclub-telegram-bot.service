@@ -12,12 +12,31 @@ EnvironmentFile=/etc/zapclub/telegram.env
 ExecStart=/srv/zapclub/current/bin/zapclub-telegram-bot
 Restart=on-failure
 RestartSec=15
+UMask=0027
+
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-RestrictAddressFamilies=AF_INET AF_INET6
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+MemoryHigh=256M
+MemoryMax=512M
+TasksMax=128
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target
