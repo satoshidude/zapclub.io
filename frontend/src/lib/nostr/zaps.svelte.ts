@@ -62,6 +62,19 @@ interface LnurlPay {
   maxSendable?: number
 }
 
+// nsnip.io's LNURL discovery response currently omits CORS headers. Zapclub already exposes
+// the same nsnip-backed discovery endpoint with CORS enabled, so browser clients must use it
+// for nsnip addresses. The returned LNbits callback has its own CORS support and stays intact.
+export function lnurlPayEndpoint(lud16: string): string {
+  const at = lud16.indexOf('@')
+  if (at < 1) throw new Error('Invalid lightning address')
+  const name = lud16.slice(0, at)
+  const domain = lud16.slice(at + 1).toLowerCase()
+  if (!domain) throw new Error('Invalid lightning address')
+  const discoveryDomain = domain === 'nsnip.io' ? 'zapclub.io' : domain
+  return `https://${discoveryDomain}/.well-known/lnurlp/${encodeURIComponent(name)}`
+}
+
 // fetch with a hard timeout — a hung LNURL host must not wedge the zap UI forever.
 async function fetchTimeout(url: string, ms = 9000): Promise<Response> {
   const ctrl = new AbortController()
@@ -75,11 +88,7 @@ async function fetchTimeout(url: string, ms = 9000): Promise<Response> {
 
 /** Resolves a lightning address (lud16) to its LNURL-pay parameters. */
 async function lnurlPayData(lud16: string): Promise<LnurlPay> {
-  const at = lud16.indexOf('@')
-  if (at < 1) throw new Error('Invalid lightning address')
-  const name = lud16.slice(0, at)
-  const domain = lud16.slice(at + 1)
-  const res = await fetchTimeout(`https://${domain}/.well-known/lnurlp/${name}`)
+  const res = await fetchTimeout(lnurlPayEndpoint(lud16))
   if (!res.ok) throw new Error('Could not reach the lightning address')
   const j = (await res.json()) as LnurlPay & { tag?: string }
   if (!j.callback) throw new Error('Not a valid LNURL-pay endpoint')

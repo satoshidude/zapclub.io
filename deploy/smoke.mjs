@@ -7,7 +7,7 @@ async function request(url, validate) {
   const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
   const body = await response.text()
-  if (validate && !validate(body)) throw new Error(`${url}: unexpected response`)
+  if (validate && !validate(body, response)) throw new Error(`${url}: unexpected response`)
 }
 
 await request('https://zapclub.io/', (body) => /<html/i.test(body))
@@ -28,6 +28,17 @@ await request('https://zapclub.io/.well-known/nostr.json?name=satoshidude', (bod
   try {
     const document = JSON.parse(body)
     return typeof document.names?.satoshidude === 'string'
+  } catch {
+    return false
+  }
+})
+await request('https://zapclub.io/.well-known/lnurlp/zapclub', (body, response) => {
+  try {
+    const document = JSON.parse(body)
+    return response.headers.get('access-control-allow-origin') === '*'
+      && document.tag === 'payRequest'
+      && document.allowsNostr === true
+      && typeof document.callback === 'string'
   } catch {
     return false
   }
