@@ -55,6 +55,14 @@
     min-width: 0;
   }
 
+  nav a {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   a {
     color: inherit;
     text-decoration-color: transparent;

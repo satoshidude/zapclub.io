@@ -14,6 +14,10 @@ describe('project footer contract', () => {
     expect(labels).toEqual(['About', 'Credits', 'Disclaimer', 'GitHub ↗'])
   })
 
+  it('gives every navigation link a minimum 44px touch target', () => {
+    expect(source).toMatch(/nav a\s*\{[\s\S]*?min-width:\s*44px;[\s\S]*?min-height:\s*44px;[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;/)
+  })
+
   it('ends its metadata after version and revision', () => {
     expect(source).toMatch(/v\{build\.version\}[\s\S]*\{revision\}[\s\S]*<\/small>/)
     expect(source).not.toMatch(/attribution/i)
