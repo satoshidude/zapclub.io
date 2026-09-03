@@ -8,12 +8,14 @@ export type Route =
   | { name: 'admin' }
   | { name: 'howto' }
   | { name: 'about' }
+  | { name: 'credits' }
+  | { name: 'disclaimer' }
   | { name: 'leaderboard' }
   | { name: 'privacy' }
   | { name: 'terms' }
   | { name: 'legal' }
 
-function parse(path: string): Route {
+export function parseRoute(path: string): Route {
   const club = path.match(/^\/club\/([\w-]+)\/?$/)
   if (club) return { name: 'club', id: club[1] }
   const user = path.match(/^\/user\/(npub1[\w]+)\/?$/)
@@ -21,6 +23,8 @@ function parse(path: string): Route {
   if (/^\/admin\/?$/.test(path)) return { name: 'admin' }
   if (/^\/howto\/?$/.test(path)) return { name: 'howto' }
   if (/^\/about\/?$/.test(path)) return { name: 'about' }
+  if (/^\/credits\/?$/.test(path)) return { name: 'credits' }
+  if (/^\/disclaimer\/?$/.test(path)) return { name: 'disclaimer' }
   if (/^\/leaderboard\/?$/.test(path)) return { name: 'leaderboard' }
   if (/^\/privacy\/?$/.test(path)) return { name: 'privacy' }
   if (/^\/terms\/?$/.test(path)) return { name: 'terms' }
@@ -28,11 +32,11 @@ function parse(path: string): Route {
   return { name: 'home' }
 }
 
-const state = $state<{ route: Route }>({ route: parse(location.pathname) })
+const state = $state<{ route: Route }>({ route: parseRoute(location.pathname) })
 
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
-    state.route = parse(location.pathname)
+    state.route = parseRoute(location.pathname)
   })
 }
 
@@ -44,7 +48,7 @@ export const router = {
 
 export function navigate(path: string): void {
   if (path !== location.pathname) history.pushState({}, '', path)
-  state.route = parse(path)
+  state.route = parseRoute(path)
 }
 
 export function goHome(): void {

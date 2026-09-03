@@ -24,17 +24,17 @@ cd "$ROOT"
 	exit 1
 }
 
+commit=$(git rev-parse HEAD)
 npm --prefix frontend ci
 npm --prefix frontend audit --audit-level=high
 npm --prefix frontend run check
 npm --prefix frontend test -- --run
-npm --prefix frontend run build
+SOURCE_COMMIT="$commit" npm --prefix frontend run build
 (cd relay && go vet ./... && go test ./... && ./e2e.sh && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=-s -o "$BUILD_DIR/zapclub-relay" .)
 (cd telegram-bot && go vet ./... && go test ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags=-s -o "$BUILD_DIR/zapclub-telegram-bot" .)
-commit=$(git rev-parse HEAD)
 git push origin main
 git bundle create "$BUNDLE" main
 scp "$BUNDLE" "$REMOTE:$REMOTE_BUNDLE"
 ssh "$REMOTE" "sudo /usr/local/sbin/vps-app-deploy zapclub '$commit'"
-node deploy/smoke.mjs
+ZAPCLUB_EXPECTED_COMMIT="$commit" node deploy/smoke.mjs
 printf 'Zapclub release activated: %s\n' "$commit"

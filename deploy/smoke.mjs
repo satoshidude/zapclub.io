@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const timeoutMs = Number(process.env.ZAPCLUB_SMOKE_TIMEOUT_MS || 10_000)
+const expectedCommit = process.env.ZAPCLUB_EXPECTED_COMMIT
 
 async function request(url, validate) {
   const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
@@ -10,6 +11,19 @@ async function request(url, validate) {
 }
 
 await request('https://zapclub.io/', (body) => /<html/i.test(body))
+await request('https://zapclub.io/about', (body) => /<html/i.test(body))
+await request('https://zapclub.io/credits', (body) => /<html/i.test(body))
+await request('https://zapclub.io/disclaimer', (body) => /<html/i.test(body))
+await request('https://zapclub.io/release.json', (body) => {
+  try {
+    const release = JSON.parse(body)
+    return release.project === 'zapclub.io'
+      && release.footerContract === '1.2.0'
+      && (!expectedCommit || release.commit === expectedCommit)
+  } catch {
+    return false
+  }
+})
 await request('https://zapclub.io/.well-known/nostr.json?name=satoshidude', (body) => {
   try {
     const document = JSON.parse(body)

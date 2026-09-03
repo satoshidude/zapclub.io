@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { router, goHome, goAbout, goAdmin, goLeaderboard, goPrivacy, goTerms, goLegal } from './lib/router.svelte'
+  import { router, goHome, goAdmin } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
   import { accountWatch, startAccountWatch } from './lib/nostr/accountWatch.svelte'
@@ -13,11 +13,14 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
   import About from './lib/components/About.svelte'
+  import Credits from './lib/components/Credits.svelte'
+  import Disclaimer from './lib/components/Disclaimer.svelte'
   import Leaderboard from './lib/components/Leaderboard.svelte'
   import LegalNotice from './lib/components/LegalNotice.svelte'
   import Privacy from './lib/components/Privacy.svelte'
   import Terms from './lib/components/Terms.svelte'
   import PayModal from './lib/components/PayModal.svelte'
+  import SiteFooter from './lib/components/SiteFooter.svelte'
   import { requestZapInvoice } from './lib/nostr/zaps.svelte'
   import { showPay } from './lib/nostr/payModal.svelte'
 
@@ -87,6 +90,10 @@
     <HowTo />
   {:else if router.route.name === 'about'}
     <About />
+  {:else if router.route.name === 'credits'}
+    <Credits />
+  {:else if router.route.name === 'disclaimer'}
+    <Disclaimer />
   {:else if router.route.name === 'leaderboard'}
     <Leaderboard />
   {:else if router.route.name === 'privacy'}
@@ -100,14 +107,15 @@
   {/if}
 </main>
 
-<footer class="footer">
+<aside class="support-bar" aria-label="Support Zapclub">
   <span class="tip-label">⚡ Tip zapclub</span>
   {#each [100, 1000, 5000] as amt (amt)}
     <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
   {/each}
-  <span class="foot-note"><button class="foot-link" onclick={goAbout}>About</button> · <button class="foot-link" onclick={goPrivacy}>Privacy</button> · <button class="foot-link" onclick={goTerms}>Terms</button> · <button class="foot-link" onclick={goLegal}>Legal Notice</button> · <a class="foot-link foot-plain" href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">GitHub</a></span>
-  <span class="foot-note">Powered by Nostr &amp; Lightning · released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a></span>
-</footer>
+  <span class="support-note">Powered by Nostr &amp; Lightning · released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a></span>
+</aside>
+
+<SiteFooter />
 
 <LoginDialog />
 <PayModal />
@@ -198,7 +206,7 @@
     background: var(--danger);
     color: #fff;
   }
-  .footer {
+  .support-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -231,14 +239,11 @@
     opacity: 0.5;
     cursor: default;
   }
-  .foot-note {
+  .support-note {
     flex-basis: 100%;
     text-align: center;
     margin-top: 0.4rem;
     font-size: 0.72rem;
-  }
-  .foot-note + .foot-note {
-    margin-top: 0.15rem;
   }
   .block {
     color: var(--text-dim);
@@ -249,30 +254,10 @@
     color: var(--accent);
     text-decoration: underline;
   }
-  .foot-link {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--accent);
-    font: inherit;
-    cursor: pointer;
-  }
-  .foot-link:hover {
-    text-decoration: underline;
-  }
-  .foot-plain {
-    text-decoration: none;
-  }
-  .foot-plain:hover {
-    text-decoration: none;
-  }
-  /* Mobile: leave room for the fixed bottom nav so content isn't hidden behind it. */
+  /* Keep route content clear of mobile browser chrome. */
   @media (max-width: 560px) {
     main {
       padding-bottom: 1rem;
-    }
-    .footer {
-      padding-bottom: calc(4.8rem + env(safe-area-inset-bottom));
     }
   }
 </style>
