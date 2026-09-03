@@ -3,6 +3,7 @@
 
   const repository = 'https://github.com/satoshidude/zapclub.io'
   const build = __ZAPCLUB_BUILD_INFO__
+  const displayVersion = build.version.endsWith('.0') ? build.version.slice(0, -2) : build.version
   const revision = build.commit === 'development' ? build.commit : build.commit.slice(0, 7)
 
   function follow(event: MouseEvent, path: string): void {
@@ -18,10 +19,9 @@
   data-project-version={build.version}
   data-build-commit={build.commit}
 >
+  <a class="info" href="/about" onclick={(event) => follow(event, '/about')}>About &amp; legal</a>
   <small>
-    <a href="/about" onclick={(event) => follow(event, '/about')}>About &amp; legal</a>
-    <span aria-hidden="true">/</span> v{build.version}
-    <span aria-hidden="true">/</span>
+    v{displayVersion} <span aria-hidden="true">/</span>
     {#if build.commit === 'development'}
       {revision}
     {:else}
@@ -33,9 +33,10 @@
 <style>
   .site-footer {
     min-height: 64px;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: center;
+    gap: 0.5rem 1.5rem;
     padding: 1.1rem max(1rem, calc((100vw - 960px) / 2));
     border-top: 1px solid var(--border);
     color: var(--text-dim);
@@ -43,10 +44,11 @@
     font-weight: 600;
   }
 
-  small > a:first-child {
+  .info {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
+    justify-self: start;
   }
 
   a {
@@ -68,6 +70,7 @@
   }
 
   small {
+    justify-self: end;
     font: inherit;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -85,7 +88,13 @@
   @media (max-width: 560px) {
     .site-footer {
       min-height: 0;
+      grid-template-columns: 1fr;
+      gap: 0;
       padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
+    }
+
+    small {
+      justify-self: start;
     }
   }
 </style>
