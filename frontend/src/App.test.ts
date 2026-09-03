@@ -5,6 +5,7 @@ import router from './lib/router.svelte.ts?raw'
 describe('global project footer', () => {
   it('renders once after the route-dependent main content', () => {
     expect(app.match(/<SiteFooter\s*\/>/g)).toHaveLength(1)
+    expect(app).not.toMatch(/support-bar|Tip zapclub|DONATE_LUD16|donate\(/)
 
     const mainEnd = app.indexOf('</main>')
     const footer = app.indexOf('<SiteFooter />')
@@ -13,6 +14,11 @@ describe('global project footer', () => {
     expect(mainEnd).toBeGreaterThan(-1)
     expect(footer).toBeGreaterThan(mainEnd)
     expect(overlays).toBeGreaterThan(footer)
+  })
+
+  it('uses the consolidated information page for all former footer routes', () => {
+    expect(app).not.toMatch(/Credits\.svelte|Disclaimer\.svelte|Privacy\.svelte|Terms\.svelte|LegalNotice\.svelte/)
+    expect(app.match(/router\.route\.name === '(?:about|credits|disclaimer|privacy|terms|legal)'[\s\S]*?<About \/>/g)).toHaveLength(6)
   })
 
   it('covers every route rendered by the app shell', () => {

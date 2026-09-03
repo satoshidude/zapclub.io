@@ -9,13 +9,15 @@ describe('project footer contract', () => {
     expect(source).not.toMatch(/sunnyhill\.io|site-footer__attribution|made by/i)
   })
 
-  it('keeps the shared link order', () => {
-    const labels = [...source.matchAll(/>(About|Credits|Disclaimer|GitHub ↗)<\/a>/g)].map(([, label]) => label)
-    expect(labels).toEqual(['About', 'Credits', 'Disclaimer', 'GitHub ↗'])
+  it('has one consolidated information link instead of a footer menu', () => {
+    expect(source).not.toContain('<nav')
+    expect(source.match(/<a\b/g)).toHaveLength(2)
+    expect(source).toContain('>About &amp; legal</a>')
+    expect(source).not.toMatch(/>Credits<|>Disclaimer<|>GitHub/)
   })
 
-  it('gives every navigation link a minimum 44px touch target', () => {
-    expect(source).toMatch(/nav a\s*\{[\s\S]*?min-width:\s*44px;[\s\S]*?min-height:\s*44px;[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;/)
+  it('gives the information link a minimum 44px touch target', () => {
+    expect(source).toMatch(/small > a:first-child\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;/)
   })
 
   it('ends its metadata after version and revision', () => {

@@ -34,12 +34,52 @@
       A global network of community-owned music clubs powered by Nostr and Lightning. No label
       platform, no tracking, no central identity. A club that genuinely belongs to the people in it.
     </p>
-    <p>
-      Built with Nostr (NIP-01/07/29/42/57), khatru + relay29, nostr-tools and Svelte.
-      <a href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">Open source on GitHub.</a>
-    </p>
-    <button class="home" onclick={goHome}>← Back to the clubs</button>
   </section>
+
+  <section class="card">
+    <h2>Credits &amp; source</h2>
+    <p>
+      Open protocols and open-source tools make ZapClub possible. It is built with Nostr,
+      Bitcoin Lightning, Svelte, nostr-tools, khatru and relay29. Synchronized playback uses
+      the YouTube IFrame API.
+    </p>
+    <p>
+      The source code and complete dependency record are available in the
+      <a href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">ZapClub repository</a>.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Privacy</h2>
+    <p>
+      ZapClub is designed around decentralized identities and open protocols. Information may be
+      processed through Nostr relays, Lightning infrastructure and other decentralized services.
+      The project minimizes centralized data collection wherever technically feasible, but users
+      remain responsible for understanding the privacy implications of the services they use.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Terms &amp; disclaimer</h2>
+    <p>
+      ZapClub is an experimental music, technology, education and digital-art project. It is not
+      a music streaming, banking or escrow service and is provided “as is” and “as available”,
+      without guarantees of availability, correctness or fitness for a particular purpose.
+    </p>
+    <p>
+      Users are responsible for the clubs they operate, the content they publish or reference,
+      the payments they initiate and their interactions with other users. External media, Nostr
+      relays and Lightning services are operated by third parties. ZapClub does not control their
+      content, availability or privacy practices. Lightning payments are irreversible; use only
+      small amounts.
+    </p>
+    <p>
+      To the fullest extent permitted by applicable law, the operators are not liable for damages
+      arising from use of the platform.
+    </p>
+  </section>
+
+  <button class="home" onclick={goHome}>← Back to the clubs</button>
 </div>
 
 <style>

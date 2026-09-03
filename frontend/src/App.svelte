@@ -13,16 +13,9 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
   import About from './lib/components/About.svelte'
-  import Credits from './lib/components/Credits.svelte'
-  import Disclaimer from './lib/components/Disclaimer.svelte'
   import Leaderboard from './lib/components/Leaderboard.svelte'
-  import LegalNotice from './lib/components/LegalNotice.svelte'
-  import Privacy from './lib/components/Privacy.svelte'
-  import Terms from './lib/components/Terms.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import SiteFooter from './lib/components/SiteFooter.svelte'
-  import { requestZapInvoice } from './lib/nostr/zaps.svelte'
-  import { showPay } from './lib/nostr/payModal.svelte'
 
   startConnectionWatch()
   startAccountWatch()
@@ -33,21 +26,6 @@
     launchLogin()
   }
 
-  // Footer donation — plain LNURL payment to the project's lightning address.
-  const DONATE_LUD16 = 'zapclub@nsnip.io'
-  let donating = $state(false)
-  async function donate(sats: number) {
-    if (donating) return
-    donating = true
-    try {
-      const { invoice, verify } = await requestZapInvoice('', DONATE_LUD16, sats, 'zapclub donation')
-      showPay(invoice, sats, 'Tip zapclub', { verify })
-    } catch {
-      /* ignore — user can retry */
-    } finally {
-      donating = false
-    }
-  }
 </script>
 
 <header class="topbar">
@@ -91,29 +69,21 @@
   {:else if router.route.name === 'about'}
     <About />
   {:else if router.route.name === 'credits'}
-    <Credits />
+    <About />
   {:else if router.route.name === 'disclaimer'}
-    <Disclaimer />
+    <About />
   {:else if router.route.name === 'leaderboard'}
     <Leaderboard />
   {:else if router.route.name === 'privacy'}
-    <Privacy />
+    <About />
   {:else if router.route.name === 'terms'}
-    <Terms />
+    <About />
   {:else if router.route.name === 'legal'}
-    <LegalNotice />
+    <About />
   {:else}
     <ClubList />
   {/if}
 </main>
-
-<aside class="support-bar" aria-label="Support Zapclub">
-  <span class="tip-label">⚡ Tip zapclub</span>
-  {#each [100, 1000, 5000] as amt (amt)}
-    <button class="tip" onclick={() => donate(amt)} disabled={donating}>{amt}</button>
-  {/each}
-  <span class="support-note">Powered by Nostr &amp; Lightning · released at <a class="block" href="https://mempool.space/block/940329" target="_blank" rel="noopener noreferrer">940329</a></span>
-</aside>
 
 <SiteFooter />
 
@@ -205,54 +175,6 @@
   .relogin:hover {
     background: var(--danger);
     color: #fff;
-  }
-  .support-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 1.6rem 1rem 2rem;
-    border-top: 1px solid var(--border);
-    color: var(--text-dim);
-    font-size: 0.8rem;
-  }
-  .tip-label {
-    font-weight: 700;
-    color: var(--amber);
-  }
-  .tip {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 999px;
-    padding: 0.25rem 0.7rem;
-    font-size: 0.78rem;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .tip:hover:not(:disabled) {
-    border-color: var(--amber);
-    color: var(--amber);
-  }
-  .tip:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .support-note {
-    flex-basis: 100%;
-    text-align: center;
-    margin-top: 0.4rem;
-    font-size: 0.72rem;
-  }
-  .block {
-    color: var(--text-dim);
-    text-decoration: none;
-    font-variant-numeric: tabular-nums;
-  }
-  .block:hover {
-    color: var(--accent);
-    text-decoration: underline;
   }
   /* Keep route content clear of mobile browser chrome. */
   @media (max-width: 560px) {

@@ -18,14 +18,10 @@
   data-project-version={build.version}
   data-build-commit={build.commit}
 >
-  <nav aria-label="Footer navigation">
-    <a href="/about" onclick={(event) => follow(event, '/about')}>About</a>
-    <a href="/credits" onclick={(event) => follow(event, '/credits')}>Credits</a>
-    <a href="/disclaimer" onclick={(event) => follow(event, '/disclaimer')}>Disclaimer</a>
-    <a href={repository} target="_blank" rel="noopener noreferrer">GitHub ↗</a>
-  </nav>
   <small>
-    v{build.version} <span aria-hidden="true">/</span>
+    <a href="/about" onclick={(event) => follow(event, '/about')}>About &amp; legal</a>
+    <span aria-hidden="true">/</span> v{build.version}
+    <span aria-hidden="true">/</span>
     {#if build.commit === 'development'}
       {revision}
     {:else}
@@ -39,8 +35,7 @@
     min-height: 64px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1.5rem;
+    justify-content: center;
     padding: 1.1rem max(1rem, calc((100vw - 960px) / 2));
     border-top: 1px solid var(--border);
     color: var(--text-dim);
@@ -48,19 +43,10 @@
     font-weight: 600;
   }
 
-  nav {
-    display: flex;
-    align-items: center;
-    gap: clamp(0.85rem, 3vw, 1.5rem);
-    min-width: 0;
-  }
-
-  nav a {
-    min-width: 44px;
+  small > a:first-child {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
   }
 
   a {
@@ -82,7 +68,6 @@
   }
 
   small {
-    flex: 0 0 auto;
     font: inherit;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -100,16 +85,7 @@
   @media (max-width: 560px) {
     .site-footer {
       min-height: 0;
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 0.55rem;
       padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
-    }
-
-    nav {
-      width: 100%;
-      justify-content: space-between;
-      gap: 0.65rem;
     }
   }
 </style>
