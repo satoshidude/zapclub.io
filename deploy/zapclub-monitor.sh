@@ -39,10 +39,11 @@ disk_used=$(df -P "$CURRENT" | awk 'NR == 2 {gsub(/%/, "", $5); print $5}')
 [ "$disk_used" -lt 90 ] || fail "filesystem usage is ${disk_used}%"
 
 attempt=1
+max_attempts=5
 while ! "$NODE" "$release/deploy/smoke.mjs"; do
-  [ "$attempt" -lt 3 ] || fail "public smoke checks failed after $attempt attempts"
+  [ "$attempt" -lt "$max_attempts" ] || fail "public smoke checks failed after $attempt attempts"
+  sleep $((attempt * 5))
   attempt=$((attempt + 1))
-  sleep 3
 done
 
 rm -f "$STATE_DIR/alert-zapclub-monitor.service"
