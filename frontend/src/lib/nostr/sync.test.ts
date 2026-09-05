@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Event } from 'nostr-tools/pure'
-import { ingestNowPlaying, resetSync, upcomingTracks } from './sync.svelte'
+import { ingestNowPlaying, resetSync, shouldReportTrackError, upcomingTracks } from './sync.svelte'
 
 function autoNowPlaying(next: Array<[string, string]>): Event {
   return {
@@ -51,5 +51,14 @@ describe('Auto DJ upcoming preview', () => {
     expect(upcomingTracks('club', 1)).toEqual([
       { dj: 'owner', videoId: 'VALIDNEXT01', title: 'Valid' },
     ])
+  })
+})
+
+describe('broken-track reporting', () => {
+  it('requires the current video, club membership and a signer', () => {
+    expect(shouldReportTrackError('video', 'video', true, true)).toBe(true)
+    expect(shouldReportTrackError('video', 'video', false, true)).toBe(false)
+    expect(shouldReportTrackError('video', 'video', true, false)).toBe(false)
+    expect(shouldReportTrackError('other', 'video', true, true)).toBe(false)
   })
 })

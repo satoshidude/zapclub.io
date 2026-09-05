@@ -233,9 +233,20 @@ export function onTrackEnded(_groupId: string): void {
  * authorized user (owner/mod/playing-DJ) or a quorum of members reports it. Any member may report
  * — it's "I can't play this", not a moderation skip.
  */
-export function onTrackError(groupId: string, videoId: string): void {
-  if (!state.np || state.np.videoId !== videoId) return // stale error of an old track
-  void reportBrokenTrack(groupId, videoId)
+export function shouldReportTrackError(
+  activeVideoId: string | null,
+  videoId: string,
+  isMember: boolean,
+  canSign: boolean,
+): boolean {
+  return isMember && canSign && activeVideoId === videoId
+}
+
+export function onTrackError(groupId: string, videoId: string, isMember: boolean): void {
+  if (!shouldReportTrackError(state.np?.videoId ?? null, videoId, isMember, auth.canSign)) return
+  void reportBrokenTrack(groupId, videoId).catch((error) => {
+    console.warn('[zc:sync] broken-track report failed:', error)
+  })
 }
 
 export function resetSync(): void {

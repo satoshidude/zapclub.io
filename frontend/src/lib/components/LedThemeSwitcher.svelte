@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  type LedTheme = 'red' | 'green' | 'blue' | 'black'
+  type LedTheme = 'red' | 'green' | 'blue' | 'portal' | 'black'
 
   const STORAGE_KEY = 'zapclub-led-theme'
   const themes: { id: LedTheme; label: string; colors: [string, string, string]; dot: string }[] = [
     { id: 'red', label: 'Red', colors: ['#4c101a', '#22070d', '#080204'], dot: '#e72e48' },
     { id: 'green', label: 'Green', colors: ['#0c3a1d', '#061b0e', '#020804'], dot: '#2fc85c' },
     { id: 'blue', label: 'Blue', colors: ['#0d1f42', '#091c3c', '#030a18'], dot: '#397fe4' },
+    { id: 'portal', label: 'Rick and Morty tribute', colors: ['#173f32', '#0b2d35', '#28123b'], dot: '#b8ff3d' },
     { id: 'black', label: 'Black', colors: ['#1a1c1e', '#0c0f11', '#020303'], dot: '#34383c' },
   ]
 
@@ -34,6 +35,7 @@
     <button
       type="button"
       class:active={active === theme.id}
+      class:is-portal={theme.id === 'portal'}
       class:is-black={theme.id === 'black'}
       style={`--led-a: ${theme.colors[0]}; --led-b: ${theme.colors[1]}; --led-c: ${theme.colors[2]}; --led-dot: ${theme.dot}`}
       aria-label={`${theme.label} card LED`}
@@ -80,6 +82,12 @@
   }
   button.is-black span {
     border-color: #24282b;
+  }
+  button.is-portal span {
+    border-color: #39d5c0;
+    background:
+      radial-gradient(circle at 36% 34%, #e8ff70 0 14%, transparent 16%),
+      conic-gradient(from 35deg, #b8ff3d, #35e5c6, #5e2c86, #b8ff3d);
   }
   button.active span {
     opacity: 1;

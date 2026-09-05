@@ -763,7 +763,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
           ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
           onCta={doPaidJoin}
           onended={() => onTrackEnded(groupId)}
-          onerror={(vid) => onTrackError(groupId, vid)}
+          onerror={(vid) => onTrackError(groupId, vid, isMember)}
           hasDjOnStage={stage.djs.length > 0}
         />
       </div>
