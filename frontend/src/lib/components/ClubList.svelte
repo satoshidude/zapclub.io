@@ -229,6 +229,11 @@
               id={`club-suggestion-${club.id}`}
               role="option"
               aria-selected={index === activeSuggestion}
+              onpointerdown={(event) => {
+                if (event.button !== 0) return
+                event.preventDefault()
+                selectClubSuggestion(club.id)
+              }}
               onclick={() => selectClubSuggestion(club.id)}
               onmouseenter={() => (activeSuggestion = index)}
             >
