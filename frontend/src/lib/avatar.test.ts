@@ -8,14 +8,13 @@ describe('generated club avatars', () => {
     expect(clubAvatar('club-a')).not.toBe(clubAvatar('club-b'))
   })
 
-  it('uses the turntable-derived violet/yellow palette plus Bitcoin-complementary accents', () => {
-    expect(source).toContain("const BACKGROUND_COLORS = ['060405']")
+  it('uses an angular LED waveform and the turntable-derived violet/yellow palette', () => {
     for (const color of [
       '752bf0',
       '973df9',
       'a454fe',
       'bd76fd',
-      'f1d12d',
+      'f4e04d',
       'ffeb63',
       'f7931a',
       '1a8bf7',
@@ -23,7 +22,10 @@ describe('generated club avatars', () => {
     ]) {
       expect(source).toContain(`'${color}'`)
     }
-    expect(source).toContain('backgroundColor: BACKGROUND_COLORS')
-    expect(source).toContain('ringColor: RING_COLORS')
+    expect(source).toContain("const BACKGROUND_COLOR = '060405'")
+    expect(source).toContain('function waveformSvg(seed: string)')
+    expect(source).toContain('shape-rendering="crispEdges"')
+    expect(source).toContain('preserveAspectRatio="xMidYMid slice"')
+    expect(source).not.toContain('@dicebear')
   })
 })

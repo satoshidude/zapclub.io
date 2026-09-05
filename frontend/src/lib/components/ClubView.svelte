@@ -752,7 +752,7 @@
     width: 72px;
     height: 72px;
     flex: 0 0 72px;
-    border-radius: 14px;
+    border-radius: 0;
     overflow: hidden;
     background:
       linear-gradient(var(--bg-elev-2), var(--bg-elev-2)),
@@ -761,6 +761,7 @@
   .pic-img {
     width: 100%;
     height: 100%;
+    border-radius: 0;
     object-fit: cover;
     display: block;
   }
@@ -783,7 +784,7 @@
       width: 44px;
       height: 44px;
       flex-basis: 44px;
-      border-radius: 10px;
+      border-radius: 0;
     }
     h1 {
       font-size: 1.05rem;
@@ -1022,7 +1023,7 @@
     height: 124px;
     flex-basis: auto;
     border: 0;
-    border-radius: 7px;
+    border-radius: 0;
     box-shadow: none;
   }
   .pic::after {
@@ -1231,7 +1232,7 @@
     .pic {
       width: 76px;
       height: 76px;
-      border-radius: 7px;
+      border-radius: 0;
     }
     .tags {
       gap: 0.45rem 0.8rem;

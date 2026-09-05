@@ -8,6 +8,8 @@ describe('club hero artwork', () => {
     expect(clubView).toContain("import { clubAvatar } from '../avatar'")
     expect(clubView).toContain('club?.picture || clubAvatar(owner || groupId)')
     expect(clubView).toContain('Image URL (leave empty for the generated one)')
+    expect(clubView).not.toMatch(/\.pic\s*\{[^}]*border-radius:\s*(?:7|10|14)px;/)
+    expect(clubView).toMatch(/\.pic-img\s*\{[^}]*border-radius:\s*0;/)
   })
 
   it('uses the turntable artwork for the timed mini overlay and missing-video fallback', () => {

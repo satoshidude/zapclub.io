@@ -675,7 +675,7 @@
     display: block;
     width: 38px;
     height: 38px;
-    border-radius: 8px;
+    border-radius: 0;
     object-fit: cover;
     filter: saturate(0.86) contrast(1.04);
   }
@@ -957,6 +957,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
+    border-radius: 0;
     object-fit: cover;
     object-position: center;
     display: block;
