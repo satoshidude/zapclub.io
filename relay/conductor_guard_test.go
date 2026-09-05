@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// The relay is the sole author of playback, credibility and aggregate listener state. Clients
+// The relay is the sole author of playback, credibility and aggregate listener/member state. Clients
 // write stage (30102), queue (30103), chat (9), skip (30107), mood (20104) and listener beats
 // (20105).
 func TestIsForeignConductorWrite(t *testing.T) {
@@ -23,6 +23,8 @@ func TestIsForeignConductorWrite(t *testing.T) {
 		{"client credibility blocked", kindCredibility, client, true},
 		{"relay listener count ok", kindListenerCount, relay, false},
 		{"client listener count blocked", kindListenerCount, client, true},
+		{"relay member count ok", kindMemberCount, relay, false},
+		{"client member count blocked", kindMemberCount, client, true},
 		{"client listener beat allowed", kindListenerBeat, client, false},
 		{"client stage allowed", kindStage, client, false},
 		{"client queue allowed", kindQueue, client, false},

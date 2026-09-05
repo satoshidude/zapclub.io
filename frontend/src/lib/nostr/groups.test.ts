@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // (groups.ts → nostrLogin.ts → router reads location.pathname at import time)
 import { describe, it, expect } from 'vitest'
-import { parseOwner, parseAdmins, selectOnAirClubDjs, selectOnStageClubDjs } from './groups'
+import { KIND_MEMBER_COUNT, parseOwner, parseAdmins, selectClubMemberCounts, selectOnAirClubDjs, selectOnAirClubTracks, selectOnStageClubDjs } from './groups'
 import type { Event } from 'nostr-tools/pure'
+import { CLUB_RELAY_PUBKEY } from './pool'
 
 // Minimal 39001 admins event with given [pubkey, role] p-tags (in tag order).
 function adminsEvent(tags: Array<[string, string]>): Event {
@@ -101,6 +102,43 @@ describe('selectOnAirClubDjs', () => {
       nowPlayingEvent({ club: 'club-a', dj: 'current-dj', sentAt: nowMs - 5_000 }),
     ]
     expect(selectOnAirClubDjs(events, ['club-a'], nowMs).get('club-a')).toBe('current-dj')
+  })
+
+  it('keeps the current track title for the club directory player row', () => {
+    const event = nowPlayingEvent({ club: 'club-a', dj: 'dj-a', sentAt: nowMs - 1_000 })
+    event.content = 'Artist – Track title'
+    expect(selectOnAirClubTracks([event], ['club-a'], nowMs).get('club-a')).toEqual({
+      dj: 'dj-a',
+      sentAt: nowMs - 1_000,
+      title: 'Artist – Track title',
+    })
+  })
+})
+
+describe('selectClubMemberCounts', () => {
+  const countEvent = (club: string, count: string, sentAt: number, pubkey = CLUB_RELAY_PUBKEY) => ({
+    kind: KIND_MEMBER_COUNT,
+    tags: [['d', club], ['h', club], ['count', count], ['sent_at', String(sentAt)]],
+    content: '',
+    created_at: Math.floor(sentAt / 1000),
+    pubkey,
+    id: `${club}-${sentAt}`,
+    sig: 'x',
+  }) as Event
+
+  it('accepts the newest relay-signed aggregate without exposing identities', () => {
+    const events = [countEvent('club-a', '2', 1_000), countEvent('club-a', '3', 2_000)]
+    expect(selectClubMemberCounts(events, ['club-a']).get('club-a')).toEqual({ count: 3, sentAt: 2_000 })
+    expect(events[1].tags.some((tag) => tag[0] === 'p')).toBe(false)
+  })
+
+  it('rejects forged, malformed and unrequested aggregates', () => {
+    const events = [
+      countEvent('club-a', '99', 2_000, 'f'.repeat(64)),
+      countEvent('club-a', '-1', 2_000),
+      countEvent('club-b', '4', 2_000),
+    ]
+    expect(selectClubMemberCounts(events, ['club-a'])).toEqual(new Map())
   })
 })
 

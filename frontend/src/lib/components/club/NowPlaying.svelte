@@ -198,11 +198,7 @@
     <div class="scanlines" aria-hidden="true"></div>
     {#if np}
       <div class="lcd-status lcd-card-heading">
-        <span class="dj-status lcd-card-title">
-          <span>DJ:</span>
-          <ZapButton club={clubId} iconOnly={true} showName={true} showSelf={true} allowSelfZap={true} hideIcon={true} />
-          <span class="live-label">ON AIR</span>
-        </span>
+        <span class="live-label lcd-card-title">ON AIR</span>
         <span>-{fmt(remaining)} / {fmt(np.duration)}</span>
       </div>
 
@@ -340,24 +336,36 @@
   .idle .lcd-media { display: none; }
   .zap-stage-action { width: 100%; height: 100%; }
   .zap-stage-action :global(.zap-mini.icon-only.with-name) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    align-content: center;
     justify-content: center;
     width: 100%;
     max-width: none;
     height: 100%;
-    gap: 12px;
+    row-gap: 5px;
     padding: 10px 14px;
     color: var(--lcd-text);
     animation: zap-breathe 2.4s ease-in-out infinite;
   }
   .zap-stage-action :global(.zap-mini.icon-only.with-name:hover:not(:disabled)) { color: #f7931a; }
-  .zap-stage-action :global(.bolt-icon) { width: 52px; height: 52px; stroke-width: 1.65; }
+  .zap-stage-action :global(.bolt-icon) {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: center;
+    width: 52px;
+    height: 52px;
+    stroke-width: 1.65;
+  }
   .zap-stage-action :global(.icon-dj-copy) {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 5px;
+    display: contents;
   }
   .zap-stage-action :global(.icon-dj-name) {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: center;
+    justify-self: center;
     max-width: none;
     color: inherit;
     font-size: 18px;
@@ -365,7 +373,17 @@
     line-height: 1;
     white-space: nowrap;
   }
-  .zap-stage-action :global(.icon-recipient-name) { color: inherit; font-size: 15px; line-height: 1; }
+  .zap-stage-action :global(.icon-recipient-name) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: center;
+    width: 100%;
+    color: inherit;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+  }
   .video-surface {
     display: none;
     width: 100%;
@@ -411,10 +429,7 @@
   .lcd-status.lcd-card-heading { margin-bottom: 4px; padding-bottom: 3px; }
   .lcd-status > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lcd-status strong { color: var(--lcd-text); font-weight: 400; }
-  .dj-status { display: flex; align-items: baseline; gap: 0.35rem; }
-  .dj-status :global(.zap-mini.icon-only.with-name.text-only) { max-width: 180px; height: auto; padding: 0; color: var(--lcd-text); }
-  .dj-status :global(.icon-dj-name) { max-width: 180px; }
-  .live-label { margin-left: 0.55rem; color: var(--accent); }
+  .live-label { color: var(--accent); }
   .lcd-status > span:last-child { flex: 0 0 auto; margin-left: 12px; color: var(--lcd-text); font-variant-numeric: tabular-nums; }
   .lcd-track-wrap { flex: 0 0 auto; width: 100%; overflow: hidden; white-space: nowrap; }
   .lcd-track { display: inline-flex; min-width: 100%; margin-top: 0; font-size: clamp(20px, 2.4vw, 27px); line-height: 1; letter-spacing: 0.01em; }
@@ -486,7 +501,6 @@
     .lcd-content { padding: 13px 9px 16px; }
     .video-wide .lcd-content { height: 130px; padding-bottom: 22px; }
     .lcd-status { font-size: 9px; }
-    .live-label { margin-left: 0.25rem; }
     .lcd-track { margin-top: 0; font-size: 17px; }
     .lcd-byline { font-size: 16px; overflow: hidden; white-space: nowrap; }
     .lcd-controls { gap: 6px; }
@@ -496,14 +510,14 @@
     .lcd-audio svg { width: 20px; height: 20px; }
     .lcd-icon { width: 18px; height: 23px; padding-inline: 1px; }
     .lcd-icon svg { width: 16px; height: 16px; }
-    .dj-status { gap: 0.2rem; font-size: 11px; }
-    .dj-status :global(.zap-mini.icon-only.with-name.text-only) { max-width: 92px; }
-    .dj-status :global(.icon-dj-name) { max-width: 92px; font-size: 11px; }
-    .zap-stage-action :global(.zap-mini.icon-only.with-name) { gap: 5px; padding: 8px 3px; }
+    .zap-stage-action :global(.zap-mini.icon-only.with-name) { padding: 8px 3px; }
+    .zap-stage-action :global(.zap-mini.icon-only.with-name) {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 3px;
+    }
     .zap-stage-action :global(.bolt-icon) { width: 28px; height: 28px; stroke-width: 1.8; }
     .zap-stage-action :global(.icon-dj-name) { font-size: 10.5px; letter-spacing: 0.02em; }
-    .zap-stage-action :global(.icon-dj-copy) { gap: 3px; }
-    .zap-stage-action :global(.icon-recipient-name) { font-size: 9.5px; }
+    .zap-stage-action :global(.icon-recipient-name) { font-size: 13px; }
     .lcd-volume { display: none; }
     .lobby-copy { margin-top: 7px; }
     .lobby-copy strong { font-size: 0.84rem; }

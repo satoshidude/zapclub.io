@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,7 +68,7 @@ func pruneOldPlays(db *badger.BadgerBackend, cutoffSec int64) int {
 // isForeignConductorWrite reports whether an event in the relay-authored state surface came from
 // anyone but the relay key. Clients must not forge playback or credibility snapshots.
 func isForeignConductorWrite(kind int, pubkey, relayPub string) bool {
-	return (kind == kindNowPlaying || kind == kindPlay || kind == kindCredibility || kind == kindListenerCount) && pubkey != relayPub
+	return (kind == kindNowPlaying || kind == kindPlay || kind == kindCredibility || kind == kindListenerCount || kind == kindMemberCount) && pubkey != relayPub
 }
 
 // purgeForeignNowPlaying deletes any now_playing (30100) NOT authored by the relay key. These
@@ -367,6 +368,26 @@ func main() {
 	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
 	cond := newConductor(db, relay, state, sk)
 	cond.cred = credibility
+	var memberCountPublishMu sync.Mutex
+	publishMemberCount := func(groupID string, count int) {
+		memberCountPublishMu.Lock()
+		defer memberCountPublishMu.Unlock()
+		now := time.Now()
+		cond.publish(context.Background(), &nostr.Event{
+			Kind:      kindMemberCount,
+			CreatedAt: cond.nextAddressableTimestamp(context.Background(), kindMemberCount, groupID),
+			Tags: nostr.Tags{
+				{"d", groupID},
+				{"h", groupID},
+				{"count", fmt.Sprint(count)},
+				{"sent_at", fmt.Sprint(now.UnixMilli())},
+			},
+		}, true)
+	}
+	social.setMemberCountPublisher(publishMemberCount)
+	for groupID, count := range social.memberCounts() {
+		publishMemberCount(groupID, count)
+	}
 	// SQLite for persistent conductor state (played-set + track state survive restarts).
 	// Writer: MaxOpenConns(1), all INSERT/UPDATE/DELETE.
 	// Reader: MaxOpenConns(4), query_only — WAL allows concurrent reads alongside the writer.

@@ -107,6 +107,13 @@ const strangerChat = await stranger.queryResult({ kinds: [9], '#h': [G] })
 assert(/restricted/i.test(strangerChat.closed), 'non-member chat subscription rejected')
 const strangerMembers = await stranger.queryResult({ kinds: [39002], '#d': [G] })
 assert(/restricted/i.test(strangerMembers.closed), 'non-member member-roster subscription rejected')
+const publicMemberCounts = await stranger.query({ kinds: [30112], '#h': [G] })
+const publicMemberCount = publicMemberCounts.at(-1)
+assert(publicMemberCount?.pubkey === RELAY_PK, 'public member aggregate is relay-authored')
+assert(publicMemberCount?.tags.find((t) => t[0] === 'count')?.[1] === '2', 'public member aggregate reports two members')
+assert(!publicMemberCount?.tags.some((t) => t[0] === 'p'), 'public member aggregate exposes no identities')
+const forgedMemberCount = await mem.evRaw({ kind: 30112, created_at: now(), tags: [['d', G], ['h', G], ['count', '99'], ['sent_at', String(Date.now())]], content: '' })
+assert(forgedMemberCount[0] === false && /relay-authored/i.test(forgedMemberCount[1] || ''), 'client-forged member aggregate is rejected')
 const directLeak = mined ? await stranger.query({ ids: [mined.id] }) : []
 assert(directLeak.length === 0, 'direct event-id query cannot leak a chat message')
 

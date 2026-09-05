@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { listClubs, fetchOnAirClubDjs, fetchOnStageClubDjs, subscribeClubPresence, type MyClub } from '../nostr/groups'
-  import { fetchMyClubs } from '../nostr/groups'
+  import { listClubs, fetchClubMemberCounts, fetchOnAirClubTracks, fetchOnStageClubDjs, subscribeClubMemberCounts, type OnAirClubTrack } from '../nostr/groups'
   import { goClub, goUser, goLeaderboard } from '../router.svelte'
   import { npubEncode } from 'nostr-tools/nip19'
-  import { auth } from '../nostr/auth.svelte'
   import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import { persistedStageGroup } from '../nostr/stage.svelte'
   import { clubAvatar } from '../avatar'
-  import ZapButton from './club/ZapButton.svelte'
+  import { marquee } from '../actions/marquee'
+  import { LISTENER_COUNT_STALE_MS, subscribeListenerCounts } from '../nostr/listeners.svelte'
   import { findClubSuggestions } from './clubSearch'
   import type { Club } from '../nostr/types'
 
@@ -16,31 +15,28 @@
   const TELEGRAM_BOT_CLUB_ID = 'c7ca6a16dd1ed946'
 
   let clubs = $state<Club[]>([])
-  let myClubs = $state<MyClub[]>([])
-  let onAirDjs = $state<Map<string, string>>(new Map())
+  let memberCounts = $state<Record<string, { count: number; sentAt: number }>>({})
+  let onAirTracks = $state<Map<string, OnAirClubTrack>>(new Map())
   let onStageDjs = $state<Map<string, string>>(new Map())
   let loading = $state(true)
   let error = $state('')
   let lbEntries = $state<LeaderboardEntry[]>([])
   let loadVersion = 0
 
-  // Per-club presence: clubId → pubkey → last beat ms
-  const ONLINE_MS = 50_000
-  let clubBeats = $state<Record<string, Record<string, number>>>({})
-  let onlineTick = $state(Date.now())
-  const onlineCounts = $derived.by(() => {
-    void onlineTick
+  let listenerTotals = $state<Record<string, { count: number; sentAt: number }>>({})
+  let listenerTick = $state(Date.now())
+  const listenerCounts = $derived.by(() => {
+    void listenerTick
     const now = Date.now()
     const out: Record<string, number> = {}
-    for (const [id, byPk] of Object.entries(clubBeats)) {
-      out[id] = Object.values(byPk).filter((ms) => now - ms < ONLINE_MS).length
+    for (const [id, total] of Object.entries(listenerTotals)) {
+      if (now - total.sentAt <= LISTENER_COUNT_STALE_MS) out[id] = total.count
     }
     return out
   })
 
-  const myIds = $derived(new Set(myClubs.map((c) => c.id)))
   const directoryClubs = $derived(
-    clubs.filter((club) => club.id !== TELEGRAM_BOT_CLUB_ID && onAirDjs.has(club.id)),
+    clubs.filter((club) => club.id !== TELEGRAM_BOT_CLUB_ID && onAirTracks.has(club.id)),
   )
   const telegramBotClub = $derived(clubs.find((club) => club.id === TELEGRAM_BOT_CLUB_ID) ?? null)
   const searchableClubs = $derived(clubs.filter((club) => club.id !== TELEGRAM_BOT_CLUB_ID))
@@ -51,10 +47,18 @@
   const showSuggestions = $derived(searchOpen && clubQuery.trim().length > 0)
   let showAllClubs = $state(false)
 
+  function trackParts(value: string): { artist: string; title: string } {
+    const full = value.trim()
+    const match = full.match(/^(.+?) [–—-] (.+)$/)
+    return match ? { artist: match[1], title: match[2] } : { artist: '', title: full }
+  }
+
   // The club the user is currently DJing in → pin to the top + highlight.
   const onStageClub = persistedStageGroup()
   const sortedClubs = $derived.by(() => {
-    const byMembers = [...directoryClubs].sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0))
+    const byMembers = [...directoryClubs].sort(
+      (a, b) => (memberCounts[b.id]?.count ?? 0) - (memberCounts[a.id]?.count ?? 0),
+    )
     // 1. own DJ club, 2. clubs with active stage, 3. rest — each group sorted by members
     const myStage = byMembers.filter((c) => c.id === onStageClub)
     const rest = byMembers.filter((c) => c.id !== onStageClub)
@@ -104,24 +108,22 @@
     }
   }
 
-  async function load(pubkey: string | null) {
+  async function load() {
     const version = ++loadVersion
     loading = true
     error = ''
     try {
-      const [loadedClubs, loadedMine] = await Promise.all([
-        listClubs(),
-        pubkey ? fetchMyClubs(pubkey) : Promise.resolve([]),
-      ])
+      const loadedClubs = await listClubs()
       const clubIds = loadedClubs.map((club) => club.id)
-      const [loadedOnAirDjs, loadedOnStageDjs] = await Promise.all([
-        fetchOnAirClubDjs(clubIds),
+      const [loadedOnAirTracks, loadedOnStageDjs, loadedMemberCounts] = await Promise.all([
+        fetchOnAirClubTracks(clubIds),
         fetchOnStageClubDjs([TELEGRAM_BOT_CLUB_ID]),
+        fetchClubMemberCounts(clubIds),
       ])
       if (version !== loadVersion) return
       clubs = loadedClubs
-      myClubs = loadedMine
-      onAirDjs = loadedOnAirDjs
+      memberCounts = Object.fromEntries(loadedMemberCounts)
+      onAirTracks = loadedOnAirTracks
       onStageDjs = loadedOnStageDjs
     } catch (e) {
       if (version !== loadVersion) return
@@ -132,8 +134,7 @@
   }
 
   $effect(() => {
-    const pubkey = auth.pubkey
-    void load(pubkey)
+    void load()
   })
 
   // Keep the public directory live after the initial snapshot. A club that
@@ -143,8 +144,8 @@
     if (clubIds.length === 0) return
     let cancelled = false
     const timer = setInterval(() => {
-      void fetchOnAirClubDjs(clubIds).then((next) => {
-        if (!cancelled) onAirDjs = next
+      void fetchOnAirClubTracks(clubIds).then((next) => {
+        if (!cancelled) onAirTracks = next
       }).catch(() => {
         // Preserve the last good snapshot through a transient relay failure.
       })
@@ -159,19 +160,28 @@
     void fetchLeaderboard().then((r) => (lbEntries = r.top.slice(0, 5)))
   })
 
-  // Presence contains member identities. Subscribe only to clubs the signed-in
-  // account belongs to; guests never request or receive this social data.
   $effect(() => {
-    const ids = myClubs.map((c) => c.id)
-    const unsub = subscribeClubPresence(ids, (clubId, pubkey, ms) => {
-      const prev = clubBeats[clubId] ?? {}
-      if (ms > (prev[pubkey] ?? 0)) {
-        clubBeats = { ...clubBeats, [clubId]: { ...prev, [pubkey]: ms } }
+    const ids = clubs.map((club) => club.id)
+    const unsub = subscribeListenerCounts(ids, (clubId, count, sentAt) => {
+      const previous = listenerTotals[clubId]
+      if (!previous || sentAt >= previous.sentAt) {
+        listenerTotals = { ...listenerTotals, [clubId]: { count, sentAt } }
       }
     })
-    const tick = setInterval(() => { onlineTick = Date.now() }, 15_000)
+    const tick = setInterval(() => { listenerTick = Date.now() }, 5_000)
     return () => { unsub(); clearInterval(tick) }
   })
+
+  $effect(() => {
+    const ids = clubs.map((club) => club.id)
+    return subscribeClubMemberCounts(ids, (clubId, count, sentAt) => {
+      const previous = memberCounts[clubId]
+      if (!previous || sentAt >= previous.sentAt) {
+        memberCounts = { ...memberCounts, [clubId]: { count, sentAt } }
+      }
+    })
+  })
+
 </script>
 
 <div class="wrap">
@@ -242,8 +252,8 @@
                 <strong>{club.name}</strong>
                 {#if club.about}<span>{club.about}</span>{/if}
               </span>
-              <span class:on-air={onAirDjs.has(club.id)} class="suggestion-state">
-                {onAirDjs.has(club.id) ? 'ON AIR' : 'ENTER CLUB'}
+              <span class:on-air={onAirTracks.has(club.id)} class="suggestion-state">
+                {onAirTracks.has(club.id) ? 'ON AIR' : 'ENTER CLUB'}
               </span>
             </button>
           {:else}
@@ -262,45 +272,69 @@
     {:else}
       <ul class="list">
         {#each displayClubs as club (club.id)}
-          {@const liveDj = onAirDjs.get(club.id)}
+          {@const live = onAirTracks.get(club.id)!}
+          {@const liveDjProfile = useProfile(live.dj)}
+          {@const track = trackParts(live.title)}
           <li>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="row club-directory-row" class:onstage={!!liveDj} role="button" tabindex="0" onclick={() => goClub(club.id)}>
-            <div class="pic">
-              <img class="pic-img" src={club.picture || clubAvatar(club.owner || club.id)} alt="" />
-            </div>
-            <div class="meta">
-              <div class="name-line">
-                <div class="name">{club.name}</div>
-                {#if myIds.has(club.id)}<span class="badge-in">Member</span>{/if}
+            <a class="club-player-row" href={`/club/${club.id}`} onclick={(event) => { event.preventDefault(); goClub(club.id) }}>
+              <div class="pic club-player-pic">
+                <img class="pic-img" src={club.picture || clubAvatar(club.owner || club.id)} alt="" />
               </div>
-              {#if club.about}<div class="about">{club.about}</div>{/if}
-              <div class="tags">
-                {#if club.memberCount != null}
-                  <span class="tag">👥 {club.memberCount} member{club.memberCount === 1 ? '' : 's'}</span>
-                {/if}
-                {#if (onlineCounts[club.id] ?? 0) > 0}
-                  <span class="tag online">● {onlineCounts[club.id]} online</span>
-                {/if}
-                {#if club.access === 'paid'}<span class="tag paid">🔒 {club.price} sats</span>{/if}
-              </div>
-              {#if club.owner}
-                {@const ownerProfile = useProfile(club.owner)}
-                <div class="host">
-                  <img class="host-avatar" src={avatarUrl(club.owner, ownerProfile)} alt="" width="18" height="18" />
-                  <span>Hosted by {displayName(club.owner, ownerProfile)}</span>
+              <div class="club-player-content">
+                <div class="club-player-status">
+                  <span class="club-player-club">
+                    <span class="club-player-name">{club.name}</span>
+                    <span class="club-player-tags">
+                      {#if memberCounts[club.id]}
+                        {@const memberCount = memberCounts[club.id].count}
+                        <span class="club-player-separator" aria-hidden="true">|</span>
+                        <span class="tag members-tag" title={`${memberCount} member${memberCount === 1 ? '' : 's'}`}>
+                          <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-4A4.5 4.5 0 0 0 3 18.5V20"></path>
+                            <circle cx="9.5" cy="7.5" r="3.5"></circle>
+                            <path d="M16 11a3 3 0 1 0 0-6M18 14.5a4 4 0 0 1 3 3.87V20"></path>
+                          </svg>
+                          {memberCount}
+                        </span>
+                      {/if}
+                      {#if club.owner}
+                        {@const ownerProfile = useProfile(club.owner)}
+                        <span class="club-player-separator" aria-hidden="true">|</span>
+                        <span class="tag host-tag" title={`Host: ${displayName(club.owner, ownerProfile)}`}>
+                          <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m4 8 3.2 3L12 5l4.8 6L20 8l-1.6 10H5.6L4 8Z"></path>
+                            <path d="M6 21h12"></path>
+                          </svg>
+                          <span class="tag-text">{displayName(club.owner, ownerProfile)}</span>
+                        </span>
+                      {/if}
+                      {#if (listenerCounts[club.id] ?? 0) > 0}
+                        <span class="club-player-separator" aria-hidden="true">|</span>
+                        <span class="tag listener-tag" title="People listening to the stream right now">
+                          <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 14v-2a8 8 0 0 1 16 0v2"></path>
+                            <path d="M4 14h3v6H5.5A1.5 1.5 0 0 1 4 18.5V14ZM20 14h-3v6h1.5a1.5 1.5 0 0 0 1.5-1.5V14Z"></path>
+                          </svg>
+                          {listenerCounts[club.id]}
+                        </span>
+                      {/if}
+                    </span>
+                  </span>
+                  <span class="club-player-dj">
+                    <span>DJ:</span>
+                    <span class="club-player-dj-name">{displayName(live.dj, liveDjProfile)}</span>
+                    <span class="live-label">ON AIR</span>
+                  </span>
                 </div>
-              {/if}
-            </div>
-            {#if liveDj}
-              {@const liveDjProfile = useProfile(liveDj)}
-              <span class="dj-status club-dj-status">
-                <span class="club-dj-name">{displayName(liveDj, liveDjProfile)}</span>
-                <span class="live-label">ON AIR</span>
-              </span>
-            {/if}
-            <button class="enter-club" onclick={(event) => { event.stopPropagation(); goClub(club.id) }}>Enter club</button>
-            </div>
+                <div class="club-player-title" use:marquee>
+                  <span class="mq-inner">{track.title || 'Untitled track'}</span>
+                </div>
+                <div class="club-player-byline">
+                  <div class="club-player-artist">{track.artist || 'Live set'}</div>
+                  <div class="club-player-actions"><span class="enter-club">Enter club</span></div>
+                </div>
+              </div>
+            </a>
           </li>
         {/each}
       </ul>
@@ -320,40 +354,82 @@
     {#if loading}
       <p class="dim">Loading club…</p>
     {:else if telegramBotClub}
-      {@const botOnAirDj = onAirDjs.get(TELEGRAM_BOT_CLUB_ID)}
+      {@const botLive = onAirTracks.get(TELEGRAM_BOT_CLUB_ID)}
       {@const botStageDj = onStageDjs.get(TELEGRAM_BOT_CLUB_ID)}
-      {@const botStatusDj = botOnAirDj || botStageDj}
+      {@const botStatusDj = botLive?.dj || botStageDj}
+      {@const botTrack = botLive ? trackParts(botLive.title) : null}
       <ul class="list">
         <li>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="row telegram-club-row" class:onstage={!!botStatusDj} role="button" tabindex="0" onclick={() => goClub(TELEGRAM_BOT_CLUB_ID)}>
-            <div class="pic">
+          <a class="club-player-row telegram-club-row" class:onstage={!!botStatusDj} href={`/club/${TELEGRAM_BOT_CLUB_ID}`} onclick={(event) => { event.preventDefault(); goClub(TELEGRAM_BOT_CLUB_ID) }}>
+            <div class="pic club-player-pic">
               <img class="pic-img" src={telegramBotClub.picture || clubAvatar(telegramBotClub.owner || telegramBotClub.id)} alt="" />
             </div>
-            <div class="meta">
-              <div class="name-line">
-                <div class="name">{telegramBotClub.name}</div>
-                {#if myIds.has(TELEGRAM_BOT_CLUB_ID)}<span class="badge-in">Member</span>{/if}
+            <div class="club-player-content">
+              <div class="club-player-status">
+                <span class="club-player-club">
+                  <span class="club-player-name">{telegramBotClub.name}</span>
+                  <span class="club-player-tags">
+                    {#if memberCounts[TELEGRAM_BOT_CLUB_ID]}
+                      {@const memberCount = memberCounts[TELEGRAM_BOT_CLUB_ID].count}
+                      <span class="club-player-separator" aria-hidden="true">|</span>
+                      <span class="tag members-tag" title={`${memberCount} member${memberCount === 1 ? '' : 's'}`}>
+                        <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-4A4.5 4.5 0 0 0 3 18.5V20"></path>
+                          <circle cx="9.5" cy="7.5" r="3.5"></circle>
+                          <path d="M16 11a3 3 0 1 0 0-6M18 14.5a4 4 0 0 1 3 3.87V20"></path>
+                        </svg>
+                        {memberCount}
+                      </span>
+                    {/if}
+                    {#if telegramBotClub.owner}
+                      {@const ownerProfile = useProfile(telegramBotClub.owner)}
+                      <span class="club-player-separator" aria-hidden="true">|</span>
+                      <span class="tag host-tag" title={`Host: ${displayName(telegramBotClub.owner, ownerProfile)}`}>
+                        <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m4 8 3.2 3L12 5l4.8 6L20 8l-1.6 10H5.6L4 8Z"></path>
+                          <path d="M6 21h12"></path>
+                        </svg>
+                        <span class="tag-text">{displayName(telegramBotClub.owner, ownerProfile)}</span>
+                      </span>
+                    {/if}
+                    {#if (listenerCounts[TELEGRAM_BOT_CLUB_ID] ?? 0) > 0}
+                      <span class="club-player-separator" aria-hidden="true">|</span>
+                      <span class="tag listener-tag" title="People listening to the stream right now">
+                        <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 14v-2a8 8 0 0 1 16 0v2"></path>
+                          <path d="M4 14h3v6H5.5A1.5 1.5 0 0 1 4 18.5V14ZM20 14h-3v6h1.5a1.5 1.5 0 0 0 1.5-1.5V14Z"></path>
+                        </svg>
+                        {listenerCounts[TELEGRAM_BOT_CLUB_ID]}
+                      </span>
+                    {/if}
+                  </span>
+                </span>
+                {#if botStatusDj}
+                  {@const botDjProfile = useProfile(botStatusDj)}
+                  <span class="club-player-dj">
+                    <span>DJ:</span>
+                    <span class="club-player-dj-name">{displayName(botStatusDj, botDjProfile)}</span>
+                    <span class:live-label={!!botLive} class:stage-label={!botLive}>{botLive ? 'ON AIR' : 'ON STAGE'}</span>
+                  </span>
+                {/if}
               </div>
-              <div class="about">{telegramBotClub.about || 'Add tracks from Telegram and listen together.'}</div>
-              {#if telegramBotClub.owner}
-                {@const ownerProfile = useProfile(telegramBotClub.owner)}
-                <div class="host">
-                  <img class="host-avatar" src={avatarUrl(telegramBotClub.owner, ownerProfile)} alt="" width="18" height="18" />
-                  <span>Hosted by {displayName(telegramBotClub.owner, ownerProfile)}</span>
+              {#if botTrack}
+                <div class="club-player-title" use:marquee>
+                  <span class="mq-inner">{botTrack.title || 'Untitled track'}</span>
+                </div>
+              {:else}
+                <div class="club-player-title club-player-placeholder">
+                  {botStageDj ? 'DJ is loading tracks' : 'No DJ on stage'}
                 </div>
               {/if}
+              <div class="club-player-byline">
+                <div class="club-player-artist">
+                  {botTrack ? (botTrack.artist || 'Live set') : (botStageDj ? 'Playback starts automatically.' : 'Take the first slot and start a set.')}
+                </div>
+                <div class="club-player-actions"><span class="enter-club">Enter club</span></div>
+              </div>
             </div>
-            {#if botStatusDj}
-              <span class="dj-status">
-                <ZapButton pubkey={botStatusDj} club={TELEGRAM_BOT_CLUB_ID} iconOnly={true} showName={true} showSelf={true} />
-                <span class:live-label={!!botOnAirDj} class:stage-label={!botOnAirDj}>{botOnAirDj ? 'ON AIR' : 'ON STAGE'}</span>
-              </span>
-            {/if}
-            {#if auth.canSign && !myIds.has(TELEGRAM_BOT_CLUB_ID)}
-              <button class="enter-club" onclick={(event) => { event.stopPropagation(); goClub(TELEGRAM_BOT_CLUB_ID) }}>Enter club</button>
-            {/if}
-          </div>
+          </a>
         </li>
       </ul>
     {:else}
@@ -627,51 +703,172 @@
     flex-direction: column;
     gap: 0.7rem;
   }
-  .row {
+  .club-player-row {
+    --player-led-surface:
+      radial-gradient(circle, rgba(241, 243, 244, 0.045) 0 0.55px, transparent 0.75px) 0 0 / 4px 4px;
     position: relative;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 0.9rem;
+    height: 104px;
+    padding: 13px 15px 14px;
+    overflow: hidden;
+    color: var(--lcd-text);
+    background: var(--player-led-surface);
+    border-bottom: 1px solid rgba(241, 243, 244, 0.14);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    text-decoration: none;
+    text-shadow: var(--lcd-text-shadow);
+    transition: background-color 0.15s ease, transform 0.08s ease;
+  }
+  .list > li:last-child .club-player-row { border-bottom: 0; }
+  .club-player-row:hover { background-color: rgba(241, 243, 244, 0.035); }
+  .club-player-row:focus-visible {
+    z-index: 1;
+    outline: 1px solid var(--lcd-text-bright);
+    outline-offset: -1px;
+  }
+  .club-player-row:active { transform: translateY(1px); }
+  .club-player-pic { align-self: start; }
+  .club-player-content {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+    align-self: stretch;
+    min-width: 0;
+  }
+  .club-player-status {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+    margin-bottom: 4px;
+    padding-bottom: 3px;
+    color: var(--lcd-text-dim);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .club-player-dj {
+    display: flex;
+    align-items: baseline;
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: 12px;
+    gap: 0.35rem;
+  }
+  .club-player-dj-name {
+    overflow: hidden;
+    color: var(--lcd-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .club-player-name {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--lcd-text);
+    font-size: 14px;
+    letter-spacing: 0.03em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .club-player-club {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
-    cursor: pointer;
-    transition: border-color 0.15s ease, transform 0.08s ease;
+    flex: 1 1 auto;
+    min-width: 0;
   }
-  .row:hover {
-    border-color: var(--accent-2);
+  .club-player-tags {
+    display: flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--lcd-text-dim);
+    font-size: 14px;
+    letter-spacing: 0.03em;
+    line-height: 1;
+    text-transform: none;
   }
-  .row:active {
-    transform: translateY(1px);
+  .club-player-separator {
+    flex: 0 0 auto;
+    margin: 0 0.42rem;
+    color: var(--lcd-text-soft);
   }
-  .club-directory-row {
-    display: grid;
-    grid-template-columns: 52px minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
-    column-gap: 0.9rem;
-    row-gap: 0.35rem;
-    align-items: start;
+  .club-player-tags .tag {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0.24rem;
+    color: var(--lcd-text);
+    white-space: nowrap;
   }
-  .club-directory-row > .pic {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    align-self: center;
+  .club-player-tags .host-tag { overflow: hidden; }
+  .club-player-tags .tag-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .club-directory-row > .meta {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+  .club-player-tags .members-tag,
+  .club-player-tags .listener-tag { flex: 0 0 auto; }
+  .club-player-tags .tag-icon {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
-  .club-directory-row > .club-dj-status {
-    grid-column: 3;
-    grid-row: 1;
-    justify-self: end;
-    align-self: start;
+  .club-player-title {
+    overflow: hidden;
+    color: var(--lcd-text);
+    font-size: 1rem;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .club-directory-row > .enter-club {
-    grid-column: 3;
-    grid-row: 2;
-    justify-self: end;
-    align-self: end;
+  .club-player-title .mq-inner {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+  }
+  .club-player-row:hover .club-player-title:global([data-mq]) .mq-inner {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    animation: club-title-scroll 6s ease-in-out infinite;
+  }
+  .club-player-artist {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .club-player-placeholder { color: var(--lcd-text-soft); }
+  .club-player-byline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+    margin-top: 2px;
+  }
+  .club-player-actions {
+    flex: 0 0 auto;
+    margin-left: 12px;
+  }
+  @keyframes club-title-scroll {
+    0%, 15% { transform: translateX(0); }
+    85%, 100% { transform: translateX(var(--mq-shift, 0px)); }
   }
   /* The club the user is DJing in: pinned to the top, pulsing green. */
-  .row.onstage {
+  .club-player-row.onstage {
     border-color: var(--accent);
     animation: club-pulse 1.6s ease-in-out infinite;
   }
@@ -685,34 +882,15 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .row.onstage {
+    .club-player-row.onstage {
       animation: none;
     }
-  }
-  .dj-status {
-    display: flex;
-    align-items: center;
-    flex: 0 1 auto;
-    min-width: 0;
-    gap: 0;
-    color: var(--lcd-text);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .dj-status :global(.zap-mini.icon-only.with-name) {
-    max-width: 220px;
-    height: 24px;
-    padding: 0;
-    gap: 0.35rem;
-    color: var(--lcd-text);
-  }
-  .dj-status :global(.bolt-icon) {
-    width: 24px;
-    height: 24px;
-  }
-  .dj-status :global(.icon-dj-name) {
-    max-width: 180px;
+    .club-player-row:hover .club-player-title:global([data-mq]) .mq-inner {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      animation: none;
+    }
   }
   .live-label {
     margin-left: 1.25em;
@@ -732,102 +910,6 @@
     height: 100%;
     object-fit: cover;
     display: block;
-  }
-  .meta {
-    flex: 1;
-    min-width: 0;
-  }
-  .name {
-    font-weight: 700;
-    font-size: 1rem;
-  }
-  .name-line {
-    display: flex;
-    align-items: baseline;
-    min-width: 0;
-    gap: 0.55rem;
-  }
-  .name-line .name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .about {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-bottom: 0.35rem;
-  }
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.15rem;
-  }
-  .tag {
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.1rem 0.5rem;
-    white-space: nowrap;
-  }
-  .tag.paid {
-    color: var(--amber);
-    border-color: var(--amber);
-    font-weight: 700;
-  }
-  .tag.online {
-    color: #4ade80;
-    border-color: #4ade80;
-    font-weight: 600;
-  }
-  .host {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.4rem;
-    font-size: 0.74rem;
-    color: var(--text-dim);
-  }
-  .club-dj-status {
-    gap: 0.25rem;
-    font-size: 0.74rem;
-    letter-spacing: 0;
-    text-transform: none;
-  }
-  .club-dj-status .live-label {
-    margin-left: 0;
-    padding: 0;
-    border: 0;
-    color: var(--accent);
-    background: transparent;
-    font-size: 8px;
-    letter-spacing: 0.06em;
-    line-height: 1;
-    transform: translateY(-0.45em);
-  }
-  .club-dj-name {
-    max-width: 130px;
-    overflow: hidden;
-    color: var(--lcd-text);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: 1rem;
-    letter-spacing: 0;
-    line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .host-avatar {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
   }
   .enter-club {
     flex: 0 0 auto;
@@ -851,14 +933,6 @@
   .enter-club:focus-visible {
     outline: 1px solid currentColor;
     outline-offset: 4px;
-  }
-  .badge-in {
-    flex: 0 0 auto;
-    font-size: 0.72rem;
-    color: var(--accent);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.2rem 0.6rem;
   }
   .dim {
     color: var(--text-dim);
@@ -1056,7 +1130,6 @@
   }
   :global(body.site-led-page) .eyebrow,
   :global(body.site-led-page) .hero-title,
-  :global(body.site-led-page) .name,
   :global(body.site-led-page) .lb-pod-name {
     font-family: 'DotGothic16', ui-monospace, monospace;
     font-weight: 400;
@@ -1106,41 +1179,14 @@
   :global(body.site-led-page) .list {
     gap: 0;
   }
-  :global(body.site-led-page) .clubs-panel .row,
-  :global(body.site-led-page) .tg-block .row {
-    min-height: 88px;
-    padding: 0.85rem 0.2rem;
-    border: 0;
-    border-bottom: 1px solid rgba(241, 243, 244, 0.14);
-    color: var(--lcd-text);
-    background: transparent;
-    transition: background-color 0.15s ease, transform 0.08s ease;
-  }
-  :global(body.site-led-page) .clubs-panel .list > li:last-child .row,
-  :global(body.site-led-page) .tg-block .list > li:last-child .row {
-    border-bottom: 0;
-  }
-  :global(body.site-led-page) .clubs-panel .row:hover,
-  :global(body.site-led-page) .tg-block .row:hover {
-    border-color: rgba(241, 243, 244, 0.14);
-    background: rgba(241, 243, 244, 0.035);
-  }
-  :global(body.site-led-page) .row.onstage {
+  :global(body.site-led-page) .club-player-row.onstage {
     animation: none;
   }
   :global(body.site-led-page) .pic,
-  :global(body.site-led-page) .host-avatar,
   :global(body.site-led-page) .lb-pod-av,
   :global(body.site-led-page) .lb-av {
     border-color: rgba(241, 243, 244, 0.26);
     filter: saturate(0.86) contrast(1.04);
-  }
-  :global(body.site-led-page) .tag,
-  :global(body.site-led-page) .badge-in {
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    font-family: 'DotGothic16', ui-monospace, monospace;
   }
   :global(body.site-led-page) .lb-preview {
     margin-top: 0.7rem;
@@ -1167,6 +1213,21 @@
     color: var(--lcd-text);
   }
   @media (max-width: 560px) {
+    .club-player-row {
+      height: 96px;
+      padding: 13px 9px 11px;
+      column-gap: 0.7rem;
+    }
+    .club-player-status { font-size: 9px; }
+    .club-player-dj { max-width: 58%; margin-left: 8px; gap: 0.2rem; }
+    .club-player-dj-name { max-width: 92px; font-size: 11px; }
+    .club-player-dj .live-label { margin-left: 0.25rem; }
+    .club-player-name { font-size: 12px; }
+    .club-player-tags { font-size: 12px; }
+    .club-player-title { font-size: 1rem; }
+    .club-player-artist { font-size: 0.82rem; }
+    .club-player-actions { min-height: 23px; }
+    .club-player-actions .enter-club { font-size: 0.72rem; }
     :global(body.site-led-page) .wrap { padding: 0.45rem 0.45rem 3rem; }
     :global(body.site-led-page) .hero {
       min-height: 260px;
@@ -1186,21 +1247,6 @@
     :global(body.site-led-page) .search-suggestion img { width: 34px; height: 34px; }
     :global(body.site-led-page) .suggestion-copy span { display: none; }
     :global(body.site-led-page) .suggestion-state { font-size: 0.66rem; }
-    :global(body.site-led-page) .clubs-panel .row,
-    :global(body.site-led-page) .tg-block .row {
-      display: grid;
-      grid-template-columns: 52px minmax(0, 1fr) auto;
-      min-height: 96px;
-      padding: 0.7rem 0.1rem;
-    }
-    :global(body.site-led-page) .clubs-panel .pic,
-    :global(body.site-led-page) .tg-block .pic { grid-row: 1 / span 2; }
-    :global(body.site-led-page) .clubs-panel .meta,
-    :global(body.site-led-page) .tg-block .meta { grid-column: 2; }
-    :global(body.site-led-page) .clubs-panel .enter-club { grid-column: 3; grid-row: 2; }
-    :global(body.site-led-page) .tg-block .enter-club { grid-column: 3; grid-row: 1; }
-    :global(body.site-led-page) .clubs-panel .dj-status { grid-column: 3; grid-row: 1; }
-    :global(body.site-led-page) .tg-block .dj-status { grid-column: 2 / -1; grid-row: 2; }
     :global(body.site-led-page) .clubs-panel { padding: 0.8rem; }
     :global(body.site-led-page) .lb-preview,
     :global(body.site-led-page) .tg-block { margin-top: 0.55rem; padding: 0.8rem; }

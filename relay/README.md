@@ -26,7 +26,9 @@ Built on **khatru + relay29** (Go, badger eventstore). Listens only on
 
 Only group members may write club content; the relay checks membership against
 the `h`-tag group. The sole exception is the empty, anonymous `20105` listener heartbeat;
-its relay-signed `20106` aggregate exposes only the count. `30100`, `1313`, `20106` and NIP-78 credibility snapshots are relay-authored only. NIP-42 AUTH runs
+its relay-signed `20106` aggregate exposes only the count. The public relay-signed
+`30112` member aggregate likewise exposes only a club id and count, never roster
+identities. `30100`, `1313`, `20106`, `30112` and NIP-78 credibility snapshots are relay-authored only. NIP-42 AUTH runs
 on connect. Public club metadata, playback and stage remain readable without
 AUTH, while kind `9`, presence and `39002` are served only to authenticated
 current members. The check applies to history, direct event-id queries and every

@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	kindChat    = 9
-	kindMembers = 39002
+	kindChat        = 9
+	kindMembers     = 39002
+	kindMemberCount = 30112 // relay-signed public aggregate; never contains member identities
 )
 
 // socialGuard keeps the public radio stream public while protecting the social
@@ -22,9 +23,26 @@ const (
 // it for public clubs, so the guard owns a small, lock-protected membership index
 // and applies the rule consistently to writes, history queries and live pushes.
 type socialGuard struct {
-	mu            sync.RWMutex
-	members       map[string]map[string]struct{} // group id -> member pubkeys
-	managerPubkey string
+	mu                 sync.RWMutex
+	members            map[string]map[string]struct{} // group id -> member pubkeys
+	managerPubkey      string
+	publishMemberCount func(groupID string, count int)
+}
+
+func (g *socialGuard) setMemberCountPublisher(publish func(groupID string, count int)) {
+	g.mu.Lock()
+	g.publishMemberCount = publish
+	g.mu.Unlock()
+}
+
+func (g *socialGuard) memberCounts() map[string]int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	counts := make(map[string]int, len(g.members))
+	for groupID, members := range g.members {
+		counts[groupID] = len(members)
+	}
+	return counts
 }
 
 func newSocialGuard(state *relay29.State, managerPubkey string) *socialGuard {
@@ -90,10 +108,11 @@ func (g *socialGuard) observe(_ context.Context, event *nostr.Event) {
 	}
 
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	changed := false
 	switch event.Kind {
 	case nostr.KindSimpleGroupCreateGroup:
 		g.members[groupID] = map[string]struct{}{event.PubKey: {}}
+		changed = true
 	case nostr.KindSimpleGroupPutUser:
 		set := g.members[groupID]
 		if set == nil {
@@ -102,6 +121,9 @@ func (g *socialGuard) observe(_ context.Context, event *nostr.Event) {
 		}
 		for _, tag := range event.Tags {
 			if len(tag) > 1 && tag[0] == "p" && nostr.IsValidPublicKey(tag[1]) {
+				if _, exists := set[tag[1]]; !exists {
+					changed = true
+				}
 				set[tag[1]] = struct{}{}
 			}
 		}
@@ -109,11 +131,21 @@ func (g *socialGuard) observe(_ context.Context, event *nostr.Event) {
 		set := g.members[groupID]
 		for _, tag := range event.Tags {
 			if len(tag) > 1 && tag[0] == "p" {
+				if _, exists := set[tag[1]]; exists {
+					changed = true
+				}
 				delete(set, tag[1])
 			}
 		}
 	case nostr.KindSimpleGroupDeleteGroup:
+		_, changed = g.members[groupID]
 		delete(g.members, groupID)
+	}
+	count := len(g.members[groupID])
+	publish := g.publishMemberCount
+	g.mu.Unlock()
+	if changed && publish != nil {
+		publish(groupID, count)
 	}
 }
 

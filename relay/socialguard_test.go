@@ -23,6 +23,8 @@ func socialGuardFixture() *socialGuard {
 
 func TestSocialGuardTracksMembership(t *testing.T) {
 	g := socialGuardFixture()
+	var published []int
+	g.setMemberCountPublisher(func(_ string, count int) { published = append(published, count) })
 	if !g.isMember("club", testOwner) {
 		t.Fatal("owner must be seeded as a member")
 	}
@@ -42,6 +44,12 @@ func TestSocialGuardTracksMembership(t *testing.T) {
 	if g.isMember("club", testMember) {
 		t.Fatal("remove-user must revoke membership immediately")
 	}
+	if got := g.memberCounts()["club"]; got != 1 {
+		t.Fatalf("member count = %d, want 1", got)
+	}
+	if len(published) != 2 || published[0] != 2 || published[1] != 1 {
+		t.Fatalf("published counts = %v, want [2 1]", published)
+	}
 }
 
 func TestProtectedSocialKinds(t *testing.T) {
@@ -50,7 +58,7 @@ func TestProtectedSocialKinds(t *testing.T) {
 			t.Fatalf("kind %d must be protected", kind)
 		}
 	}
-	for _, kind := range []int{1, 39000, 30100, kindListenerBeat, kindListenerCount} {
+	for _, kind := range []int{1, 39000, 30100, kindListenerBeat, kindListenerCount, kindMemberCount} {
 		if isProtectedSocialKind(kind) {
 			t.Fatalf("public kind %d must stay public", kind)
 		}

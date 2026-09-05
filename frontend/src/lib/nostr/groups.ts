@@ -1,7 +1,7 @@
 import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { minePow } from 'nostr-tools/nip13'
-import { pool, CLUB_RELAY, PROFILE_RELAYS } from './pool'
+import { pool, CLUB_RELAY, CLUB_RELAY_PUBKEY, PROFILE_RELAYS } from './pool'
 import { signEvent } from './nostrLogin'
 import { auth } from './auth.svelte'
 import { resolveZapper } from './zaps.svelte'
@@ -34,6 +34,7 @@ export const KIND_FLOOR_REACTION = 20103 // ephemeral floor emote (content = emo
 export const KIND_MOOD           = 20104 // ephemeral vibe reaction: h=club, pos=track-pos, v=banger|skip
 export const KIND_LISTENER_BEAT  = 20105 // anonymous, tab-scoped club-page heartbeat
 export const KIND_LISTENER_COUNT = 20106 // relay-signed aggregate of active listener sessions
+export const KIND_MEMBER_COUNT = 30112 // relay-signed public member total; no roster identities
 export const KIND_AUTODJ = 30105      // replaceable per club (d=club): owner-armed auto-dj playlist
 export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-signed disarm marker
 
@@ -411,11 +412,7 @@ export function parseOwner(ev: Event): string {
   return ownerTag?.[1] ?? ev.tags.find((t) => t[0] === 'p' && t[1])?.[1] ?? ''
 }
 
-/**
- * List of all clubs (kind:39000), enriched with member counts (kind:39002) and owner
- * (kind:39001). Active clubs (more members) first; empty (0 members) clubs are hidden
- * so orphaned/test clubs don't clutter the home page.
- */
+/** List all clubs from public metadata, owner and access configuration events. */
 export async function listClubs(): Promise<Club[]> {
   const [metaEvents, adminEvents, configEvents] = await Promise.all([
     pool.querySync(RELAYS, { kinds: [KIND_METADATA] }, { maxWait: 4000 }),
@@ -449,8 +446,8 @@ export async function listClubs(): Promise<Club[]> {
       featured: !!configs.get(c.id)?.featured,
     }))
 
-  // The member roster is private, so the public directory does not derive or
-  // expose counts from kind 39002. Featured clubs still sort first.
+  // The private 39002 roster stays out of this query. Public aggregate counts
+  // come from the separate relay-authored KIND_MEMBER_COUNT event.
   clubs.sort((a, b) => {
     if (a.featured !== b.featured) return a.featured ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -488,6 +485,10 @@ export interface OnAirClubDj {
   sentAt: number
 }
 
+export interface OnAirClubTrack extends OnAirClubDj {
+  title: string
+}
+
 /**
  * Select the current DJ for every club with a fresh, actively playing
  * now_playing event. Unlike `fetchLiveClubIds`, stage heartbeats alone do not
@@ -499,8 +500,19 @@ export function selectOnAirClubDjs(
   clubIds: string[],
   nowMs = Date.now(),
 ): Map<string, string> {
+  return new Map(
+    [...selectOnAirClubTracks(events, clubIds, nowMs)].map(([clubId, live]) => [clubId, live.dj]),
+  )
+}
+
+/** Select the current track and DJ for every club that is actively on air. */
+export function selectOnAirClubTracks(
+  events: Event[],
+  clubIds: string[],
+  nowMs = Date.now(),
+): Map<string, OnAirClubTrack> {
   const allowed = new Set(clubIds)
-  const latest = new Map<string, OnAirClubDj>()
+  const latest = new Map<string, OnAirClubTrack>()
 
   for (const ev of events) {
     const clubId = tagValue(ev, 'h')
@@ -509,21 +521,80 @@ export function selectOnAirClubDjs(
     if (!clubId || !allowed.has(clubId) || !dj) continue
     if (tagValue(ev, 'status') === 'paused' || sentAt <= 0 || nowMs - sentAt >= 150_000) continue
     if (sentAt <= (latest.get(clubId)?.sentAt ?? 0)) continue
-    latest.set(clubId, { dj, sentAt })
+    latest.set(clubId, { dj, sentAt, title: ev.content.trim() })
   }
 
-  return new Map([...latest].map(([clubId, live]) => [clubId, live.dj]))
+  return latest
 }
 
 /** Current on-air DJ by club id. */
 export async function fetchOnAirClubDjs(clubIds: string[]): Promise<Map<string, string>> {
+  const tracks = await fetchOnAirClubTracks(clubIds)
+  return new Map([...tracks].map(([clubId, live]) => [clubId, live.dj]))
+}
+
+/** Current on-air track and DJ by club id. */
+export async function fetchOnAirClubTracks(clubIds: string[]): Promise<Map<string, OnAirClubTrack>> {
   if (clubIds.length === 0) return new Map()
   const events = await pool.querySync(
     RELAYS,
     { kinds: [KIND_NOW_PLAYING], '#h': clubIds },
     { maxWait: 4000 },
   )
-  return selectOnAirClubDjs(events, clubIds)
+  return selectOnAirClubTracks(events, clubIds)
+}
+
+export interface ClubMemberCount {
+  count: number
+  sentAt: number
+}
+
+/** Validate and select the newest relay-authored public member total per club. */
+export function selectClubMemberCounts(
+  events: Event[],
+  clubIds: string[],
+): Map<string, ClubMemberCount> {
+  const allowed = new Set(clubIds)
+  const latest = new Map<string, ClubMemberCount>()
+  for (const event of events) {
+    if (event.kind !== KIND_MEMBER_COUNT || event.pubkey !== CLUB_RELAY_PUBKEY) continue
+    const clubId = tagValue(event, 'h')
+    const count = Number(tagValue(event, 'count'))
+    const sentAt = Number(tagValue(event, 'sent_at'))
+    if (!clubId || !allowed.has(clubId)) continue
+    if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(sentAt) || sentAt <= 0) continue
+    if (sentAt < (latest.get(clubId)?.sentAt ?? 0)) continue
+    latest.set(clubId, { count, sentAt })
+  }
+  return latest
+}
+
+export async function fetchClubMemberCounts(clubIds: string[]): Promise<Map<string, ClubMemberCount>> {
+  if (clubIds.length === 0) return new Map()
+  const events = await pool.querySync(
+    RELAYS,
+    { kinds: [KIND_MEMBER_COUNT], '#h': clubIds },
+    { maxWait: 4000 },
+  )
+  return selectClubMemberCounts(events, clubIds)
+}
+
+export function subscribeClubMemberCounts(
+  clubIds: string[],
+  onCount: (clubId: string, count: number, sentAt: number) => void,
+): () => void {
+  if (clubIds.length === 0) return () => {}
+  const sub = pool.subscribeMany(
+    RELAYS,
+    { kinds: [KIND_MEMBER_COUNT], '#h': clubIds },
+    {
+      onevent(event) {
+        const next = selectClubMemberCounts([event], clubIds)
+        for (const [clubId, value] of next) onCount(clubId, value.count, value.sentAt)
+      },
+    },
+  )
+  return () => sub.close()
 }
 
 const DIRECTORY_STAGE_STALE_MS = 300_000

@@ -3,7 +3,7 @@ import { KIND_LISTENER_BEAT, KIND_LISTENER_COUNT } from './groups'
 import { CLUB_RELAY, CLUB_RELAY_PUBKEY, pool } from './pool'
 
 const BEAT_MS = 25_000
-const COUNT_STALE_MS = 45_000
+export const LISTENER_COUNT_STALE_MS = 45_000
 const SESSION_KEY_PREFIX = 'zapclub:listener-session-key:'
 
 interface ListenerState {
@@ -24,7 +24,7 @@ if (typeof setInterval !== 'undefined') {
 export const listeners = {
   /** Relay-authoritative active browser sessions for the current club. */
   get count(): number {
-    if (!state.clubId || state.now-state.sentAt > COUNT_STALE_MS) return 0
+    if (!state.clubId || state.now-state.sentAt > LISTENER_COUNT_STALE_MS) return 0
     return state.count
   },
 }
@@ -46,6 +46,28 @@ export function ingestListenerCount(event: Event, clubId: string): void {
   state.clubId = clubId
   state.count = next.count
   state.sentAt = next.sentAt
+}
+
+/** Subscribe to relay-authoritative listener totals for several directory clubs. */
+export function subscribeListenerCounts(
+  clubIds: string[],
+  onCount: (clubId: string, count: number, sentAt: number) => void,
+): () => void {
+  if (clubIds.length === 0) return () => {}
+  const allowed = new Set(clubIds)
+  const sub = pool.subscribeMany(
+    [CLUB_RELAY],
+    { kinds: [KIND_LISTENER_COUNT], '#h': clubIds },
+    {
+      onevent(event) {
+        const clubId = event.tags.find((entry) => entry[0] === 'h')?.[1]
+        if (!clubId || !allowed.has(clubId)) return
+        const next = parseListenerCount(event, clubId)
+        if (next) onCount(clubId, next.count, next.sentAt)
+      },
+    },
+  )
+  return () => sub.close()
 }
 
 const sessionKeys = new Map<string, Uint8Array>()

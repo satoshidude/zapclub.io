@@ -4,6 +4,7 @@
   import { showPay } from '../../nostr/payModal.svelte'
   import { useProfile, displayName, avatarUrl } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
+  import { marquee } from '../../actions/marquee'
 
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
@@ -93,7 +94,11 @@
       {#if showName}
         <span class="icon-dj-copy">
           <span class="icon-dj-name lcd-card-title">{iconLabel || displayName(dj, djProfile)}</span>
-          {#if showRecipientName}<span class="icon-recipient-name">{displayName(dj, djProfile)}</span>{/if}
+          {#if showRecipientName}
+            <span class="icon-recipient-name" use:marquee>
+              <span class="mq-inner">{displayName(dj, djProfile)}</span>
+            </span>
+          {/if}
         </span>
       {/if}
     {:else}
@@ -200,6 +205,27 @@
     white-space: nowrap;
   }
   .icon-dj-copy { min-width: 0; }
+  .icon-recipient-name {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .icon-recipient-name .mq-inner {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+  }
+  .zap-mini:hover .icon-recipient-name:global([data-mq]) .mq-inner {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    animation: recipient-name-scroll 6s ease-in-out infinite;
+  }
   .bolt-icon {
     width: 23px;
     height: 23px;
@@ -233,6 +259,19 @@
   .divided {
     border-left: 1px solid rgba(255, 178, 64, 0.45);
     padding-left: 0.45rem;
+  }
+  @keyframes recipient-name-scroll {
+    0%, 15% { transform: translateX(0); }
+    85%, 100% { transform: translateX(var(--mq-shift, 0px)); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .zap-mini:hover .icon-recipient-name:global([data-mq]) .mq-inner {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      animation: none;
+    }
   }
   .backdrop {
     position: fixed;
