@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Self-contained E2E for the zapclub relay. Builds the relay, boots a THROWAWAY instance
-# (temp DB, freshly generated keys, RELAY_SUPERADMIN = the test admin key), runs
+# Self-contained E2E for the zapclub relay. Builds the relay, boots an isolated THROWAWAY
+# instance (free port, temp runtime, freshly generated keys, test superadmin), runs
 # grouptest.mjs — including the admin NIP-98 ban/purge/replay/unban/delete-club tests —
 # then tears everything down.
 #
@@ -8,31 +8,41 @@
 set -e
 cd "$(dirname "$0")"
 
-PORT=3344
-# ESM ignores NODE_PATH → symlink a node_modules that has nostr-tools (the frontend's).
-ln -sfn ../frontend/node_modules node_modules
+TEST_ROOT=$(mktemp -d)
+DB="$TEST_ROOT/db"
+mkdir "$DB"
+# ESM ignores NODE_PATH. Put the test script and its dependency link inside this run's
+# private directory so concurrent release checks cannot remove or replace either one.
+cp grouptest.mjs "$TEST_ROOT/grouptest.mjs"
+ln -s "$(pwd)/../frontend/node_modules" "$TEST_ROOT/node_modules"
+# Avoid the old fixed-port collision when two worktrees or tasks validate concurrently.
+PORT=$(node -e 'const net=require("node:net");const s=net.createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close()})')
 
 # Generate admin (superadmin) + relay keys. Output: "<adminSK> <adminPK> <relaySK> <relayPK>".
-KEYS=$(node -e 'import("nostr-tools/pure").then(m=>{const sk=m.generateSecretKey();const r=m.generateSecretKey();process.stdout.write(Buffer.from(sk).toString("hex")+" "+m.getPublicKey(sk)+" "+Buffer.from(r).toString("hex")+" "+m.getPublicKey(r))})')
+KEYS=$(cd "$TEST_ROOT" && node -e 'import("nostr-tools/pure").then(m=>{const sk=m.generateSecretKey();const r=m.generateSecretKey();process.stdout.write(Buffer.from(sk).toString("hex")+" "+m.getPublicKey(sk)+" "+Buffer.from(r).toString("hex")+" "+m.getPublicKey(r))})')
 ASK=$(printf %s "$KEYS" | cut -d' ' -f1)
 APK=$(printf %s "$KEYS" | cut -d' ' -f2)
 RSK=$(printf %s "$KEYS" | cut -d' ' -f3)
 RPK=$(printf %s "$KEYS" | cut -d' ' -f4)
 
-DB=$(mktemp -d)
-go build -o /tmp/zc-e2e-relay .
+go build -o "$TEST_ROOT/zc-e2e-relay" .
 RELAY_SECRET_KEY="$RSK" RELAY_SUPERADMIN="$APK" RELAY_DB="$DB" RELAY_PORT="$PORT" \
   RELAY_SERVICE_URL="ws://127.0.0.1:$PORT" SQLITE_PATH="$DB/conductor.db" \
   RELAY_BANLIST="$DB/banned.json" RELAY_LISTENERS="$DB/listeners.json" \
   RELAY_LEADERBOARD="$DB/leaderboard.json" RELAY_CREDIBILITY="$DB/credibility.json" \
-  /tmp/zc-e2e-relay >/tmp/zc-e2e-relay.log 2>&1 &
+  "$TEST_ROOT/zc-e2e-relay" >"$TEST_ROOT/relay.log" 2>&1 &
 RPID=$!
 cleanup() {
   kill "$RPID" 2>/dev/null || true
-  rm -rf "$DB" node_modules /tmp/zc-e2e-relay
+  wait "$RPID" 2>/dev/null || true
+  rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT INT TERM
 sleep 1.5
+if ! kill -0 "$RPID" 2>/dev/null; then
+  cat "$TEST_ROOT/relay.log"
+  exit 1
+fi
 
 RELAY_URL="ws://127.0.0.1:$PORT" ADMIN_URL="http://127.0.0.1:$PORT" ADMIN_SK="$ASK" RELAY_PK="$RPK" RELAY_SK="$RSK" \
-  node grouptest.mjs
+  node "$TEST_ROOT/grouptest.mjs"

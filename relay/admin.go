@@ -89,52 +89,59 @@ func (b *banStore) save() {
 	}
 }
 
-// verifyAdmin checks the NIP-98 (kind 27235) Authorization header and that the signer is
-// the superadmin. Path-only URL match keeps it robust behind the Caddy reverse proxy.
-func verifyAdmin(r *http.Request) bool {
+// verifyNIP98 checks a kind-27235 Authorization header and returns its signer. Path-only URL
+// matching keeps it robust behind the Caddy reverse proxy. Tokens are single-use within the
+// freshness window, including for read-only private endpoints.
+func verifyNIP98(r *http.Request) (string, bool) {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Nostr ") {
-		return false
+		return "", false
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Nostr "))
 	if err != nil {
-		return false
+		return "", false
 	}
 	var ev nostr.Event
 	if err := json.Unmarshal(raw, &ev); err != nil {
-		return false
+		return "", false
 	}
-	if ev.Kind != 27235 || ev.PubKey != superadmin {
-		return false
+	if ev.Kind != 27235 || !nostr.IsValidPublicKey(ev.PubKey) {
+		return "", false
 	}
 	if ok, err := ev.CheckSignature(); !ok || err != nil {
-		return false
+		return "", false
 	}
 	// Freshness: ±60s against replay.
 	t := ev.CreatedAt.Time()
 	now := time.Now()
 	if t.Before(now.Add(-60*time.Second)) || t.After(now.Add(60*time.Second)) {
-		return false
+		return "", false
 	}
 	// Method must match.
 	if m := ev.Tags.GetFirst([]string{"method"}); m == nil || !strings.EqualFold(m.Value(), r.Method) {
-		return false
+		return "", false
 	}
 	// URL path must match the request (host is proxied, so compare path only).
 	u := ev.Tags.GetFirst([]string{"u"})
 	if u == nil {
-		return false
+		return "", false
 	}
 	parsed, err := url.Parse(u.Value())
 	if err != nil || parsed.Path != r.URL.Path {
-		return false
+		return "", false
 	}
 	// Replay protection: each NIP-98 token (event id) is single-use within its freshness
 	// window. A captured Authorization header can't be replayed to re-run ban/delete.
 	if ev.ID != "" && adminNonceSeen(ev.ID) {
-		return false
+		return "", false
 	}
-	return true
+	return ev.PubKey, true
+}
+
+// verifyAdmin additionally restricts a valid NIP-98 request to the configured superadmin.
+func verifyAdmin(r *http.Request) bool {
+	pubkey, ok := verifyNIP98(r)
+	return ok && pubkey == superadmin
 }
 
 // adminNonces tracks used NIP-98 event ids → their expiry, for single-use enforcement.

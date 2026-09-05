@@ -6,23 +6,24 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Global all-time zap leaderboard. Built from kind-20101 club zap broadcasts — the same soft,
-// self-reported signal that drives the in-room zap score. A NIP-57 9735 receipt is the hard
-// proof of a zap, but many LNURL providers (e.g. nsnip.io) never publish one, so the broadcast
-// is what every client actually sees; the leaderboard is therefore at the SAME trust level as
-// the live score (membership-gated, but not a cryptographic proof — a determined member could
-// inflate it). Self-zaps (sender == recipient) are dropped so nobody ranks themselves up, and
-// each zap is counted once (bolt11, else event id). Per recipient we keep total sats, zap count
-// and the set of distinct senders (→ "from N people"). Persisted to disk so the board survives
-// restarts. Served PUBLIC and unauthenticated at GET /leaderboard (it's public ranking data).
+// Global all-time Zapclub leaderboard. Club zaps arrive as kind-20101 broadcasts; direct profile
+// zaps arrive through the authenticated HTTP endpoint below. Both are the same soft, self-reported
+// payment signal: many LNURL providers never publish a NIP-57 receipt, so the client reports a
+// confirmed invoice. Self-zaps are dropped, each invoice is counted once, and the recipient comes
+// from the explicit target rather than a wallet provider's global receipt history. Public totals
+// are served at GET /leaderboard; the sender breakdown is only returned to its NIP-98-authenticated
+// recipient at GET /zaps/received.
 
 const (
 	kindZapBroadcast = 20101
+	anonZapSender    = "__anon__"
 	lbMaxRecipients  = 100_000 // memory-DoS cap on tracked recipients
 	lbMaxSenders     = 5_000   // cap distinct senders tracked per recipient
 	lbSeenCap        = 500_000 // bounded in-memory dedup of counted zaps
@@ -30,25 +31,49 @@ const (
 )
 
 type zapEntry struct {
-	Sats    int64           `json:"sats"`
-	Zaps    int             `json:"zaps"`
-	Senders map[string]bool `json:"senders"` // distinct sender pubkeys → count = "zappers"
+	Sats     int64                      `json:"sats"`
+	Zaps     int                        `json:"zaps"`
+	Senders  map[string]bool            `json:"senders"` // retained for backwards compatibility
+	BySender map[string]*zapSenderEntry `json:"by_sender,omitempty"`
+	Legacy   bool                       `json:"legacy,omitempty"` // old aggregate lacks per-sender amounts
+}
+
+type zapSenderEntry struct {
+	Sats int64 `json:"sats"`
+	Zaps int   `json:"zaps"`
 }
 
 type zapBoard struct {
 	mu   sync.Mutex
 	path string
-	By   map[string]*zapEntry `json:"by"`   // recipient pubkey → totals (persisted)
+	By   map[string]*zapEntry `json:"by"` // recipient pubkey → totals (persisted)
 	seen map[string]bool      // dedup key → counted (in-memory only; ephemeral source)
+	pub  *kindLimiter         // report budget per signed request author
+	ip   *ipLimiter           // report budget per HTTP client
 }
 
 func newZapBoard(path string) *zapBoard {
-	b := &zapBoard{path: path, By: map[string]*zapEntry{}, seen: map[string]bool{}}
+	b := &zapBoard{
+		path: path, By: map[string]*zapEntry{}, seen: map[string]bool{},
+		pub: newKindLimiter(6, 0.1, "rate-limited: too many zap reports", nostr.KindZapRequest),
+		ip:  newIPLimiter(30, 1),
+	}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, b) // best-effort
 	}
 	if b.By == nil {
 		b.By = map[string]*zapEntry{}
+	}
+	for _, entry := range b.By {
+		if entry.Senders == nil {
+			entry.Senders = map[string]bool{}
+		}
+		if entry.BySender == nil {
+			entry.BySender = map[string]*zapSenderEntry{}
+			if entry.Zaps > 0 {
+				entry.Legacy = true
+			}
+		}
 	}
 	b.seen = map[string]bool{}
 	return b
@@ -60,42 +85,53 @@ func (b *zapBoard) observe(_ context.Context, ev *nostr.Event) {
 	if ev.Kind != kindZapBroadcast {
 		return
 	}
-	recipient := tagVal(ev, "p")
-	if recipient == "" || recipient == ev.PubKey { // no self-zap onto the board
-		return
-	}
 	sats := int64(atoiDefault(tagVal(ev, "amount"), 0))
-	if sats <= 0 {
-		return
-	}
 	dk := tagVal(ev, "bolt11")
 	if dk == "" {
 		dk = "id:" + ev.ID
+	} else {
+		dk = "bolt11:" + strings.ToLower(dk)
+	}
+	b.record(ev.PubKey, tagVal(ev, "p"), sats, dk)
+}
+
+func (b *zapBoard) record(sender, recipient string, sats int64, dedupKey string) {
+	if sender == "" || recipient == "" || sender == recipient || sats <= 0 || dedupKey == "" {
+		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.seen[dk] {
+	if b.seen[dedupKey] {
 		return // same zap already counted
 	}
 	if len(b.seen) >= lbSeenCap {
 		b.seen = map[string]bool{} // bounded; rare reset (worst case: a few re-counts)
 	}
-	b.seen[dk] = true
+	b.seen[dedupKey] = true
 	e := b.By[recipient]
 	if e == nil {
 		if len(b.By) >= lbMaxRecipients {
 			return
 		}
-		e = &zapEntry{Senders: map[string]bool{}}
+		e = &zapEntry{Senders: map[string]bool{}, BySender: map[string]*zapSenderEntry{}}
 		b.By[recipient] = e
 	}
 	if e.Senders == nil {
 		e.Senders = map[string]bool{}
 	}
+	if e.BySender == nil {
+		e.BySender = map[string]*zapSenderEntry{}
+	}
 	e.Sats += sats
 	e.Zaps++
-	if !e.Senders[ev.PubKey] && len(e.Senders) < lbMaxSenders {
-		e.Senders[ev.PubKey] = true
+	if !e.Senders[sender] && len(e.Senders) < lbMaxSenders {
+		e.Senders[sender] = true
+	}
+	if senderEntry := e.BySender[sender]; senderEntry != nil {
+		senderEntry.Sats += sats
+		senderEntry.Zaps++
+	} else if len(e.BySender) < lbMaxSenders {
+		e.BySender[sender] = &zapSenderEntry{Sats: sats, Zaps: 1}
 	}
 }
 
@@ -181,6 +217,126 @@ func (b *zapBoard) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, total := b.top(lbTopN)
 	_ = enc.Encode(map[string]any{"total": total, "top": entries})
+}
+
+type receivedSender struct {
+	Sender string `json:"sender"`
+	Sats   int64  `json:"sats,omitempty"`
+	Count  int    `json:"count,omitempty"`
+	Exact  bool   `json:"exact"`
+	Anon   bool   `json:"anon"`
+}
+
+type receivedZaps struct {
+	Total    int64            `json:"total"`
+	Count    int              `json:"count"`
+	BySender []receivedSender `json:"bySender"`
+}
+
+func (b *zapBoard) received(pubkey string) receivedZaps {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	result := receivedZaps{BySender: []receivedSender{}}
+	e := b.By[pubkey]
+	if e == nil {
+		return result
+	}
+	result.Total, result.Count = e.Sats, e.Zaps
+	for sender := range e.Senders {
+		row := receivedSender{Sender: sender, Exact: !e.Legacy, Anon: sender == anonZapSender}
+		if stats := e.BySender[sender]; stats != nil && !e.Legacy {
+			row.Sats, row.Count = stats.Sats, stats.Zaps
+		}
+		result.BySender = append(result.BySender, row)
+	}
+	sort.Slice(result.BySender, func(i, j int) bool {
+		if result.BySender[i].Sats != result.BySender[j].Sats {
+			return result.BySender[i].Sats > result.BySender[j].Sats
+		}
+		return result.BySender[i].Sender < result.BySender[j].Sender
+	})
+	return result
+}
+
+// handleZaps records site-confirmed zaps from their signed NIP-57 requests and serves a
+// recipient's private sender breakdown. The request signature binds sender, recipient and amount;
+// the client marker excludes zap requests created outside Zapclub.
+func (b *zapBoard) handleZaps(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Vary", "Origin")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case r.URL.Path == "/zaps/received" && r.Method == http.MethodGet:
+		pubkey, ok := verifyNIP98(r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(b.received(pubkey))
+	case r.URL.Path == "/zaps" && r.Method == http.MethodPost:
+		if !b.ip.allow(clientIP(r)) {
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		var body struct {
+			Request nostr.Event `json:"request"`
+			Invoice string      `json:"invoice"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		if err := dec.Decode(&body); err != nil || body.Request.Kind != nostr.KindZapRequest ||
+			!hasTagValue(body.Request.Tags, "client", "zapclub.io") ||
+			len(body.Invoice) < 8 || len(body.Invoice) > 4096 ||
+			!strings.HasPrefix(strings.ToLower(body.Invoice), "ln") {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if ok, err := body.Request.CheckSignature(); !ok || err != nil {
+			http.Error(w, "invalid zap request", http.StatusBadRequest)
+			return
+		}
+		if reject, reason := b.pub.reject(r.Context(), &body.Request); reject {
+			http.Error(w, reason, http.StatusTooManyRequests)
+			return
+		}
+		recipient := tagVal(&body.Request, "p")
+		msats := int64(atoiDefault(tagVal(&body.Request, "amount"), 0))
+		if !nostr.IsValidPublicKey(recipient) || msats < 1000 {
+			http.Error(w, "invalid zap target", http.StatusBadRequest)
+			return
+		}
+		sender := body.Request.PubKey
+		if sender == recipient {
+			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+			return
+		}
+		if hasTagValue(body.Request.Tags, "anon", "") {
+			sender = anonZapSender
+		}
+		b.record(sender, recipient, msats/1000, "bolt11:"+strings.ToLower(body.Invoice))
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *zapBoard) sweep() {
+	b.pub.sweep(10 * time.Minute)
+	b.ip.sweep(10 * time.Minute)
+}
+
+func hasTagValue(tags nostr.Tags, name, value string) bool {
+	for _, tag := range tags {
+		if len(tag) > 0 && tag[0] == name && (value == "" || len(tag) > 1 && tag[1] == value) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *zapBoard) save() {

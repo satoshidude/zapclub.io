@@ -56,8 +56,10 @@ boundary also applies to history, direct event queries and live subscriptions.
 
 Logged-out visitors use an ephemeral local key for schema- and rate-limited
 listener heartbeats. Individual heartbeats remain server-side; the relay
-publishes only an aggregate count. Profiles and verified zap receipts are read
-from public Nostr relays.
+publishes only an aggregate count. Profiles are read from public Nostr relays.
+Zap receipts are used only to confirm the currently open invoice; profile and
+leaderboard history contains exclusively Zapclub-marked zaps recorded by the
+Zapclub relay.
 
 Playback state, listener aggregates and DJ credibility are relay-authored.
 Private and paid clubs are gated by the relay, and administrative HTTP routes

@@ -224,8 +224,8 @@ export async function leaveClub(groupId: string): Promise<void> {
  * clients would never see the zap. After the zapper confirms payment we also emit this
  * lightweight club event so everyone in the room gets the animation + session score
  * immediately, regardless of the DJ's provider. Trust: self-reported by the zapper (an
- * ephemeral social signal, like applause); the 9735 — when it exists — stays authoritative,
- * and `bolt11` dedup (in ingestZapBroadcast/ingestZapReceipt) prevents double-counting.
+ * ephemeral social signal, like applause); `bolt11` dedup in ingestZapBroadcast prevents
+ * the zapper's local credit and broadcast echo from counting twice.
  */
 export async function publishZapBroadcast(
   club: string,

@@ -23,9 +23,9 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { publishMyProfile } from '../nostr/profileEdit'
   import { logout } from '../nostr/nostrLogin'
-  import { fetchReceivedZaps, requestZapInvoice, type ReceivedZaps } from '../nostr/zaps.svelte'
+  import { requestZapInvoice } from '../nostr/zaps.svelte'
   import { showPay } from '../nostr/payModal.svelte'
-  import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
+  import { fetchReceivedZaps, fetchZapRank, type ReceivedZaps, type ZapRank } from '../nostr/leaderboard'
   import { fetchCredibility, type Credibility } from '../nostr/credibility'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
@@ -104,15 +104,13 @@
         rolesById = a.rolesById
       })
     }
-    // Public zap standing: sats received, how many people, and the global placement — all from the
-    // 9735-based leaderboard (shown to everyone). The detailed "who zapped you" list (sender
-    // identities) stays owner-only further down.
+    // Public Zapclub standing plus an authenticated, owner-only sender breakdown.
     received = null
     zapRank = null
     credibility = null
     void fetchZapRank(pk).then((r) => (zapRank = r))
     void fetchCredibility(pk).then((result) => (credibility = result))
-    if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
+    if (isMe && auth.canSign) void fetchReceivedZaps().then((r) => (received = r)).catch(() => {})
   })
 
   // ── Create-club form (own profile only) ─────────────────────────────────
@@ -302,8 +300,8 @@
     zapping = true
     zapErr = ''
     try {
-      const { invoice, verify } = await requestZapInvoice(pubkey, profile.lud16 as string, sats, 'Zap on zapclub')
-      showPay(invoice, sats, `Zap ${displayName(pubkey, profile)}`, { verify })
+      const { invoice, verify, request } = await requestZapInvoice(pubkey, profile.lud16 as string, sats, 'Zap on zapclub')
+      showPay(invoice, sats, `Zap ${displayName(pubkey, profile)}`, { verify, dj: pubkey, zapRequest: request })
     } catch (e) {
       zapErr = String((e as Error)?.message ?? 'Zap failed')
       setTimeout(() => (zapErr = ''), 4000)
@@ -450,8 +448,7 @@
     </section>
   {/if}
 
-  <!-- Public zap standing: global placement + sats received + how many people (NOT who). The whole
-       card links to the leaderboard. Shown to everyone, from the 9735-based ranking. -->
+  <!-- Public Zapclub standing: global placement + sats received + how many people (NOT who). -->
   {#if zapRank}
     {@const medal = zapRank.rank === 1 ? '🥇' : zapRank.rank === 2 ? '🥈' : zapRank.rank === 3 ? '🥉' : '🏆'}
     <a
@@ -473,7 +470,7 @@
     </a>
   {/if}
 
-  <!-- Who zapped you (verified 9735, incl. names) — OWNER-ONLY by request. -->
+  <!-- Who zapped you on Zapclub — NIP-98-authenticated and owner-only. -->
   {#if isMe && received && received.bySender.length > 0}
     <section class="card zaps-recv led-zone">
       <h2>⚡ Who zapped you <span class="count">private</span></h2>
@@ -489,16 +486,20 @@
             <li>
               <span class="av anon-av" aria-hidden="true">⚡</span>
               <span class="who anon">Anonymous</span>
-              <span class="s-sats">{s.sats.toLocaleString()} sats</span>
-              <span class="s-count">{s.count}×</span>
+              {#if s.exact}
+                <span class="s-sats">{s.sats.toLocaleString()} sats</span>
+                <span class="s-count">{s.count}×</span>
+              {/if}
             </li>
           {:else}
             {@const sp = useProfile(s.sender)}
             <li>
               <img class="av" src={avatarUrl(s.sender, sp)} alt="" width="22" height="22" />
               <a class="who" href={`/user/${npubEncode(s.sender)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(s.sender)) }}>{displayName(s.sender, sp)}</a>
+              {#if s.exact}
               <span class="s-sats">{s.sats.toLocaleString()} sats</span>
               <span class="s-count">{s.count}×</span>
+              {/if}
             </li>
           {/if}
         {/each}
@@ -1201,7 +1202,6 @@
   .senders .who:hover {
     color: var(--accent-2);
   }
-  /* Anonymous (guest) zaps: a neutral bolt avatar + dimmed label, no profile link. */
   .senders .anon-av {
     width: 22px;
     height: 22px;

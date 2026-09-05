@@ -398,6 +398,8 @@ func main() {
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
 	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
+	relay.Router().HandleFunc("/zaps", board.handleZaps)
+	relay.Router().HandleFunc("/zaps/received", board.handleZaps)
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
@@ -438,6 +440,7 @@ func main() {
 			// Advance/trim the listener buckets even when idle, then persist (5-min tick
 			// matches the 5-min bucket → at most one bucket lost on an unclean crash).
 			listeners.tick(time.Now().UnixMilli(), true)
+			board.sweep()
 			board.save()
 			credibility.save()
 			// Drop play-log records older than 24h (client reads only a ≤6h window).

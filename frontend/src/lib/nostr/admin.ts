@@ -1,6 +1,6 @@
 import { pool, CLUB_RELAY } from './pool'
-import { signEvent } from './nostrLogin'
 import { auth } from './auth.svelte'
+import { nip98Header } from './nip98'
 import { parseClubMetadata, parseMembers, parseAdmins, parseOwner, queryClubAuthed } from './groups'
 import type { Club, ClubMember } from './types'
 
@@ -14,20 +14,6 @@ export function isSuperadmin(): boolean {
 }
 
 const ADMIN_BASE = 'https://relay.zapclub.io'
-
-// Builds a NIP-98 (kind 27235) Authorization header for an admin call.
-async function nip98Header(url: string, method: string): Promise<string> {
-  const ev = await signEvent({
-    kind: 27235,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['u', url],
-      ['method', method],
-    ],
-    content: '',
-  })
-  return 'Nostr ' + btoa(JSON.stringify(ev))
-}
 
 async function adminFetch(path: string, method: 'GET' | 'POST', body?: unknown): Promise<unknown> {
   const url = ADMIN_BASE + path

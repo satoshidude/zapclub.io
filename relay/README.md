@@ -41,6 +41,15 @@ stores the settled DJ score in
 `30078` event with `h=zapclub-credibility` and
 `d=zapclub:credibility:<pubkey>`.
 
+## Zap history
+
+The public `GET /leaderboard` and private `GET /zaps/received` use only zaps
+recorded on Zapclub. Club zaps enter through kind `20101`; browser-confirmed
+profile and guest zaps are submitted to `POST /zaps` with their signed kind
+`9734` request carrying `client=zapclub.io`. The request signature binds sender,
+recipient and amount. The private sender list additionally requires a fresh
+NIP-98 signature from that recipient.
+
 ## Secrets
 
 `RELAY_SECRET_KEY` lives in `relay.env` (mode 600), never in the repo. Keep it

@@ -8,7 +8,29 @@
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
   // `showDj` renders the recipient DJ's avatar + name on the chip (the zap target).
-  let { pubkey = '', club = '', showDj = false, iconOnly = false, showName = false, showSelf = false, allowSelfZap = false }: { pubkey?: string; club?: string; showDj?: boolean; iconOnly?: boolean; showName?: boolean; showSelf?: boolean; allowSelfZap?: boolean } = $props()
+  let {
+    pubkey = '',
+    club = '',
+    showDj = false,
+    iconOnly = false,
+    showName = false,
+    showSelf = false,
+    allowSelfZap = false,
+    hideIcon = false,
+    iconLabel = '',
+    showRecipientName = false,
+  }: {
+    pubkey?: string
+    club?: string
+    showDj?: boolean
+    iconOnly?: boolean
+    showName?: boolean
+    showSelf?: boolean
+    allowSelfZap?: boolean
+    hideIcon?: boolean
+    iconLabel?: string
+    showRecipientName?: boolean
+  } = $props()
 
   const PRESETS = [21, 100, 500, 2100]
   // Fallback payee when the recipient has no lightning address on their profile. The
@@ -22,11 +44,10 @@
   const isSelf = $derived(!!dj && dj === auth.pubkey)
   const show = $derived(!!dj && (showSelf || !isSelf))
   const canOpen = $derived(!isSelf || allowSelfZap)
-  // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
+  // Sats received during this club session, from Zapclub's club-scoped broadcasts.
   const total = $derived(dj ? zaps.score(dj) : 0)
 
-  // The score is fed by ClubView's single per-club zap subscription (stage DJs + owner) —
-  // this component only reads zaps.score(dj), it does not open its own subscription.
+  // ClubView's group subscription feeds the score; this component only reads it.
 
   let open = $state(false)
   let comment = $state('')
@@ -39,11 +60,11 @@
     busy = true
     error = ''
     try {
-      const { invoice, verify } = await requestZapInvoice(dj, lud16, sats, comment.trim())
+      const { invoice, verify, request } = await requestZapInvoice(dj, lud16, sats, comment.trim())
       open = false
       comment = ''
       custom = ''
-      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj, club })
+      showPay(invoice, sats, `Zap ${displayName(dj, djProfile)}`, { verify, dj, club, zapRequest: request })
     } catch (e) {
       error = String((e as Error)?.message ?? e)
     } finally {
@@ -58,6 +79,7 @@
     class:with-dj={showDj}
     class:icon-only={iconOnly}
     class:with-name={iconOnly && showName}
+    class:text-only={iconOnly && hideIcon}
     class:self-label={!canOpen}
     onclick={(event) => {
       event.stopPropagation()
@@ -67,8 +89,13 @@
     aria-label={canOpen ? 'Zap the DJ' : `Current DJ: ${displayName(dj, djProfile)}`}
   >
     {#if iconOnly}
-      <svg class="bolt-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path></svg>
-      {#if showName}<span class="icon-dj-name lcd-card-title">{displayName(dj, djProfile)}</span>{/if}
+      {#if !hideIcon}<svg class="bolt-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path></svg>{/if}
+      {#if showName}
+        <span class="icon-dj-copy">
+          <span class="icon-dj-name lcd-card-title">{iconLabel || displayName(dj, djProfile)}</span>
+          {#if showRecipientName}<span class="icon-recipient-name">{displayName(dj, djProfile)}</span>{/if}
+        </span>
+      {/if}
     {:else}
       <span class="bolt">⚡</span>
       {#if showDj}
@@ -172,6 +199,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .icon-dj-copy { min-width: 0; }
   .bolt-icon {
     width: 23px;
     height: 23px;

@@ -1,6 +1,9 @@
 // Global public ranking from the relay's aggregate endpoint. Building the candidate
 // set from kind 39002 would expose the protected club membership roster.
 
+import type { Event } from 'nostr-tools/pure'
+import { nip98Header } from './nip98'
+
 export interface LeaderboardEntry {
   pubkey: string
   sats: number
@@ -20,6 +23,13 @@ export interface ZapRank {
 let cache: { at: number; promise: Promise<{ total: number; top: LeaderboardEntry[] }> } | null = null
 const TTL_MS = 60_000
 const LEADERBOARD_URL = 'https://relay.zapclub.io/leaderboard'
+const ZAPS_URL = 'https://relay.zapclub.io/zaps'
+
+export interface ReceivedZaps {
+  total: number
+  count: number
+  bySender: { sender: string; sats: number; count: number; exact: boolean; anon: boolean }[]
+}
 
 /** The public ranking of DJs by sats received (only DJs who HAVE been zapped). Cached ~60s. */
 export function fetchLeaderboard(): Promise<{ total: number; top: LeaderboardEntry[] }> {
@@ -50,4 +60,24 @@ export async function fetchZapRank(pubkey: string): Promise<ZapRank | null> {
   } catch {
     return null
   }
+}
+
+/** Records a payment confirmed inside Zapclub using its already-signed NIP-57 request. */
+export async function recordZap(request: Event, invoice: string): Promise<void> {
+  const response = await fetch(ZAPS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request, invoice }),
+  })
+  if (!response.ok) throw new Error(`record zap: ${response.status}`)
+}
+
+/** Returns only Zapclub-recorded zaps received by the NIP-98 signer. */
+export async function fetchReceivedZaps(): Promise<ReceivedZaps> {
+  const url = `${ZAPS_URL}/received`
+  const response = await fetch(url, {
+    headers: { Authorization: await nip98Header(url, 'GET') },
+  })
+  if (!response.ok) throw new Error(`received zaps: ${response.status}`)
+  return response.json() as Promise<ReceivedZaps>
 }

@@ -1,5 +1,5 @@
 import type { Event } from 'nostr-tools/pure'
-import { verifyEvent, finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { pool, ZAP_RELAYS } from './pool'
 import { signEvent } from './nostrLogin'
 import { auth } from './auth.svelte'
@@ -110,12 +110,13 @@ export async function resolveZapper(lud16: string): Promise<string> {
 export interface ZapInvoice {
   invoice: string // bolt11
   verify?: string // LUD-21 verify URL (to detect external payment)
+  request?: Event // signed 9734 used to attribute this Zapclub zap after payment
 }
 
 /**
  * Builds a zap invoice for a recipient (NIP-57). Signs a kind-9734 zap request (so the
- * payment produces a 9735 receipt the room sees and that lifts the DJ's score) when the LNURL
- * server supports nostr; otherwise a plain LNURL payment. Returns the bolt11 invoice to pay —
+ * payment produces a 9735 receipt) when the LNURL server supports nostr; otherwise it requests a
+ * plain LNURL payment. Its signed request also attributes the Zapclub-local history. Returns the bolt11 invoice to pay —
  * by any wallet (Alby Go via the lightning: link, copy, or QR).
  *
  * A logged-in user signs with their own key (attributable zap). A GUEST (no signer / read-only)
@@ -140,17 +141,20 @@ export async function requestZapInvoice(
   const url = new URL(data.callback)
   url.searchParams.set('amount', String(msats))
   // recipientPubkey === '' → a plain LNURL payment (e.g. a donation), no zap request.
-  if (data.allowsNostr && recipientPubkey) {
+  let request: Event | undefined
+  if (recipientPubkey) {
     const tags: string[][] = [
       ['relays', ...ZAP_RELAYS],
       ['amount', String(msats)],
       ['p', recipientPubkey],
+      ['client', 'zapclub.io'],
     ]
     if (!auth.canSign) tags.push(['anon']) // mark a guest zap anonymous → shown as "Anonymous"
     const req = { kind: 9734, created_at: nowSec(), tags, content: comment || '' }
     // Logged-in → sign with the user's key; guest → the stable per-browser anonymous key.
-    const zr = auth.canSign ? await signEvent(req) : finalizeEvent(req, guestZapKey())
-    url.searchParams.set('nostr', JSON.stringify(zr))
+    request = auth.canSign ? await signEvent(req) : finalizeEvent(req, guestZapKey())
+    if (data.allowsNostr) url.searchParams.set('nostr', JSON.stringify(request))
+    else if (comment) url.searchParams.set('comment', comment.slice(0, 120))
   } else if (comment) {
     url.searchParams.set('comment', comment.slice(0, 120))
   }
@@ -158,7 +162,7 @@ export async function requestZapInvoice(
   const res = await fetchTimeout(url.toString())
   const json = (await res.json()) as { pr?: string; verify?: string; reason?: string }
   if (!json.pr) throw new Error(json.reason || 'No invoice received')
-  return { invoice: json.pr, verify: json.verify }
+  return { invoice: json.pr, verify: json.verify, request }
 }
 
 /**
@@ -252,114 +256,9 @@ export async function pollPaid(verifyUrl: string, stillOpen: () => boolean): Pro
   return false
 }
 
-// Parses a 9735 zap receipt to {recipient, sender, sats}, verifying the embedded 9734
-// request. sender = the zap-request author (the person who zapped).
-function parseReceiptDetail(
-  ev: Event,
-): { recipient: string; sender: string; sats: number; anon: boolean } | null {
-  const recipient = ev.tags.find((t) => t[0] === 'p')?.[1]
-  const desc = ev.tags.find((t) => t[0] === 'description')?.[1]
-  if (!recipient || !desc) return null
-  let req: Event
-  try {
-    req = JSON.parse(desc) as Event
-  } catch {
-    return null
-  }
-  if (req.kind !== 9734 || !verifyEvent(req)) return null
-  if (req.tags.find((t) => t[0] === 'p')?.[1] !== recipient) return null
-  const amountTag = req.tags.find((t) => t[0] === 'amount')?.[1]
-  const sats = amountTag ? Math.round(Number(amountTag) / 1000) : 0
-  if (!sats || sats <= 0) return null
-  const anon = req.tags.some((t) => t[0] === 'anon')
-  return { recipient, sender: req.pubkey, sats, anon }
-}
-
-function parseReceipt(ev: Event): { dj: string; sats: number } | null {
-  const d = parseReceiptDetail(ev)
-  return d ? { dj: d.recipient, sats: d.sats } : null
-}
-
-export interface ReceivedZaps {
-  total: number
-  count: number
-  /** Senders, sats-desc. Anonymous (guest) zaps are collapsed into one entry (sender='__anon__',
-   *  anon=true) so they show as a single "Anonymous" row instead of many throwaway npubs. */
-  bySender: { sender: string; sats: number; count: number; anon: boolean }[]
-}
-
-/** Bucket key under which all anonymous (guest) zaps aggregate. */
-const ANON_BUCKET = '__anon__'
-
-/** Aggregates all zaps a user has RECEIVED (9735 with #p = pubkey), grouped by sender. */
-export async function fetchReceivedZaps(pubkey: string): Promise<ReceivedZaps> {
-  const evs = await pool.querySync(
-    ZAP_RELAYS,
-    { kinds: [KIND_ZAP_RECEIPT], '#p': [pubkey] },
-    { maxWait: 5000 },
-  )
-  const map = new Map<string, { sats: number; count: number; anon: boolean }>()
-  let total = 0
-  let count = 0
-  const dedup = new Set<string>()
-  for (const ev of evs) {
-    if (dedup.has(ev.id)) continue
-    dedup.add(ev.id)
-    const d = parseReceiptDetail(ev)
-    if (!d || d.recipient !== pubkey) continue
-    total += d.sats
-    count++
-    const key = d.anon ? ANON_BUCKET : d.sender // all anonymous zaps collapse into one row
-    const cur = map.get(key) ?? { sats: 0, count: 0, anon: d.anon }
-    cur.sats += d.sats
-    cur.count++
-    map.set(key, cur)
-  }
-  const bySender = [...map.entries()]
-    .map(([sender, v]) => ({ sender, ...v }))
-    .sort((a, b) => b.sats - a.sats)
-  return { total, count, bySender }
-}
-
-export interface RecipientTotals {
-  sats: number
-  zaps: number
-  zappers: number // distinct senders (anonymous zaps collapse into one)
-}
-
-/**
- * Aggregates received zaps (9735) for a SET of recipients in ONE query → per-recipient totals.
- * Powers the global zap leaderboard (built client-side from the verified receipts, since that's
- * where the historical zap data lives). Chunks the `#p` filter so a big DJ set doesn't blow the
- * relay's per-filter cap. Anonymous zaps collapse into a single distinct "sender".
- */
-export async function aggregateReceived(pubkeys: string[]): Promise<Map<string, RecipientTotals>> {
-  const acc = new Map<string, { sats: number; zaps: number; senders: Set<string> }>()
-  const dedup = new Set<string>()
-  for (let i = 0; i < pubkeys.length; i += 200) {
-    const chunk = pubkeys.slice(i, i + 200)
-    if (chunk.length === 0) continue
-    const evs = await pool.querySync(ZAP_RELAYS, { kinds: [KIND_ZAP_RECEIPT], '#p': chunk }, { maxWait: 6000 })
-    for (const ev of evs) {
-      if (dedup.has(ev.id)) continue
-      dedup.add(ev.id)
-      const d = parseReceiptDetail(ev)
-      if (!d) continue
-      const cur = acc.get(d.recipient) ?? { sats: 0, zaps: 0, senders: new Set<string>() }
-      cur.sats += d.sats
-      cur.zaps++
-      cur.senders.add(d.anon ? ANON_BUCKET : d.sender)
-      acc.set(d.recipient, cur)
-    }
-  }
-  const out = new Map<string, RecipientTotals>()
-  for (const [pk, v] of acc) out.set(pk, { sats: v.sats, zaps: v.zaps, zappers: v.senders.size })
-  return out
-}
-
 const seen = new Set<string>()
-// bolt11 invoices already counted — so an optimistic local credit and the later 9735
-// receipt for the SAME zap don't double-count (and vice versa).
+// bolt11 invoices already counted — so an optimistic local credit and the matching club
+// broadcast for the same zap don't double-count.
 const creditedInvoices = new Set<string>()
 
 function applyZap(dj: string, sats: number): void {
@@ -367,23 +266,9 @@ function applyZap(dj: string, sats: number): void {
   state.lastZap = { dj, sats, at: Date.now() }
 }
 
-export function ingestZapReceipt(ev: Event): void {
-  if (seen.has(ev.id)) return
-  seen.add(ev.id)
-  const r = parseReceipt(ev)
-  if (!r) return
-  const inv = ev.tags.find((t) => t[0] === 'bolt11')?.[1]
-  if (inv) {
-    if (creditedInvoices.has(inv)) return // already credited optimistically
-    creditedInvoices.add(inv)
-  }
-  applyZap(r.dj, r.sats)
-}
-
 /**
- * Optimistically credits a confirmed zap locally, without waiting for the 9735 receipt
- * (which is slow/unreliable on public relays). Idempotent per invoice, so the receipt —
- * if it ever lands — won't double-count. Lets the zapper see their zap immediately.
+ * Credits a confirmed zap locally without waiting for the club broadcast echo. Idempotent
+ * per invoice, so the echo cannot double-count it. Lets the zapper see their zap immediately.
  */
 export function creditZap(dj: string, sats: number, invoice?: string): void {
   if (!dj || sats <= 0) return
@@ -420,8 +305,8 @@ export function watchInvoicePaid(
 
 /** Handles an incoming club zap broadcast (kind 20101) → animation + session score.
  *  See publishZapBroadcast in groups.ts for the why (LNURL providers that don't publish a
- *  9735). `bolt11` dedup keeps the broadcast, the zapper's optimistic credit, and any later
- *  real 9735 from triple-counting the same zap. */
+ *  9735). `bolt11` dedup keeps the broadcast and the zapper's local credit from counting
+ *  the same zap twice. */
 export function ingestZapBroadcast(ev: Event): void {
   if (seen.has(ev.id)) return
   seen.add(ev.id)
@@ -430,22 +315,11 @@ export function ingestZapBroadcast(ev: Event): void {
   if (!dj || !sats || sats <= 0) return
   const inv = ev.tags.find((t) => t[0] === 'bolt11')?.[1]
   if (inv) {
-    // Dedup against the local optimistic credit (zapper's own echo) and any later 9735.
+    // Dedup against the local credit when the zapper receives their own broadcast echo.
     if (creditedInvoices.has(inv)) return
     creditedInvoices.add(inv)
   }
   applyZap(dj, sats)
-}
-
-/** Subscribes to zap receipts (9735) for the stage DJs on the public relays. */
-export function subscribeZaps(djPubkeys: string[]): () => void {
-  if (djPubkeys.length === 0) return () => {}
-  const sub = pool.subscribe(
-    ZAP_RELAYS,
-    { kinds: [KIND_ZAP_RECEIPT], '#p': djPubkeys },
-    { onevent: ingestZapReceipt },
-  )
-  return () => sub.close()
 }
 
 export function resetZaps(): void {

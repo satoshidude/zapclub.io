@@ -1,6 +1,8 @@
 import { pollPaid, creditZap, watchInvoicePaid } from './zaps.svelte'
 import { publishZapBroadcast } from './groups'
 import { auth } from './auth.svelte'
+import { recordZap } from './leaderboard'
+import type { Event } from 'nostr-tools/pure'
 
 // Global "pay this Lightning invoice" modal — shared by the DJ zap button and the
 // footer donation. Shows a QR + "open in wallet" + copy, and auto-closes (paid state)
@@ -14,9 +16,11 @@ interface PayState {
   dj: string
   /** Club id — set for an in-club zap so payment also broadcasts to the room. */
   club: string
+  /** Signed NIP-57 request binding sender, recipient and amount for Zapclub history. */
+  zapRequest: Event | null
 }
 
-const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '', club: '' })
+const state = $state<PayState>({ invoice: '', sats: 0, label: '', paid: false, dj: '', club: '', zapRequest: null })
 let closeWatch: (() => void) | null = null
 let onPaidCb: (() => void) | null = null
 
@@ -42,7 +46,7 @@ export function showPay(
   invoice: string,
   sats: number,
   label: string,
-  opts: { verify?: string; dj?: string; club?: string; onPaid?: () => void } = {},
+  opts: { verify?: string; dj?: string; club?: string; zapRequest?: Event; onPaid?: () => void } = {},
 ): void {
   state.invoice = invoice
   state.sats = sats
@@ -50,6 +54,7 @@ export function showPay(
   state.paid = false
   state.dj = opts.dj ?? ''
   state.club = opts.club ?? ''
+  state.zapRequest = opts.zapRequest ?? null
   onPaidCb = opts.onPaid ?? null
   closeWatch?.()
   closeWatch = null
@@ -75,7 +80,12 @@ export function markPaid(): void {
   state.paid = true
   if (state.dj && state.invoice) {
     creditZap(state.dj, state.sats, state.invoice)
-    if (state.club && auth.canSign) void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
+    if (state.zapRequest) {
+      void recordZap(state.zapRequest, state.invoice).catch((error) => console.warn('[zap] record failed', error))
+    }
+    if (state.club && auth.canSign) {
+      void publishZapBroadcast(state.club, state.dj, state.sats, state.invoice)
+    }
   }
   if (onPaidCb) {
     const cb = onPaidCb
@@ -94,4 +104,5 @@ export function hidePay(): void {
   state.paid = false
   state.dj = ''
   state.club = ''
+  state.zapRequest = null
 }

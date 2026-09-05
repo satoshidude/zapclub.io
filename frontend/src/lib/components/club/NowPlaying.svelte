@@ -152,6 +152,19 @@
 
 <section class="lcd-shell led-zone" class:idle={!np} class:video-wide={videoWide} aria-label="Club player">
   <div class="lcd-media">
+    {#if np && !videoWide}
+      <div class="zap-stage-action">
+        <ZapButton
+          club={clubId}
+          iconOnly={true}
+          showName={true}
+          showSelf={true}
+          allowSelfZap={true}
+          iconLabel="ZAP THE DJ"
+          showRecipientName={true}
+        />
+      </div>
+    {/if}
     <div class="video-surface" aria-hidden={!videoWide}>
       <Player
         bind:this={playerRef}
@@ -185,7 +198,11 @@
     <div class="scanlines" aria-hidden="true"></div>
     {#if np}
       <div class="lcd-status lcd-card-heading">
-        <span class="dj-status"><ZapButton club={clubId} iconOnly={true} showName={true} showSelf={true} allowSelfZap={true} /><span class="live-label">ON AIR</span></span>
+        <span class="dj-status lcd-card-title">
+          <span>DJ:</span>
+          <ZapButton club={clubId} iconOnly={true} showName={true} showSelf={true} allowSelfZap={true} hideIcon={true} />
+          <span class="live-label">ON AIR</span>
+        </span>
         <span>-{fmt(remaining)} / {fmt(np.duration)}</span>
       </div>
 
@@ -279,18 +296,19 @@
       radial-gradient(circle, rgba(241, 243, 244, 0.045) 0 0.55px, transparent 0.75px) 0 0 / 4px 4px;
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
     overflow: hidden;
     height: 158px;
     border: 0;
     border-radius: 0;
     color: var(--lcd-text);
-    background: transparent;
+    background: var(--player-led-surface);
     box-shadow: none;
     font-family: 'DotGothic16', ui-monospace, monospace;
     text-shadow: var(--lcd-text-shadow);
   }
   .lcd-shell.idle {
+    grid-template-columns: minmax(0, 1fr);
     color: var(--lcd-text);
     border-color: transparent;
     box-shadow: none;
@@ -306,15 +324,50 @@
   }
   .idle .scanlines { display: none; }
   .lcd-media {
-    position: absolute;
-    width: 1px;
-    height: 1px;
+    position: relative;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
     overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
-    background: transparent;
+    opacity: 1;
+    pointer-events: auto;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--lcd-text) 4%, transparent), transparent 82%),
+      var(--player-led-surface);
   }
+  .idle .lcd-media { display: none; }
+  .zap-stage-action { width: 100%; height: 100%; }
+  .zap-stage-action :global(.zap-mini.icon-only.with-name) {
+    justify-content: center;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    gap: 12px;
+    padding: 10px 14px;
+    color: var(--lcd-text);
+    animation: zap-breathe 2.4s ease-in-out infinite;
+  }
+  .zap-stage-action :global(.zap-mini.icon-only.with-name:hover:not(:disabled)) { color: #f7931a; }
+  .zap-stage-action :global(.bolt-icon) { width: 52px; height: 52px; stroke-width: 1.65; }
+  .zap-stage-action :global(.icon-dj-copy) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+  .zap-stage-action :global(.icon-dj-name) {
+    max-width: none;
+    color: inherit;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .zap-stage-action :global(.icon-recipient-name) { color: inherit; font-size: 15px; line-height: 1; }
   .video-surface {
+    display: none;
     width: 100%;
     height: 100%;
   }
@@ -334,11 +387,12 @@
     border-right: 0;
     border-bottom: 1px solid rgba(207, 233, 255, 0.24);
   }
+  .video-wide .video-surface { display: block; }
   .video-wide .lcd-content {
     display: flex;
     height: 160px;
     padding-bottom: 28px;
-    background: var(--player-led-surface);
+    background: transparent;
   }
   .lcd-content {
     position: relative;
@@ -357,11 +411,10 @@
   .lcd-status.lcd-card-heading { margin-bottom: 4px; padding-bottom: 3px; }
   .lcd-status > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lcd-status strong { color: var(--lcd-text); font-weight: 400; }
-  .dj-status { display: flex; align-items: center; gap: 0; }
-  .dj-status :global(.zap-mini.icon-only.with-name) { max-width: 220px; height: 24px; padding: 0; gap: 0.35rem; color: var(--lcd-text); }
-  .dj-status :global(.bolt-icon) { width: 24px; height: 24px; }
+  .dj-status { display: flex; align-items: baseline; gap: 0.35rem; }
+  .dj-status :global(.zap-mini.icon-only.with-name.text-only) { max-width: 180px; height: auto; padding: 0; color: var(--lcd-text); }
   .dj-status :global(.icon-dj-name) { max-width: 180px; }
-  .live-label { margin-left: 1.25em; color: var(--accent); }
+  .live-label { margin-left: 0.55rem; color: var(--accent); }
   .lcd-status > span:last-child { flex: 0 0 auto; margin-left: 12px; color: var(--lcd-text); font-variant-numeric: tabular-nums; }
   .lcd-track-wrap { flex: 0 0 auto; width: 100%; overflow: hidden; white-space: nowrap; }
   .lcd-track { display: inline-flex; min-width: 100%; margin-top: 0; font-size: clamp(20px, 2.4vw, 27px); line-height: 1; letter-spacing: 0.01em; }
@@ -422,12 +475,18 @@
     to { transform: translateX(-50%); }
   }
 
+  @keyframes zap-breathe {
+    0%, 100% { opacity: 0.74; }
+    50% { opacity: 1; }
+  }
+
   @media (max-width: 560px) {
-    .lcd-shell { height: 126px; }
+    .lcd-shell { grid-template-columns: minmax(104px, 31%) minmax(0, 1fr); height: 126px; }
+    .lcd-shell.idle { grid-template-columns: minmax(0, 1fr); }
     .lcd-content { padding: 13px 9px 16px; }
     .video-wide .lcd-content { height: 130px; padding-bottom: 22px; }
     .lcd-status { font-size: 9px; }
-    .live-label { display: none; }
+    .live-label { margin-left: 0.25rem; }
     .lcd-track { margin-top: 0; font-size: 17px; }
     .lcd-byline { font-size: 16px; overflow: hidden; white-space: nowrap; }
     .lcd-controls { gap: 6px; }
@@ -437,9 +496,14 @@
     .lcd-audio svg { width: 20px; height: 20px; }
     .lcd-icon { width: 18px; height: 23px; padding-inline: 1px; }
     .lcd-icon svg { width: 16px; height: 16px; }
-    .dj-status :global(.zap-mini.icon-only.with-name) { max-width: 130px; height: 18px; gap: 0.2rem; }
-    .dj-status :global(.bolt-icon) { width: 16px; height: 16px; }
-    .dj-status :global(.icon-dj-name) { max-width: 108px; }
+    .dj-status { gap: 0.2rem; font-size: 11px; }
+    .dj-status :global(.zap-mini.icon-only.with-name.text-only) { max-width: 92px; }
+    .dj-status :global(.icon-dj-name) { max-width: 92px; font-size: 11px; }
+    .zap-stage-action :global(.zap-mini.icon-only.with-name) { gap: 5px; padding: 8px 3px; }
+    .zap-stage-action :global(.bolt-icon) { width: 28px; height: 28px; stroke-width: 1.8; }
+    .zap-stage-action :global(.icon-dj-name) { font-size: 10.5px; letter-spacing: 0.02em; }
+    .zap-stage-action :global(.icon-dj-copy) { gap: 3px; }
+    .zap-stage-action :global(.icon-recipient-name) { font-size: 9.5px; }
     .lcd-volume { display: none; }
     .lobby-copy { margin-top: 7px; }
     .lobby-copy strong { font-size: 0.84rem; }
@@ -449,6 +513,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .zap-stage-action :global(.zap-mini.icon-only.with-name) { animation: none; opacity: 1; }
     .lcd-track.scroll { max-width: 100%; overflow: hidden; text-overflow: ellipsis; animation: none; }
     .lcd-track.scroll span + span { display: none; }
   }

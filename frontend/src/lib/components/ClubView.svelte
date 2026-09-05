@@ -46,9 +46,9 @@
   import { ingestAutoDJ, ingestAutoCtrl, resetAutoDJ } from '../nostr/autodj.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
   import { listeners, ingestListenerCount, startListening, stopListening } from '../nostr/listeners.svelte'
-  import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
+  import { resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
-import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
+  import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import type { Event } from 'nostr-tools/pure'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
@@ -218,14 +218,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     if (club && stageEoseReady && canHear && (!club.isPrivate || isMember)) startListening(id)
     else stopListening()
     return () => stopListening()
-  })
-
-  // One zap-receipt (9735) subscription per club for everyone shown with a zap chip:
-  // the stage DJs + the club owner. ZapButton instances only READ the score, they don't
-  // open their own subscriptions (avoids N overlapping REQs per club).
-  $effect(() => {
-    const pks = [...new Set([...stage.djs.map((d) => d.pubkey), owner].filter(Boolean))]
-    return subscribeZaps(pks)
   })
 
   // When the DJ roster changes (someone steps on/off stage), re-sync the queues right away
