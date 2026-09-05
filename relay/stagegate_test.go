@@ -96,3 +96,52 @@ func TestStageGateBlocksFourthDJButAllowsHeartbeat(t *testing.T) {
 		t.Fatalf("fourth DJ: reject=%v reason=%q", reject, reason)
 	}
 }
+
+func TestStageGateCountsActiveAutoDJAsOneSlot(t *testing.T) {
+	g := &stageGate{
+		countFn:      func(_ string, _ string) (int, bool) { return 2, false },
+		autoActiveFn: func(_ string) bool { return true },
+	}
+	evt := &nostr.Event{Kind: kindStage, PubKey: "third-real", Content: "on", Tags: nostr.Tags{{"h", "club"}}}
+	if reject, reason := g.reject(context.Background(), evt); !reject || reason != "restricted: stage is full" {
+		t.Fatalf("third real DJ with active Auto DJ: reject=%v reason=%q", reject, reason)
+	}
+}
+
+func TestStageGateSerializesAutoDJArmWithRealDJJoins(t *testing.T) {
+	autoActive := false
+	g := &stageGate{
+		countFn:      func(_ string, _ string) (int, bool) { return 2, false },
+		autoActiveFn: func(_ string) bool { return autoActive },
+	}
+	auto := &nostr.Event{
+		Kind: kindAutoDJ, PubKey: "owner", Content: "playlist",
+		Tags: nostr.Tags{{"h", "club"}, {"status", "armed"}, {"track", "yt:one", "One", "120"}},
+	}
+	if reject, reason := g.reject(context.Background(), auto); reject {
+		t.Fatalf("Auto DJ arm into final slot rejected: %s", reason)
+	}
+	join := &nostr.Event{Kind: kindStage, PubKey: "third-real", Content: "on", Tags: nostr.Tags{{"h", "club"}}}
+	if reject, reason := g.reject(context.Background(), join); !reject || reason != "restricted: stage is full" {
+		t.Fatalf("join racing reserved Auto DJ slot: reject=%v reason=%q", reject, reason)
+	}
+	g.observe(context.Background(), auto)
+	autoActive = true
+	if reject, reason := g.reject(context.Background(), auto); reject {
+		t.Fatalf("active Auto DJ config replacement rejected: %s", reason)
+	}
+}
+
+func TestStageGateRejectsAutoDJArmWhenRealStageIsFull(t *testing.T) {
+	g := &stageGate{
+		countFn:      func(_ string, _ string) (int, bool) { return 3, false },
+		autoActiveFn: func(_ string) bool { return false },
+	}
+	auto := &nostr.Event{
+		Kind: kindAutoDJ, PubKey: "owner", Content: "playlist",
+		Tags: nostr.Tags{{"h", "club"}, {"status", "armed"}, {"track", "yt:one", "One", "120"}},
+	}
+	if reject, reason := g.reject(context.Background(), auto); !reject || reason != "restricted: stage is full" {
+		t.Fatalf("Auto DJ arm on full stage: reject=%v reason=%q", reject, reason)
+	}
+}

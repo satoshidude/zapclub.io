@@ -19,6 +19,7 @@
     KIND_PUT_USER,
     KIND_REMOVE_USER,
     shareNote,
+    selectClubMemberCounts,
   } from '../nostr/groups'
   import { untrack } from 'svelte'
   import { goUser } from '../router.svelte'
@@ -63,6 +64,7 @@
 
   let club = $state<Club | null>(null)
   let members = $state<ClubMember[]>([])
+  let publicMemberCount = $state<number | null>(null)
   let admins = $state<string[]>([])
   let ownerPk = $state('')
   let busy = $state(false)
@@ -85,6 +87,7 @@
   )
   const isMember = $derived(!!auth.pubkey && members.some((m) => m.pubkey === auth.pubkey))
   const canModerate = $derived(isOwner || isMod)
+  const memberTotal = $derived(publicMemberCount ?? (isMember ? members.length : null))
 
   // Access config (kind 30101) — keep the newest per author; only the OWNER's counts.
   let configEvs = $state<Record<string, Event>>({})
@@ -109,6 +112,7 @@
     const id = groupId
     club = null
     members = []
+    publicMemberCount = null
     admins = []
     configEvs = {}
     stageResumed = false
@@ -170,6 +174,10 @@
       onEmote: ingestEmote,
       onMood: ingestMood,
       onListenerCount: (ev) => ingestListenerCount(ev, id),
+      onMemberCount: (ev) => {
+        const value = selectClubMemberCounts([ev], [id]).get(id)
+        if (value) publicMemberCount = value.count
+      },
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
       onEose: () => { stageEoseReady = true },
@@ -565,14 +573,14 @@
       <div class="info">
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
-          {#if isMember}
-            <span class="tag members-tag lcd-card-title" title={`${members.length} member${members.length === 1 ? '' : 's'}`}>
+          {#if memberTotal !== null}
+            <span class="tag members-tag lcd-card-title" title={`${memberTotal} member${memberTotal === 1 ? '' : 's'}`}>
               <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-4A4.5 4.5 0 0 0 3 18.5V20"></path>
                 <circle cx="9.5" cy="7.5" r="3.5"></circle>
                 <path d="M16 11a3 3 0 1 0 0-6M18 14.5a4 4 0 0 1 3 3.87V20"></path>
               </svg>
-              {members.length}
+              {memberTotal}
             </span>
           {/if}
           {#if owner}
@@ -774,6 +782,7 @@
         {isMember}
         {owner}
         currentDj={sync.live?.dj ?? ''}
+        autoPlaying={sync.live?.auto ?? false}
         onkick={kick}
         onpromote={promote}
       />

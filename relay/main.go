@@ -357,13 +357,14 @@ func main() {
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
 	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
-	// Stage cap: every club may have at most 3 DJs on stage.
-	stageG := &stageGate{db: db}
-	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
-
 	// Auto DJ config (kind 30105): only the club owner may arm/disarm.
 	autoDJG := newAutoDJGate(db, superadmin)
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
+
+	// Stage cap: three shared slots for real DJs and the active virtual Auto DJ.
+	// Authorization runs first so a rejected Auto-DJ event never reserves a slot.
+	stageG := &stageGate{db: db}
+	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
 
 	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
 	cond := newConductor(db, relay, state, sk)
@@ -409,6 +410,7 @@ func main() {
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken, cond.observeMood)
 	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
+	stageG.autoActiveFn = cond.hasActiveAutoDJ
 	autoDJG.ownerFn = cond.clubOwner
 	go cond.run()
 

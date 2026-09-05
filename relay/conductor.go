@@ -2001,6 +2001,21 @@ func (c *conductor) armedAutoClubs(ctx context.Context) map[string]*autoState {
 	return out
 }
 
+// hasActiveAutoDJ reports whether a club's owner-armed Auto DJ currently owns the
+// virtual stage slot. It mirrors armedAutoClubs without rebuilding every club.
+func (c *conductor) hasActiveAutoDJ(club string) bool {
+	c.idxMu.Lock()
+	defer c.idxMu.Unlock()
+	ev := c.autoDJIdx[club]
+	if ev == nil || tagVal(ev, "status") != "armed" {
+		return false
+	}
+	if c.autoDJCtrlIdx[club] >= ev.CreatedAt {
+		return false
+	}
+	return len(parseQueueTracks(ev)) > 0
+}
+
 // driveAutoClub drives a club in Auto DJ mode: shuffled rotation of an owner-armed playlist,
 // with no real DJ on stage. Completely separate from the real-DJ round-robin.
 func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoState, now int64) {
@@ -2147,17 +2162,21 @@ type stageGate struct {
 	// Set after the conductor is initialized (main.go) so reject() reads
 	// the conductor's in-memory indexes instead of querying BadgerDB.
 	countFn func(club, sender string) (active int, alreadyOnStage bool)
+	// Auto DJ is a virtual participant and permanently owns one of the three
+	// slots while armed, including while a real DJ's track is playing.
+	autoActiveFn func(club string) bool
 }
 
-// reject blocks a stage-join (kind 30102, content != "off") if the club is
-// already at its DJ cap of 3.
-// Heartbeats from DJs already on stage are always allowed through.
+const autoDJStageReservation = "\x00autodj"
+
+// reject atomically reserves the three shared stage slots for real DJ joins and
+// newly armed Auto DJs. Heartbeats and Auto-DJ config replacements are always
+// allowed because their participant already owns a slot.
 func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
-	if evt.Kind != kindStage {
+	isStageJoin := evt.Kind == kindStage && evt.Content != "off"
+	isAutoArm := evt.Kind == kindAutoDJ && tagVal(evt, "status") == "armed" && len(parseQueueTracks(evt)) > 0
+	if !isStageJoin && !isAutoArm {
 		return false, ""
-	}
-	if evt.Content == "off" {
-		return false, "" // leaving stage is always allowed
 	}
 	club := tagVal(evt, "h")
 	if club == "" {
@@ -2253,10 +2272,24 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 			}
 		}
 	}
-	if alreadyOnStage {
+	if isStageJoin && alreadyOnStage {
 		return false, "" // heartbeat from existing DJ
 	}
-	if _, reserved := g.pending[club][evt.PubKey]; reserved {
+	if isAutoArm {
+		if g.autoActiveFn != nil && g.autoActiveFn(club) {
+			return false, "" // replacing the config of the Auto DJ already on stage
+		}
+		if alreadyOnStage {
+			active++ // count the owner's real-DJ slot too
+		}
+	} else if g.autoActiveFn != nil && g.autoActiveFn(club) {
+		active++
+	}
+	reservation := evt.PubKey
+	if isAutoArm {
+		reservation = autoDJStageReservation
+	}
+	if _, reserved := g.pending[club][reservation]; reserved {
 		return false, "" // duplicate in-flight heartbeat/join from the same DJ
 	}
 	active += len(g.pending[club])
@@ -2267,22 +2300,26 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	if g.pending[club] == nil {
 		g.pending[club] = map[string]time.Time{}
 	}
-	g.pending[club][evt.PubKey] = now.Add(10 * time.Second)
+	g.pending[club][reservation] = now.Add(10 * time.Second)
 	return false, ""
 }
 
 // observe releases the short admission reservation after the stage event has
 // been stored and the normal event observers can make it visible in the index.
 func (g *stageGate) observe(_ context.Context, evt *nostr.Event) {
-	if evt == nil || evt.Kind != kindStage {
+	if evt == nil || (evt.Kind != kindStage && evt.Kind != kindAutoDJ) {
 		return
 	}
 	club := tagVal(evt, "h")
 	if club == "" {
 		return
 	}
+	reservation := evt.PubKey
+	if evt.Kind == kindAutoDJ {
+		reservation = autoDJStageReservation
+	}
 	g.mu.Lock()
-	delete(g.pending[club], evt.PubKey)
+	delete(g.pending[club], reservation)
 	if len(g.pending[club]) == 0 {
 		delete(g.pending, club)
 	}

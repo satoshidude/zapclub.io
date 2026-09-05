@@ -154,6 +154,12 @@
   <div class="lcd-media">
     {#if np && !videoWide}
       <div class="zap-stage-action">
+        <span class="zap-sparkles" aria-hidden="true">
+          <span class="zap-star"></span>
+          <span class="zap-star"></span>
+          <span class="zap-star"></span>
+          <span class="zap-star"></span>
+        </span>
         <ZapButton
           club={clubId}
           iconOnly={true}
@@ -334,8 +340,48 @@
       var(--player-led-surface);
   }
   .idle .lcd-media { display: none; }
-  .zap-stage-action { width: 100%; height: 100%; }
+  .zap-stage-action {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    height: 100%;
+  }
+  .zap-sparkles {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    pointer-events: none;
+  }
+  .zap-star {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    color: #f1f3f4;
+    background: currentColor;
+    box-shadow: 0 0 7px currentColor;
+    opacity: 0;
+    animation: zap-star-flash 6.4s ease-in-out infinite;
+  }
+  .zap-star::before,
+  .zap-star::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    border-radius: 999px;
+    background: currentColor;
+    transform: translate(-50%, -50%);
+  }
+  .zap-star::before { width: 10px; height: 1px; }
+  .zap-star::after { width: 1px; height: 10px; }
+  .zap-star:nth-child(1) { top: 22%; left: 16%; animation-delay: -0.4s; }
+  .zap-star:nth-child(2) { top: 19%; left: 82%; color: #8d4cff; animation-delay: -2s; }
+  .zap-star:nth-child(3) { top: 76%; left: 20%; color: #f7931a; animation-delay: -3.6s; }
+  .zap-star:nth-child(4) { top: 70%; left: 84%; animation-delay: -5.2s; }
   .zap-stage-action :global(.zap-mini.icon-only.with-name) {
+    position: relative;
+    z-index: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto auto;
@@ -352,18 +398,21 @@
   .zap-stage-action :global(.zap-mini.icon-only.with-name:hover:not(:disabled)) { color: #f7931a; }
   .zap-stage-action :global(.bolt-icon) {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 2;
     justify-self: center;
     width: 52px;
     height: 52px;
     stroke-width: 1.65;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: zap-icon-turn 7s linear infinite;
   }
   .zap-stage-action :global(.icon-dj-copy) {
     display: contents;
   }
   .zap-stage-action :global(.icon-dj-name) {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1;
     align-self: center;
     justify-self: center;
     max-width: none;
@@ -495,6 +544,17 @@
     50% { opacity: 1; }
   }
 
+  @keyframes zap-icon-turn {
+    from { transform: perspective(240px) rotateY(0deg); }
+    to { transform: perspective(240px) rotateY(360deg); }
+  }
+
+  @keyframes zap-star-flash {
+    0%, 76%, 100% { opacity: 0; transform: scale(0.2) rotate(0deg); }
+    82% { opacity: 0.95; transform: scale(1) rotate(45deg); }
+    89% { opacity: 0; transform: scale(0.35) rotate(90deg); }
+  }
+
   @media (max-width: 560px) {
     .lcd-shell { grid-template-columns: minmax(104px, 31%) minmax(0, 1fr); height: 126px; }
     .lcd-shell.idle { grid-template-columns: minmax(0, 1fr); }
@@ -528,6 +588,8 @@
 
   @media (prefers-reduced-motion: reduce) {
     .zap-stage-action :global(.zap-mini.icon-only.with-name) { animation: none; opacity: 1; }
+    .zap-stage-action :global(.bolt-icon) { animation: none; }
+    .zap-star { animation: none; opacity: 0.28; transform: scale(0.65) rotate(45deg); }
     .lcd-track.scroll { max-width: 100%; overflow: hidden; text-overflow: ellipsis; animation: none; }
     .lcd-track.scroll span + span { display: none; }
   }

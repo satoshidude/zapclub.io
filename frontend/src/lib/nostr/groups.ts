@@ -866,6 +866,7 @@ export interface ClubSubHandlers {
   onAutoDJCtrl?: (ev: Event) => void
   onMood?: (ev: Event) => void
   onListenerCount?: (ev: Event) => void
+  onMemberCount?: (ev: Event) => void
   /** Called once after all stored events have been delivered (EOSE). */
   onEose?: () => void
 }
@@ -890,6 +891,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_FLOOR_REACTION,
       KIND_MOOD,
       KIND_LISTENER_COUNT,
+      KIND_MEMBER_COUNT,
       KIND_AUTODJ,
       KIND_AUTODJ_CTRL,
     ],
@@ -965,6 +967,7 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
       else if (ev.kind === KIND_MOOD) h.onMood?.(ev)
       else if (ev.kind === KIND_LISTENER_COUNT) h.onListenerCount?.(ev)
+      else if (ev.kind === KIND_MEMBER_COUNT) h.onMemberCount?.(ev)
     },
   })
 

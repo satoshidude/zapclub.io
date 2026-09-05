@@ -7,6 +7,7 @@
   import type { ClubMember } from '../../nostr/types'
   import { zaps } from '../../nostr/zaps.svelte'
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
+  import { autodj } from '../../nostr/autodj.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
   import ComingNext from './ComingNext.svelte'
@@ -19,6 +20,7 @@
     isMember = false,
     owner = '',
     currentDj = '',
+    autoPlaying = false,
     onkick,
     onpromote,
   }: {
@@ -29,6 +31,7 @@
     isMember?: boolean
     owner?: string
     currentDj?: string
+    autoPlaying?: boolean
     onkick?: (pubkey: string) => void
     onpromote?: (pubkey: string) => void
   } = $props()
@@ -36,11 +39,13 @@
   // DJs currently on stage — the floor's front row (even if their presence beat is a little
   // stale; being on stage means they're here). They are NOT repeated in the crowd below.
   const stageDjs = $derived(stage.djs)
+  const autoDJ = $derived(autodj.getConfig(groupId))
   const stageSet = $derived(new Set(stageDjs.map((d) => d.pubkey)))
   const onStage = $derived(stage.isOnStage(auth.pubkey))
-  const emptySlots = $derived(Math.max(0, MAX_DJS - stageDjs.length))
+  const occupiedSlots = $derived(stageDjs.length + (autoDJ ? 1 : 0))
+  const emptySlots = $derived(Math.max(0, MAX_DJS - occupiedSlots))
   // A free slot can be taken directly by a signed-in member who isn't on stage yet.
-  const canJoin = $derived(auth.canSign && isMember && !onStage && !stage.full)
+  const canJoin = $derived(auth.canSign && isMember && !onStage && occupiedSlots < MAX_DJS)
   let stageBusy = $state(false)
   let stageError = $state('')
 
@@ -132,20 +137,20 @@
 <section class="floor stage-card card led-zone" class:playing>
   <div class="led-scanlines" aria-hidden="true"></div>
   <div class="head lcd-card-heading">
-    <span class="head-title"><h3 class="lcd-card-title">On stage</h3><span class="count">{stageDjs.length}/{MAX_DJS}</span></span>
+    <span class="head-title"><h3 class="lcd-card-title">On stage</h3><span class="count">{occupiedSlots}/{MAX_DJS}</span></span>
     {#if auth.canSign && isMember && onStage}
       <button class="leave-stage lcd-card-title" onclick={offStage} disabled={stageBusy}>Leave stage</button>
     {/if}
   </div>
 
-  {#if stageDjs.length === 0}
+  {#if occupiedSlots === 0}
     <p class="dim">No one is on stage yet.</p>
   {/if}
 
   <!-- Stage row: the on-stage DJs dance up front, right against the crowd. Open slots are
        joinable in place; the people live ONLY here (not repeated in the crowd below). -->
   <div class="stagerow">
-    <span class="stage-tag" aria-hidden="true">{stageDjs.length}/{MAX_DJS} ON STAGE</span>
+    <span class="stage-tag" aria-hidden="true">{occupiedSlots}/{MAX_DJS} ON STAGE</span>
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
       <button
@@ -163,6 +168,23 @@
         <span class="nm"><span class="mq-inner">{displayName(dj.pubkey, profile)}</span></span>
       </button>
     {/each}
+    {#if autoDJ}
+      <div
+        class="dancer up-front auto-dj"
+        class:dj={autoPlaying}
+        style={danceVars(`autodj:${groupId}`)}
+        role="img"
+        aria-label={`Auto DJ on stage — ${autoDJ.name}`}
+        title={`Auto DJ — ${autoDJ.name}`}
+      >
+        <span class="bob v{variantOf(`autodj:${groupId}`)}">
+          <span class="auto-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path></svg>
+          </span>
+        </span>
+        <span class="nm"><span class="mq-inner">Auto DJ</span></span>
+      </div>
+    {/if}
     {#each Array(emptySlots) as _, i (i)}
       <button
         class="dancer open"
@@ -397,6 +419,34 @@
   }
   .dancer.up-front.no-ring .av {
     opacity: 0.92;
+  }
+  .dancer.auto-dj {
+    cursor: default;
+  }
+  .auto-avatar {
+    display: grid;
+    place-items: center;
+    width: var(--stage-avatar-size);
+    height: var(--stage-avatar-size);
+    border: 1px solid rgba(241, 243, 244, 0.34);
+    border-radius: 50%;
+    color: var(--lcd-text-soft);
+    background:
+      radial-gradient(circle, rgba(241, 243, 244, 0.08) 0 1px, transparent 1.2px) 0 0 / 5px 5px,
+      rgba(241, 243, 244, 0.025);
+  }
+  .auto-avatar svg {
+    width: 43%;
+    height: 43%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .dancer.auto-dj.dj .auto-avatar {
+    border-color: rgba(241, 243, 244, 0.62);
+    color: var(--lcd-text);
   }
   .dancer.dj .av {
     opacity: 1;
