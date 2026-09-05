@@ -13,119 +13,108 @@
     void autodj.getConfig(clubId)
     const djs = stage.djs
     for (const d of djs) void queues.get(d.pubkey)?.updatedAt
-    return upcomingTracks(clubId, 6)
+    return upcomingTracks(clubId, 3)
   })
-  const firstProfile = $derived(next[0] ? useProfile(next[0].dj) : null)
-  const rest = $derived(next.slice(1))
 </script>
 
-{#if next.length > 0}
-  <details class="cn">
-    <summary>
-      <span class="cn-label">Up next</span>
-      <span class="cn-title">{next[0].title}</span>
-      <span class="cn-dj">{displayName(next[0].dj, firstProfile)}</span>
-      {#if rest.length > 0}<span class="chevron" aria-hidden="true">▾</span>{/if}
-    </summary>
-    {#if rest.length > 0}
+{#if stage.djs.length > 0}
+  <section class="cn" aria-label="Upcoming DJ queue">
+    <div class="cn-head">
+      <span class="cn-label lcd-card-title">Up next</span>
+    </div>
+    {#if next.length > 0}
       <ol>
-        {#each rest as item, i (item.videoId + i)}
+        {#each next as item, i (item.videoId + i)}
           {@const profile = useProfile(item.dj)}
-          <li>
-            <span class="idx">{i + 2}</span>
+          <li class:first={i === 0}>
+            <span class="idx">{i + 1}</span>
             <span class="title">{item.title}</span>
-            <span class="dj">{displayName(item.dj, profile)}</span>
+            <span class="dj"><span class="by">by</span> {displayName(item.dj, profile)}</span>
           </li>
         {/each}
       </ol>
+    {:else}
+      <p class="empty">No tracks queued yet.</p>
     {/if}
-  </details>
+  </section>
 {/if}
 
 <style>
-  /* Borderless accordion — sits inside the hero card; the summary previews the next track. */
+  /* Compact relay-derived round-robin preview, placed directly below the stage avatars. */
   .cn {
-    margin-top: 0.9rem;
-    border-top: 1px solid var(--border);
-    padding-top: 0.8rem;
+    margin-top: 0.1rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid rgba(241, 243, 244, 0.2);
   }
-  summary {
+  .cn-head {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    cursor: pointer;
-    list-style: none;
-    font-size: 0.85rem;
-  }
-  summary::-webkit-details-marker {
-    display: none;
+    min-height: 24px;
+    margin-bottom: 0.25rem;
   }
   .cn-label {
-    flex: 0 0 auto;
-    color: var(--accent);
-    font-weight: 700;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-  .cn-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 600;
-  }
-  .cn-dj {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    font-size: 0.76rem;
-    max-width: 10ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .chevron {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    transition: transform 0.18s ease;
-  }
-  .cn[open] .chevron {
-    transform: rotate(180deg);
+    color: var(--lcd-text-bright);
+    font-size: 0.92rem;
   }
   ol {
     list-style: none;
-    margin: 0.7rem 0 0;
+    margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
   }
   li {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1.35rem minmax(0, 1fr) minmax(6rem, auto);
     align-items: center;
-    gap: 0.6rem;
-    font-size: 0.85rem;
+    gap: 0.5rem;
+    min-height: 30px;
+    border-bottom: 1px solid rgba(241, 243, 244, 0.1);
+    color: var(--lcd-text-soft);
+    font-size: 0.76rem;
+  }
+  li.first {
+    color: var(--lcd-text-bright);
   }
   .idx {
-    flex: 0 0 1.3rem;
-    color: var(--text-dim);
+    color: var(--accent);
     font-variant-numeric: tabular-nums;
+    text-align: center;
   }
   .title {
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .dj {
-    flex: 0 0 auto;
-    color: var(--text-dim);
-    font-size: 0.76rem;
-    max-width: 10ch;
+    max-width: 15ch;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--lcd-text);
+    text-align: right;
+  }
+  .by {
+    color: var(--lcd-text-dim);
+  }
+  .empty {
+    margin: 0;
+    color: var(--lcd-text-dim);
+    font-size: 0.76rem;
+    line-height: 30px;
+  }
+  @media (max-width: 560px) {
+    li {
+      grid-template-columns: 1.15rem minmax(0, 1fr) minmax(4.5rem, 30%);
+      gap: 0.35rem;
+      font-size: 0.69rem;
+    }
+    .dj {
+      max-width: none;
+    }
+    .by {
+      display: none;
+    }
   }
 </style>

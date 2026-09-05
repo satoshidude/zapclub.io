@@ -185,7 +185,7 @@
     <div class="scanlines" aria-hidden="true"></div>
     {#if np}
       <div class="lcd-status lcd-card-heading">
-        <span class="dj-status"><ZapButton club={clubId} iconOnly={true} showName={true} showSelf={true} /><span class="live-label">ON AIR</span></span>
+        <span class="dj-status"><ZapButton club={clubId} iconOnly={true} showName={true} showSelf={true} allowSelfZap={true} /><span class="live-label">ON AIR</span></span>
         <span>-{fmt(remaining)} / {fmt(np.duration)}</span>
       </div>
 

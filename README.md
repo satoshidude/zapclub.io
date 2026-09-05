@@ -117,12 +117,11 @@ deploy/        Project-specific Caddy, systemd, monitoring and backup files
 
 ## Production
 
-Production runs on `sunnyhill.io` as immutable, commit-addressed releases. A
-clean local `main` is released exclusively through `./release.sh`; the script
-validates the exact commit, transfers it as a Git bundle, invokes the restricted
-server-side validator, activates it atomically and finishes with public smoke
-checks. A failed activation rolls back to the preceding verified release.
+Deployments use immutable, commit-addressed releases. Each candidate is built
+and validated separately, activated through an atomic switch and checked through
+the public protocols. A failed activation returns to the preceding verified
+release.
 
 Persistent state, secrets, backups and monitoring remain outside the release.
-See [`deploy/README.md`](deploy/README.md) for the authoritative release,
-rollback, service, monitoring and backup procedures.
+See [`deploy/README.md`](deploy/README.md) for the general deployment,
+rollback, monitoring and backup architecture.

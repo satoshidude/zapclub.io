@@ -8,7 +8,7 @@
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
   // `showDj` renders the recipient DJ's avatar + name on the chip (the zap target).
-  let { pubkey = '', club = '', showDj = false, iconOnly = false, showName = false, showSelf = false }: { pubkey?: string; club?: string; showDj?: boolean; iconOnly?: boolean; showName?: boolean; showSelf?: boolean } = $props()
+  let { pubkey = '', club = '', showDj = false, iconOnly = false, showName = false, showSelf = false, allowSelfZap = false }: { pubkey?: string; club?: string; showDj?: boolean; iconOnly?: boolean; showName?: boolean; showSelf?: boolean; allowSelfZap?: boolean } = $props()
 
   const PRESETS = [21, 100, 500, 2100]
   // Fallback payee when the recipient has no lightning address on their profile. The
@@ -21,6 +21,7 @@
   const lud16 = $derived((djProfile?.lud16 as string) || FALLBACK_LUD16)
   const isSelf = $derived(!!dj && dj === auth.pubkey)
   const show = $derived(!!dj && (showSelf || !isSelf))
+  const canOpen = $derived(!isSelf || allowSelfZap)
   // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
   const total = $derived(dj ? zaps.score(dj) : 0)
 
@@ -57,13 +58,13 @@
     class:with-dj={showDj}
     class:icon-only={iconOnly}
     class:with-name={iconOnly && showName}
-    class:self-label={isSelf && showSelf}
+    class:self-label={!canOpen}
     onclick={(event) => {
       event.stopPropagation()
-      if (!isSelf) open = !open
+      if (canOpen) open = !open
     }}
-    title={isSelf ? displayName(dj, djProfile) : `Zap ${displayName(dj, djProfile)}`}
-    aria-label={isSelf ? `Current DJ: ${displayName(dj, djProfile)}` : 'Zap the DJ'}
+    title={canOpen ? `Zap ${displayName(dj, djProfile)}` : displayName(dj, djProfile)}
+    aria-label={canOpen ? 'Zap the DJ' : `Current DJ: ${displayName(dj, djProfile)}`}
   >
     {#if iconOnly}
       <svg class="bolt-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path></svg>

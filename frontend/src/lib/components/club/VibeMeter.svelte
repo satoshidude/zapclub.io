@@ -83,9 +83,9 @@
   const bangerTxt = $derived(bangers > 0 ? `BANGER ${bangers}/${BANGER_MAX}` : 'BANGER')
   const readyTxt = $derived(
     !auth.canSign ? 'SIGN IN TO VOTE'
-      : !isMember ? 'JOIN TO VOTE'
-        : sending ? 'SENDING…'
-          : cooldownSeconds > 0 ? `NEXT VOTE IN ${cooldownSeconds}s` : 'READY',
+        : !isMember ? 'JOIN TO VOTE'
+          : sending ? 'SENDING…'
+          : cooldownSeconds > 0 ? `NEXT VOTE IN ${cooldownSeconds}s` : 'RATE THE DJ',
   )
 
   // ── Fireworks (unified: brief on each banger vote, longer on threshold) ──────
@@ -191,13 +191,13 @@
 
       <button class="meter-action banger" class:active={ownVote === 'banger'} onclick={() => vote('banger')} disabled={!canBanger} aria-label="Vote banger">
         <svg class="action-icon" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M17 2c1 7 8 8 8 17 0 7-4 11-10 11S5 26 5 19c0-6 4-11 9-16-1 7 2 8 4 11 2-4 1-8-1-12z" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"></path>
-          <path d="M15 28c-4-4-1-8 2-11 0 4 4 5 3 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+          <path d="M16 2.5l3 6.3 6.7-2.5-2.5 6.6 6.3 3.1-6.3 3.1 2.5 6.6-6.7-2.5-3 6.3-3-6.3-6.7 2.5 2.5-6.6L2.5 16l6.3-3.1-2.5-6.6L13 8.8 16 2.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
+          <path d="m17.5 9.5-5 7h4L14.5 23l5-7h-4l2-6.5z" fill="currentColor"></path>
         </svg>
         <span>{bangerTxt}</span>
       </button>
     </div>
-    <div class="vote-state" class:cooling={cooldownSeconds > 0}>{readyTxt}</div>
+    <div class="vote-state" class:rate-ready={readyTxt === 'RATE THE DJ'} class:cooling={cooldownSeconds > 0}>{readyTxt}</div>
   </div>
 </div>
 
@@ -306,6 +306,9 @@
   }
   .vote-state.cooling {
     color: var(--lcd-text);
+  }
+  .vote-state.rate-ready {
+    font-size: calc(0.62rem + 3px);
   }
   @media (max-width: 760px) {
     .gauge-wrap {

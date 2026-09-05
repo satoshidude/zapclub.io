@@ -9,6 +9,7 @@
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
+  import ComingNext from './ComingNext.svelte'
 
   let {
     groupId,
@@ -180,6 +181,7 @@
       </button>
     {/each}
   </div>
+  <ComingNext clubId={groupId} />
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
   {#if sel && stageSet.has(sel.pubkey)}
