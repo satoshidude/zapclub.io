@@ -4,6 +4,7 @@ import { parseRoute } from './router.svelte'
 
 describe('footer content routes', () => {
   it.each([
+    ['/leaderboard', 'leaderboard'],
     ['/about', 'about'],
     ['/credits', 'about'],
     ['/disclaimer', 'disclaimer'],

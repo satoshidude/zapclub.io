@@ -4,9 +4,9 @@ import { CLUB_RELAY_PUBKEY } from './pool'
 import { leaveStage, persistedStageGroup } from './stage.svelte'
 import type { Playlist } from './types'
 
-// Auto DJ: an owner can arm one of their saved playlists as a virtual DJ participant.
-// When real DJs are on stage, auto-DJ joins the round-robin as another slot.
-// When no real DJ is on stage, the conductor plays the playlist in shuffled loop rotation.
+// Auto DJ: an owner can arm one of their saved playlists as a visible virtual participant.
+// It occupies a shared stage slot but remains on standby while any real DJ is active.
+// With no real DJ on stage, the conductor plays its playlist in shuffled loop rotation.
 // Arming publishes a kind-30105 snapshot to the club relay.
 // The owner manually disarms via the Stop button (publishes 30105 with status=off).
 

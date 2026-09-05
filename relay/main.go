@@ -420,13 +420,13 @@ func main() {
 	cond.tick()
 	go cond.run()
 
-	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).
+	// Zapclub-only payment history is kept separately from the DJ-performance leaderboard.
 	board := newZapBoard(env("RELAY_LEADERBOARD", "./leaderboard.json"))
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, board.observe)
 
 	relay.Router().HandleFunc("/yt-search", handleSearch)
 	relay.Router().HandleFunc("/yt-playlist", handlePlaylist)
-	relay.Router().HandleFunc("/leaderboard", board.handleHTTP)
+	relay.Router().HandleFunc("/leaderboard", credibility.handleLeaderboard)
 	relay.Router().HandleFunc("/zaps", board.handleZaps)
 	relay.Router().HandleFunc("/zaps/received", board.handleZaps)
 

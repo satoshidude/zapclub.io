@@ -47,7 +47,7 @@ func nip98Request(t *testing.T, method, path, sk string, body string) *http.Requ
 	return r
 }
 
-func TestZapBoardAccumulatesAndRanks(t *testing.T) {
+func TestZapBoardAccumulatesPrivateHistory(t *testing.T) {
 	b := newZapBoard(filepath.Join(t.TempDir(), "lb.json"))
 	ctx := context.Background()
 	// alice receives 100 (from S1) + 50 (from S2); bob receives 30 (from S1).
@@ -55,16 +55,13 @@ func TestZapBoardAccumulatesAndRanks(t *testing.T) {
 	b.observe(ctx, bcast("S2", "alice", "50", "inv2"))
 	b.observe(ctx, bcast("S1", "bob", "30", "inv3"))
 
-	ae, total, ok := b.rankOf("alice")
-	if !ok || total != 2 {
-		t.Fatalf("alice: ok=%v total=%d want ok,2", ok, total)
+	alice := b.received("alice")
+	if alice.Total != 150 || alice.Count != 2 || len(alice.BySender) != 2 {
+		t.Errorf("alice history = %+v; want 150 sats, 2 zaps, 2 senders", alice)
 	}
-	if ae.Sats != 150 || ae.Zaps != 2 || ae.Zappers != 2 || ae.Rank != 1 {
-		t.Errorf("alice entry = %+v; want sats150 zaps2 zappers2 rank1", ae)
-	}
-	be, _, _ := b.rankOf("bob")
-	if be.Sats != 30 || be.Zappers != 1 || be.Rank != 2 {
-		t.Errorf("bob entry = %+v; want sats30 zappers1 rank2", be)
+	bob := b.received("bob")
+	if bob.Total != 30 || bob.Count != 1 || len(bob.BySender) != 1 {
+		t.Errorf("bob history = %+v; want 30 sats, 1 zap, 1 sender", bob)
 	}
 }
 
@@ -81,18 +78,15 @@ func TestZapBoardDedupAndSelfZapAndDistinctSenders(t *testing.T) {
 	// zero / missing amount ignored
 	b.observe(ctx, bcast("S2", "alice", "0", "zero"))
 
-	e, _, ok := b.rankOf("alice")
-	if !ok {
-		t.Fatal("alice should be ranked")
+	received := b.received("alice")
+	if received.Total != 120 {
+		t.Errorf("sats = %d; want 120 (dup + self + zero excluded)", received.Total)
 	}
-	if e.Sats != 120 {
-		t.Errorf("sats = %d; want 120 (dup + self + zero excluded)", e.Sats)
+	if received.Count != 2 {
+		t.Errorf("zaps = %d; want 2", received.Count)
 	}
-	if e.Zaps != 2 {
-		t.Errorf("zaps = %d; want 2", e.Zaps)
-	}
-	if e.Zappers != 1 {
-		t.Errorf("zappers = %d; want 1 (one distinct sender)", e.Zappers)
+	if len(received.BySender) != 1 {
+		t.Errorf("senders = %d; want 1 distinct sender", len(received.BySender))
 	}
 }
 
@@ -103,9 +97,9 @@ func TestZapBoardPersists(t *testing.T) {
 	b.save()
 
 	b2 := newZapBoard(path)
-	e, total, ok := b2.rankOf("alice")
-	if !ok || total != 1 || e.Sats != 100 || e.Zappers != 1 {
-		t.Errorf("reloaded board: ok=%v total=%d entry=%+v; want 100 sats / 1 zapper", ok, total, e)
+	received := b2.received("alice")
+	if received.Total != 100 || received.Count != 1 || len(received.BySender) != 1 {
+		t.Errorf("reloaded zap history = %+v; want 100 sats / 1 zap / 1 sender", received)
 	}
 }
 
@@ -124,21 +118,6 @@ func TestZapBoardLoadsLegacyTotalsWithoutInventingSenderAmounts(t *testing.T) {
 		if sender.Exact || sender.Sats != 0 || sender.Count != 0 {
 			t.Fatalf("legacy sender = %+v; unknown historical split must not be invented", sender)
 		}
-	}
-}
-
-func TestZapBoardTop(t *testing.T) {
-	b := newZapBoard(filepath.Join(t.TempDir(), "lb.json"))
-	ctx := context.Background()
-	b.observe(ctx, bcast("S1", "alice", "100", "i1"))
-	b.observe(ctx, bcast("S1", "bob", "300", "i2"))
-	b.observe(ctx, bcast("S1", "carol", "200", "i3"))
-	top, total := b.top(2)
-	if total != 3 || len(top) != 2 {
-		t.Fatalf("top: total=%d len=%d want 3,2", total, len(top))
-	}
-	if top[0].Pubkey != "bob" || top[0].Rank != 1 || top[1].Pubkey != "carol" || top[1].Rank != 2 {
-		t.Errorf("top order = %+v; want bob#1, carol#2", top)
 	}
 }
 
@@ -162,9 +141,9 @@ func TestZapBoardDeduplicatesHTTPRecordAndClubBroadcast(t *testing.T) {
 	b.record("sender", "alice", 100, "bolt11:lnbc_invoice")
 	b.observe(context.Background(), bcast("sender", "alice", "100", "lnbc_invoice"))
 
-	e, _, ok := b.rankOf("alice")
-	if !ok || e.Sats != 100 || e.Zaps != 1 {
-		t.Fatalf("entry = %+v, ok=%v; duplicated invoice must count once", e, ok)
+	received := b.received("alice")
+	if received.Total != 100 || received.Count != 1 {
+		t.Fatalf("history = %+v; duplicated invoice must count once", received)
 	}
 }
 

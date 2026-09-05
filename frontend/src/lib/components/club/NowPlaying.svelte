@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { enrichMyTrackTitle, enrichMyTrackDuration } from '../../nostr/queue.svelte'
+  import { useProfile, displayName } from '../../nostr/profiles.svelte'
   import { auth } from '../../nostr/auth.svelte'
   import { likes, likeTrack, unlikeTrack } from '../../nostr/likes.svelte'
   import Player from './Player.svelte'
@@ -42,16 +44,60 @@
     toggleVideoFullscreen: () => void
   }
 
+  type PlayerControlState = {
+    ready: boolean
+    muted: boolean
+    volume: number
+    fullscreen: boolean
+    playing: boolean
+  }
+
+  const MINI_VIDEO_MASK_MS = 8000
+
   let playerRef = $state<PlayerControls>()
-  let controls = $state({ ready: false, muted: true, volume: 70, fullscreen: false, playing: false })
+  let controls = $state<PlayerControlState>({ ready: false, muted: true, volume: 70, fullscreen: false, playing: false })
   let liking = $state(false)
   let failedVideo = $state('')
   let videoReady = $state(false)
   let videoWide = $state(false)
   let autoPreviewTrack = $state('')
   let autoPreviewPhase = $state<AutoVideoPreviewPhase>('done')
+  let miniVideoMaskVisible = $state(false)
+  let miniVideoMaskTrack = $state('')
+  let miniVideoMaskTimer: ReturnType<typeof setTimeout> | undefined
 
   const np = $derived(sync.live)
+  const djProfile = $derived(np?.dj ? useProfile(np.dj) : null)
+  const djName = $derived(np?.dj ? displayName(np.dj, djProfile) : '')
+
+  function showMiniVideoMask() {
+    miniVideoMaskVisible = true
+    if (miniVideoMaskTimer) clearTimeout(miniVideoMaskTimer)
+    miniVideoMaskTimer = setTimeout(() => {
+      miniVideoMaskVisible = false
+      miniVideoMaskTimer = undefined
+    }, MINI_VIDEO_MASK_MS)
+  }
+
+  function handleControlState(state: PlayerControlState) {
+    controls = state
+  }
+
+  function toggleAudio() {
+    if (controls.muted) showMiniVideoMask()
+    playerRef?.toggleAudio()
+  }
+
+  $effect(() => {
+    const videoId = np?.videoId || ''
+    if (!videoId || videoId === miniVideoMaskTrack) return
+    miniVideoMaskTrack = videoId
+    showMiniVideoMask()
+  })
+
+  onDestroy(() => {
+    if (miniVideoMaskTimer) clearTimeout(miniVideoMaskTimer)
+  })
 
   let nowMs = $state(Date.now())
   $effect(() => {
@@ -93,11 +139,15 @@
 
   const remaining = $derived(np?.duration ? Math.max(0, np.duration - pos) : 0)
   const liked = $derived(!!np?.videoId && likes.has(np.videoId))
+  const audioOnly = $derived(!!np && failedVideo === np.videoId)
+  const miniArtworkVisible = $derived(!videoWide && (miniVideoMaskVisible || audioOnly))
   const currentCover = $derived.by(() => {
-    if (!np || !videoWide) return ''
-    return failedVideo === np.videoId || !videoReady
-      ? `https://i.ytimg.com/vi/${np.videoId}/mqdefault.jpg`
-      : ''
+    if (!np) return ''
+    if (miniArtworkVisible) return clubImage
+    if (failedVideo === np.videoId) {
+      return clubImage || `https://i.ytimg.com/vi/${np.videoId}/mqdefault.jpg`
+    }
+    return !videoReady ? `https://i.ytimg.com/vi/${np.videoId}/mqdefault.jpg` : ''
   })
 
   $effect(() => {
@@ -151,27 +201,15 @@
 </script>
 
 <section class="lcd-shell led-zone" class:idle={!np} class:video-wide={videoWide} aria-label="Club player">
+  {#if np}
+    <div class="lcd-status lcd-card-heading player-status">
+      <span class="live-label lcd-card-title">ON AIR</span>
+      <span>-{fmt(remaining)} / {fmt(np.duration)}</span>
+    </div>
+  {/if}
+
   <div class="lcd-media">
-    {#if np && !videoWide}
-      <div class="zap-stage-action">
-        <span class="zap-sparkles" aria-hidden="true">
-          <span class="zap-star"></span>
-          <span class="zap-star"></span>
-          <span class="zap-star"></span>
-          <span class="zap-star"></span>
-        </span>
-        <ZapButton
-          club={clubId}
-          iconOnly={true}
-          showName={true}
-          showSelf={true}
-          allowSelfZap={true}
-          iconLabel="ZAP THE DJ"
-          showRecipientName={true}
-        />
-      </div>
-    {/if}
-    <div class="video-surface" aria-hidden={!videoWide}>
+    <div class="video-surface">
       <Player
         bind:this={playerRef}
         {canHear}
@@ -183,8 +221,9 @@
         compact={true}
         embedded={true}
         cover={currentCover}
+        ledCover={miniArtworkVisible}
         poster={clubImage}
-        oncontrolstate={(state) => (controls = state)}
+        oncontrolstate={handleControlState}
         onmeta={(author) => {
           if (!np) return
           ytMeta = { vid: np.videoId, author }
@@ -198,16 +237,26 @@
         }}
       />
     </div>
+    {#if np && !videoWide && (miniVideoMaskVisible || audioOnly)}
+      <div
+        class="mini-video-status"
+        class:audio-only={audioOnly}
+        role="status"
+        aria-label={audioOnly ? 'Audio only' : 'Video syncing'}
+      >
+        <span class="mini-video-status-label">{audioOnly ? 'AUDIO ONLY' : 'VIDEO SYNC'}</span>
+        <span class="mini-video-status-bars" aria-hidden="true">
+          {#each [0, 1, 2, 3, 4, 5, 6, 7] as index}
+            <span style={`--sync-index: ${index}`}></span>
+          {/each}
+        </span>
+      </div>
+    {/if}
   </div>
 
   <div class="lcd-content" class:lobby-content={!np}>
     <div class="scanlines" aria-hidden="true"></div>
     {#if np}
-      <div class="lcd-status lcd-card-heading">
-        <span class="live-label lcd-card-title">ON AIR</span>
-        <span>-{fmt(remaining)} / {fmt(np.duration)}</span>
-      </div>
-
       <div class="lcd-track-wrap">
         <div class="lcd-track" class:scroll={parts.title.length > 28}>
           <span>{parts.title}</span>
@@ -222,11 +271,22 @@
       </div>
 
       <div class="lcd-controls">
+        <div class="lcd-dj-line">
+          <ZapButton
+            club={clubId}
+            iconOnly={true}
+            showName={true}
+            showSelf={true}
+            allowSelfZap={true}
+            hideIcon={true}
+            iconLabel={`⚡ ${djName}`}
+          />
+        </div>
         <div class="volume-cluster">
           <button
             class="lcd-audio"
             class:muted={controls.muted}
-            onclick={() => playerRef?.toggleAudio()}
+            onclick={toggleAudio}
             disabled={!controls.ready || !canHear}
             aria-label={controls.muted ? 'Unmute' : 'Mute'}
             title={controls.muted ? 'Unmute' : 'Mute'}
@@ -298,9 +358,13 @@
       radial-gradient(circle, rgba(241, 243, 244, 0.045) 0 0.55px, transparent 0.75px) 0 0 / 4px 4px;
     position: relative;
     display: grid;
+    grid-template-areas:
+      'status status'
+      'media content';
     grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+    grid-template-rows: 36px auto;
     overflow: hidden;
-    height: 158px;
+    height: auto;
     border: 0;
     border-radius: 0;
     color: var(--lcd-text);
@@ -310,7 +374,10 @@
     text-shadow: var(--lcd-text-shadow);
   }
   .lcd-shell.idle {
+    grid-template-areas: 'content';
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 158px;
     color: var(--lcd-text);
     border-color: transparent;
     box-shadow: none;
@@ -326,12 +393,12 @@
   }
   .idle .scanlines { display: none; }
   .lcd-media {
+    grid-area: media;
     position: relative;
     z-index: 2;
-    display: grid;
-    place-items: center;
+    display: block;
     width: 100%;
-    height: 100%;
+    height: auto;
     overflow: hidden;
     opacity: 1;
     pointer-events: auto;
@@ -340,107 +407,65 @@
       var(--player-led-surface);
   }
   .idle .lcd-media { display: none; }
-  .zap-stage-action {
-    position: relative;
-    isolation: isolate;
+  .video-surface {
+    display: block;
     width: 100%;
     height: 100%;
+    min-height: 0;
   }
-  .zap-sparkles {
+  .mini-video-status {
     position: absolute;
-    z-index: 0;
     inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    color: var(--lcd-text);
+    background:
+      repeating-linear-gradient(0deg, rgba(143, 197, 255, 0.025) 0 1px, transparent 1px 4px),
+      radial-gradient(circle at 50% 50%, rgba(50, 118, 181, 0.14), transparent 62%),
+      linear-gradient(180deg, rgba(2, 5, 10, 0.08), rgba(2, 5, 10, 0.44));
     pointer-events: none;
   }
-  .zap-star {
-    position: absolute;
-    width: 2px;
-    height: 2px;
-    border-radius: 50%;
-    color: #f1f3f4;
-    background: currentColor;
-    box-shadow: 0 0 7px currentColor;
-    opacity: 0;
-    animation: zap-star-flash 6.4s ease-in-out infinite;
+  .mini-video-status-label {
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-shadow: var(--lcd-text-shadow);
   }
-  .zap-star::before,
-  .zap-star::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    border-radius: 999px;
-    background: currentColor;
-    transform: translate(-50%, -50%);
+  .mini-video-status.audio-only {
+    background:
+      repeating-linear-gradient(0deg, rgba(143, 197, 255, 0.025) 0 1px, transparent 1px 4px),
+      linear-gradient(180deg, rgba(2, 5, 10, 0.08), rgba(2, 5, 10, 0.52));
   }
-  .zap-star::before { width: 10px; height: 1px; }
-  .zap-star::after { width: 1px; height: 10px; }
-  .zap-star:nth-child(1) { top: 22%; left: 16%; animation-delay: -0.4s; }
-  .zap-star:nth-child(2) { top: 19%; left: 82%; color: #8d4cff; animation-delay: -2s; }
-  .zap-star:nth-child(3) { top: 76%; left: 20%; color: #f7931a; animation-delay: -3.6s; }
-  .zap-star:nth-child(4) { top: 70%; left: 84%; animation-delay: -5.2s; }
-  .zap-stage-action :global(.zap-mini.icon-only.with-name) {
-    position: relative;
-    z-index: 1;
+  .mini-video-status-bars {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
-    align-content: center;
-    justify-content: center;
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    row-gap: 5px;
-    padding: 10px 14px;
-    color: var(--lcd-text);
-    animation: zap-breathe 2.4s ease-in-out infinite;
+    grid-template-columns: repeat(8, 6px);
+    align-items: end;
+    gap: 3px;
+    height: 19px;
   }
-  .zap-stage-action :global(.zap-mini.icon-only.with-name:hover:not(:disabled)) { color: #f7931a; }
-  .zap-stage-action :global(.bolt-icon) {
-    grid-column: 1;
-    grid-row: 2;
-    justify-self: center;
-    width: 52px;
-    height: 52px;
-    stroke-width: 1.65;
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: zap-icon-turn 7s linear infinite;
+  .mini-video-status-bars span {
+    width: 6px;
+    height: 5px;
+    background: currentColor;
+    opacity: 0.18;
+    animation: mini-video-sync 1.2s steps(1, end) infinite;
+    animation-delay: calc(var(--sync-index) * -0.12s);
   }
-  .zap-stage-action :global(.icon-dj-copy) {
-    display: contents;
-  }
-  .zap-stage-action :global(.icon-dj-name) {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: center;
-    justify-self: center;
-    max-width: none;
-    color: inherit;
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1;
-    white-space: nowrap;
-  }
-  .zap-stage-action :global(.icon-recipient-name) {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-self: center;
-    width: 100%;
-    color: inherit;
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1;
-    text-align: center;
-  }
-  .video-surface {
-    display: none;
-    width: 100%;
-    height: 100%;
-  }
+  .video-wide .video-surface { display: block; }
   .lcd-shell.video-wide {
     height: auto;
+    grid-template-areas:
+      'status'
+      'media'
+      'content';
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 36px auto auto;
     background: #03050a;
   }
   .video-wide .lcd-media {
@@ -462,13 +487,14 @@
     background: transparent;
   }
   .lcd-content {
+    grid-area: content;
     position: relative;
     z-index: 2;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    height: 100%;
+    height: auto;
     padding: 13px 15px 22px;
     overflow: hidden;
     background: var(--player-led-surface);
@@ -476,6 +502,14 @@
   .lcd-content > :not(.scanlines) { position: relative; z-index: 1; }
   .lcd-status { display: flex; align-items: baseline; justify-content: space-between; color: var(--lcd-text-dim); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
   .lcd-status.lcd-card-heading { margin-bottom: 4px; padding-bottom: 3px; }
+  .player-status.lcd-card-heading {
+    grid-area: status;
+    position: relative;
+    z-index: 3;
+    height: 100%;
+    margin: 0;
+    padding: 7px 15px 5px;
+  }
   .lcd-status > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lcd-status strong { color: var(--lcd-text); font-weight: 400; }
   .live-label { color: var(--accent); }
@@ -484,10 +518,37 @@
   .lcd-track { display: inline-flex; min-width: 100%; margin-top: 0; font-size: clamp(20px, 2.4vw, 27px); line-height: 1; letter-spacing: 0.01em; }
   .lcd-track span { padding-right: 48px; }
   .lcd-track.scroll { animation: lcd-marquee 10s linear infinite; }
-  .lcd-byline { display: flex; gap: 7px; min-height: 20px; margin-top: 2px; color: var(--lcd-text-soft); font-size: 17px; }
+  .lcd-byline { display: flex; gap: 7px; min-height: 20px; margin-top: 9px; color: var(--accent); font-size: 17px; }
+  .lcd-dj-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-right: auto;
+  }
+  .lcd-dj-line :global(.zap-mini.icon-only.with-name) {
+    width: auto;
+    max-width: min(100%, 190px);
+    height: auto;
+    padding: 0;
+    overflow: hidden;
+    color: #f4e04d;
+  }
+  .lcd-dj-line :global(.icon-dj-copy),
+  .lcd-dj-line :global(.icon-dj-name) {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .lcd-separator { color: var(--lcd-text-dim); }
   .lcd-controls { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin-top: 10px; }
   .volume-cluster, .right-controls { display: flex; align-items: center; gap: 10px; }
+  .volume-cluster {
+    color: var(--lcd-text);
+    filter: drop-shadow(0 0 2px rgba(90, 160, 255, 0.42));
+    text-shadow: var(--lcd-text-shadow);
+  }
   .right-controls { gap: 14px; }
   .lcd-audio {
     display: grid;
@@ -496,7 +557,7 @@
     height: 34px;
     padding: 0;
     border: 0;
-    color: var(--lcd-text);
+    color: inherit;
     background: transparent;
   }
   .lcd-audio.muted {
@@ -518,13 +579,13 @@
     margin: 0;
     appearance: none;
     background:
-      repeating-linear-gradient(90deg, rgba(241, 243, 244, 0.96) 0 7px, transparent 7px 10px) left center / var(--volume) 12px no-repeat,
-      repeating-linear-gradient(90deg, rgba(241, 243, 244, 0.16) 0 7px, transparent 7px 10px) left center / 100% 12px no-repeat;
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--lcd-text) 96%, transparent) 0 7px, transparent 7px 10px) left center / var(--volume) 12px no-repeat,
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--lcd-text) 16%, transparent) 0 7px, transparent 7px 10px) left center / 100% 12px no-repeat;
     cursor: pointer;
   }
-  .lcd-volume:focus-visible { outline: 1px solid rgba(241, 243, 244, 0.78); outline-offset: 3px; }
-  .lcd-volume::-webkit-slider-thumb { appearance: none; width: 3px; height: 18px; border: 1px solid rgba(241, 243, 244, 0.82); background: rgba(27, 31, 35, 0.78); }
-  .lcd-volume::-moz-range-thumb { width: 3px; height: 18px; border: 1px solid rgba(241, 243, 244, 0.82); border-radius: 0; background: rgba(27, 31, 35, 0.78); }
+  .lcd-volume:focus-visible { outline: 1px solid var(--lcd-text); outline-offset: 3px; }
+  .lcd-volume::-webkit-slider-thumb { appearance: none; width: 3px; height: 18px; border: 1px solid var(--lcd-text); background: rgba(27, 31, 35, 0.78); }
+  .lcd-volume::-moz-range-thumb { width: 3px; height: 18px; border: 1px solid var(--lcd-text); border-radius: 0; background: rgba(27, 31, 35, 0.78); }
   .idle .lcd-status { border-color: var(--border); color: var(--text-dim); }
   .idle .lcd-status strong { color: var(--text); }
   .lobby-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 10px; }
@@ -539,45 +600,36 @@
     to { transform: translateX(-50%); }
   }
 
-  @keyframes zap-breathe {
-    0%, 100% { opacity: 0.74; }
-    50% { opacity: 1; }
-  }
-
-  @keyframes zap-icon-turn {
-    from { transform: perspective(240px) rotateY(0deg); }
-    to { transform: perspective(240px) rotateY(360deg); }
-  }
-
-  @keyframes zap-star-flash {
-    0%, 76%, 100% { opacity: 0; transform: scale(0.2) rotate(0deg); }
-    82% { opacity: 0.95; transform: scale(1) rotate(45deg); }
-    89% { opacity: 0; transform: scale(0.35) rotate(90deg); }
+  @keyframes mini-video-sync {
+    0%, 100% { height: 5px; opacity: 0.18; }
+    25% { height: 19px; opacity: 1; }
+    50% { height: 11px; opacity: 0.52; }
   }
 
   @media (max-width: 560px) {
-    .lcd-shell { grid-template-columns: minmax(104px, 31%) minmax(0, 1fr); height: 126px; }
-    .lcd-shell.idle { grid-template-columns: minmax(0, 1fr); }
-    .lcd-content { padding: 13px 9px 16px; }
+    .lcd-shell {
+      grid-template-columns: minmax(72px, 22%) minmax(0, 1fr);
+      grid-template-rows: 32px auto;
+      height: auto;
+    }
+    .lcd-shell.idle {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      height: 126px;
+    }
+    .lcd-shell.video-wide { grid-template-rows: 32px auto auto; }
+    .lcd-content { padding: 13px 7px 16px; }
     .video-wide .lcd-content { height: 130px; padding-bottom: 22px; }
     .lcd-status { font-size: 9px; }
+    .player-status.lcd-card-heading { padding: 5px 9px 4px; }
     .lcd-track { margin-top: 0; font-size: 17px; }
-    .lcd-byline { font-size: 16px; overflow: hidden; white-space: nowrap; }
-    .lcd-controls { gap: 6px; }
-    .volume-cluster, .right-controls { gap: 5px; }
-    .right-controls { gap: 1px; }
-    .lcd-audio { width: 24px; height: 25px; }
-    .lcd-audio svg { width: 20px; height: 20px; }
-    .lcd-icon { width: 18px; height: 23px; padding-inline: 1px; }
-    .lcd-icon svg { width: 16px; height: 16px; }
-    .zap-stage-action :global(.zap-mini.icon-only.with-name) { padding: 8px 3px; }
-    .zap-stage-action :global(.zap-mini.icon-only.with-name) {
-      grid-template-columns: minmax(0, 1fr);
-      row-gap: 3px;
-    }
-    .zap-stage-action :global(.bolt-icon) { width: 28px; height: 28px; stroke-width: 1.8; }
-    .zap-stage-action :global(.icon-dj-name) { font-size: 10.5px; letter-spacing: 0.02em; }
-    .zap-stage-action :global(.icon-recipient-name) { font-size: 13px; }
+    .lcd-byline { font-size: 16px; margin-top: 8px; overflow: hidden; white-space: nowrap; }
+    .lcd-controls { justify-content: space-between; gap: 0; margin-top: 8px; }
+    .volume-cluster, .right-controls { gap: 0; }
+    .lcd-audio { width: 44px; height: 44px; }
+    .lcd-audio svg { width: 25px; height: 25px; }
+    .lcd-icon { width: 44px; height: 44px; padding: 8px; }
+    .lcd-icon svg { width: 24px; height: 24px; }
     .lcd-volume { display: none; }
     .lobby-copy { margin-top: 7px; }
     .lobby-copy strong { font-size: 0.84rem; }
@@ -587,10 +639,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .zap-stage-action :global(.zap-mini.icon-only.with-name) { animation: none; opacity: 1; }
-    .zap-stage-action :global(.bolt-icon) { animation: none; }
-    .zap-star { animation: none; opacity: 0.28; transform: scale(0.65) rotate(45deg); }
     .lcd-track.scroll { max-width: 100%; overflow: hidden; text-overflow: ellipsis; animation: none; }
     .lcd-track.scroll span + span { display: none; }
+    .mini-video-status-bars span { height: 11px; opacity: 0.72; animation: none; }
   }
 </style>

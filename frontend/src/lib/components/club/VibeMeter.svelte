@@ -176,11 +176,11 @@
 
       <!-- The current mood owns the visual centre, as in the reference panel. -->
       <text
+        class="meter-label"
         x={CX} y="145"
         text-anchor="middle" dominant-baseline="middle"
         font-family="'DotGothic16', ui-monospace, monospace"
         font-size="21" font-weight="700" letter-spacing="1.6"
-        fill="#f1f3f4"
       >{labelName}</text>
 
     </svg>
@@ -260,6 +260,11 @@
     display: block;
     width: 100%;
     height: 138px;
+  }
+  .meter-label {
+    fill: var(--lcd-text);
+    text-shadow: var(--lcd-text-shadow);
+    filter: drop-shadow(0 0 2px rgba(90, 160, 255, 0.42));
   }
   .meter-actions {
     display: grid;

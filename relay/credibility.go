@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -12,6 +13,7 @@ import (
 // normal Nostr event while the local JSON file remains the authoritative durable aggregate.
 const kindCredibility = 30078
 const credibilityNamespace = "zapclub-credibility"
+const credibilityTrackHistoryMax = 100
 
 type credibilityEntry struct {
 	Pubkey  string `json:"pubkey"`
@@ -21,11 +23,35 @@ type credibilityEntry struct {
 	Skipped int    `json:"skipped"`
 }
 
+// credibilityTrack is one settled human-DJ performance. It deliberately stores
+// only the aggregate Vibemeter result, never the voters behind it. Keeping the
+// club and DJ on the performance (instead of aggregating by video) makes every
+// public leaderboard row attributable without inventing a single owner for a
+// track that may have been played by several DJs.
+type credibilityTrack struct {
+	Club      string `json:"club"`
+	VideoID   string `json:"video_id"`
+	Title     string `json:"title"`
+	DJ        string `json:"dj"`
+	Bangers   int    `json:"bangers"`
+	Skipped   bool   `json:"skipped,omitempty"`
+	StartedAt int64  `json:"started_at"`
+}
+
+type trackSettlement uint8
+
+const (
+	trackPlayed trackSettlement = iota
+	trackCommunitySkipped
+	trackDiscarded
+)
+
 type credibilityBoard struct {
-	mu        sync.Mutex
-	path      string
-	By        map[string]*credibilityEntry `json:"by"`
-	LastTrack map[string]string            `json:"last_track"`
+	mu                sync.Mutex
+	path              string
+	By                map[string]*credibilityEntry `json:"by"`
+	LastTrack         map[string]string            `json:"last_track"`
+	TrackPerformances []credibilityTrack           `json:"track_performances,omitempty"`
 }
 
 func newCredibilityBoard(path string) *credibilityBoard {
@@ -47,10 +73,11 @@ func newCredibilityBoard(path string) *credibilityBoard {
 	return b
 }
 
-// record settles exactly one score for a played track. A community-skipped track is always -1;
-// otherwise each accepted banger contributes +1, capped at +5. LastTrack makes a repeated
-// conductor transition or restart idempotent without retaining an unbounded event history.
-func (b *credibilityBoard) record(club string, pos int, startedAt int64, dj string, bangers int, skipped bool) (credibilityEntry, bool) {
+// record settles exactly one outcome for a track. A naturally played track receives its accepted
+// bangers, a community-skipped track is always -1, and manual/broken transitions are only marked
+// as handled so they cannot farm play volume. LastTrack makes a repeated conductor transition or
+// restart idempotent; the separate performance history remains explicitly bounded.
+func (b *credibilityBoard) record(club string, pos int, startedAt int64, videoID, title, dj string, bangers int, settlement trackSettlement, publishTrack bool) (credibilityEntry, bool) {
 	if club == "" || dj == "" || pos < 0 || startedAt <= 0 {
 		return credibilityEntry{}, false
 	}
@@ -62,6 +89,12 @@ func (b *credibilityBoard) record(club string, pos int, startedAt int64, dj stri
 		return credibilityEntry{}, false
 	}
 	b.LastTrack[club] = trackKey
+	if settlement == trackDiscarded {
+		// Persist the dedup marker so a subsequent stop or restart cannot reclassify this
+		// discarded transition as a naturally played track.
+		b.saveLocked()
+		return credibilityEntry{}, false
+	}
 
 	entry := b.By[dj]
 	if entry == nil {
@@ -76,17 +109,48 @@ func (b *credibilityBoard) record(club string, pos int, startedAt int64, dj stri
 	}
 	entry.Tracks++
 	entry.Bangers += bangers
-	if skipped {
+	if settlement == trackCommunitySkipped {
 		entry.Score--
 		entry.Skipped++
 	} else {
 		entry.Score += bangers
+	}
+	if publishTrack {
+		b.TrackPerformances = append(b.TrackPerformances, credibilityTrack{
+			Club: club, VideoID: videoID, Title: title, DJ: dj, Bangers: bangers,
+			Skipped: settlement == trackCommunitySkipped, StartedAt: startedAt,
+		})
+		b.trimTrackPerformancesLocked()
 	}
 
 	// A track finishes at most every few seconds; persisting here keeps an unclean relay restart
 	// from losing settled credibility. The rename is atomic on the production filesystem.
 	b.saveLocked()
 	return *entry, true
+}
+
+// Keep persistence bounded while retaining the performances that can still
+// matter to the public Top 10. Among equal vote counts, newer plays win.
+func (b *credibilityBoard) trimTrackPerformancesLocked() {
+	sort.SliceStable(b.TrackPerformances, func(i, j int) bool {
+		a, z := b.TrackPerformances[i], b.TrackPerformances[j]
+		if a.Bangers != z.Bangers {
+			return a.Bangers > z.Bangers
+		}
+		if a.StartedAt != z.StartedAt {
+			return a.StartedAt > z.StartedAt
+		}
+		if a.Club != z.Club {
+			return a.Club < z.Club
+		}
+		if a.DJ != z.DJ {
+			return a.DJ < z.DJ
+		}
+		return a.VideoID < z.VideoID
+	})
+	if len(b.TrackPerformances) > credibilityTrackHistoryMax {
+		b.TrackPerformances = b.TrackPerformances[:credibilityTrackHistoryMax]
+	}
 }
 
 func (b *credibilityBoard) saveLocked() {

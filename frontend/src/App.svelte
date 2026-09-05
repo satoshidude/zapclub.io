@@ -41,7 +41,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
     <Turntable size={32} />
-    <span><span class="word">zapclub</span><span class="tld">.io</span></span>
+    <span class="topbar-wordmark lcd-card-title"><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <div class="top-actions">
     <LedThemeSwitcher />
@@ -163,14 +163,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #f4e04d;
-    font-family: var(--font-headline);
-    font-weight: 400;
-    font-size: 22px;
     cursor: pointer;
-    letter-spacing: 0.04em;
-    line-height: 1;
-    text-transform: uppercase;
   }
   .brand .word {
     color: inherit;

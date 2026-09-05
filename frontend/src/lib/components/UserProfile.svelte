@@ -25,7 +25,7 @@
   import { logout } from '../nostr/nostrLogin'
   import { requestZapInvoice } from '../nostr/zaps.svelte'
   import { showPay } from '../nostr/payModal.svelte'
-  import { fetchReceivedZaps, fetchZapRank, type ReceivedZaps, type ZapRank } from '../nostr/leaderboard'
+  import { fetchDJRank, fetchReceivedZaps, type DJRank, type ReceivedZaps } from '../nostr/leaderboard'
   import { fetchCredibility, type Credibility } from '../nostr/credibility'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
@@ -43,7 +43,7 @@
   })
   const isMe = $derived(!!auth.pubkey && auth.pubkey === pubkey)
   // Liked tracks + playlists are PRIVATE: only the owner (logged in as themselves) or the
-  // superadmin may see them. Everyone else sees just the public profile + the zap ranking.
+  // superadmin may see them. Everyone else sees just the public profile + the DJ ranking.
   const canSeePrivate = $derived(isMe || isSuperadmin())
   const profile = $derived(pubkey ? useProfile(pubkey) : null)
 
@@ -54,7 +54,7 @@
   let topClubId = $state<string | null>(null)
   let rolesById = $state<Record<string, string[]>>({})
   let received = $state<ReceivedZaps | null>(null)
-  let zapRank = $state<ZapRank | null>(null)
+  let djRank = $state<DJRank | null>(null)
   let credibility = $state<Credibility | null>(null)
   let likedTracks = $state<UserLike[]>([])
 
@@ -104,11 +104,11 @@
         rolesById = a.rolesById
       })
     }
-    // Public Zapclub standing plus an authenticated, owner-only sender breakdown.
+    // Public DJ standing plus an authenticated, owner-only zap sender breakdown.
     received = null
-    zapRank = null
+    djRank = null
     credibility = null
-    void fetchZapRank(pk).then((r) => (zapRank = r))
+    void fetchDJRank(pk).then((result) => (djRank = result))
     void fetchCredibility(pk).then((result) => (credibility = result))
     if (isMe && auth.canSign) void fetchReceivedZaps().then((r) => (received = r)).catch(() => {})
   })
@@ -292,7 +292,7 @@
   }
 
   // Zap this user directly from their public profile (NIP-57 to their lud16). The recipient pubkey
-  // goes into the zap request, so the 9735 receipt is attributable → counts on the leaderboard.
+  // keeps the payment attributable in the recipient's private Zapclub history.
   let zapping = $state(false)
   let zapErr = $state('')
   async function zapUser(sats: number) {
@@ -448,25 +448,30 @@
     </section>
   {/if}
 
-  <!-- Public Zapclub standing: global placement + sats received + how many people (NOT who). -->
-  {#if zapRank}
-    {@const medal = zapRank.rank === 1 ? '🥇' : zapRank.rank === 2 ? '🥈' : zapRank.rank === 3 ? '🥉' : '🏆'}
+  <!-- Public DJ standing from settled songs and the room's Vibemeter. -->
+  {#if djRank}
+    {@const medal = djRank.rank === 1 ? '🥇' : djRank.rank === 2 ? '🥈' : djRank.rank === 3 ? '🥉' : '🏆'}
     <a
-      class="card ziprank led-zone"
-      class:top3={zapRank.rank <= 3}
+      class="card djrank led-zone"
+      class:top3={djRank.rank <= 3}
       href="/leaderboard"
       onclick={(e) => { e.preventDefault(); goLeaderboard() }}
-      title="View the zap leaderboard"
+      title="View the DJ leaderboard"
     >
-      <span class="zr-badge"><span class="zr-medal">{medal}</span><span class="zr-rank">#{zapRank.rank.toLocaleString()}</span></span>
-      <span class="zr-main">
-        <span class="zr-amt">⚡ {zapRank.sats.toLocaleString()} <span class="zr-unit">sats</span></span>
-        <span class="zr-sub">
-          received from {zapRank.zappers.toLocaleString()} {zapRank.zappers === 1 ? 'person' : 'people'}
-          · rank {zapRank.rank.toLocaleString()} of {zapRank.total.toLocaleString()}
+      <span class="dr-badge"><span class="dr-medal">{medal}</span><span class="dr-rank">#{djRank.rank.toLocaleString()}</span></span>
+      <span class="dr-main">
+        <span class="dr-amt">{(djRank.score / 10).toFixed(1)} <span class="dr-unit">DJ SCORE</span></span>
+        <span class="dr-sub">
+          {djRank.tracks.toLocaleString()} {djRank.tracks === 1 ? 'song' : 'songs'}
+          · VIBE {djRank.vibeScore > 0 ? '+' : ''}{djRank.vibeScore.toLocaleString()}
+        </span>
+        <span class="dr-detail">
+          {djRank.bangers.toLocaleString()} {djRank.bangers === 1 ? 'banger' : 'bangers'}
+          · {djRank.skipped.toLocaleString()} {djRank.skipped === 1 ? 'skip' : 'skips'}
+          · rank {djRank.rank.toLocaleString()} of {djRank.total.toLocaleString()}
         </span>
       </span>
-      <span class="zr-cta">Leaderboard →</span>
+      <span class="dr-cta">Leaderboard →</span>
     </a>
   {/if}
 
@@ -817,7 +822,7 @@
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    border: 0;
     flex: 0 0 auto;
   }
   .pinfo {
@@ -1064,8 +1069,8 @@
     font-weight: 700;
     white-space: nowrap;
   }
-  /* Public zap standing — clickable card linking to the leaderboard. */
-  .ziprank {
+  /* Public DJ standing — clickable LCD card linking to the leaderboard. */
+  .djrank {
     margin-top: 1rem;
     display: flex;
     align-items: center;
@@ -1080,13 +1085,13 @@
     border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
     transition: border-color 0.15s ease, transform 0.08s ease;
   }
-  .ziprank:hover {
+  .djrank:hover {
     border-color: var(--amber);
   }
-  .ziprank:active {
+  .djrank:active {
     transform: translateY(1px);
   }
-  .zr-badge {
+  .dr-badge {
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
@@ -1099,29 +1104,29 @@
     background: var(--bg);
     border: 1px solid var(--border);
   }
-  .ziprank.top3 .zr-badge {
+  .djrank.top3 .dr-badge {
     border-color: var(--amber);
     box-shadow: 0 0 14px rgba(245, 166, 35, 0.35);
   }
-  .zr-medal {
+  .dr-medal {
     font-size: 1.25rem;
     line-height: 1;
   }
-  .zr-rank {
+  .dr-rank {
     font-size: 0.92rem;
     font-weight: 900;
     color: var(--text);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
   }
-  .zr-main {
+  .dr-main {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
   }
-  .zr-amt {
+  .dr-amt {
     font-size: 1.7rem;
     font-weight: 900;
     color: var(--amber);
@@ -1129,17 +1134,22 @@
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
-  .zr-unit {
+  .dr-unit {
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--amber);
     opacity: 0.7;
   }
-  .zr-sub {
+  .dr-sub,
+  .dr-detail {
     font-size: 0.78rem;
     color: var(--text-dim);
   }
-  .zr-cta {
+  .dr-detail {
+    font-size: 0.7rem;
+    opacity: 0.86;
+  }
+  .dr-cta {
     flex: 0 0 auto;
     align-self: center;
     font-size: 0.76rem;
@@ -1147,14 +1157,14 @@
     color: var(--accent-2);
     white-space: nowrap;
   }
-  .ziprank:hover .zr-cta {
+  .djrank:hover .dr-cta {
     color: var(--amber);
   }
   @media (max-width: 460px) {
     .cred-proof {
       display: none;
     }
-    .zr-cta {
+    .dr-cta {
       display: none;
     }
   }
@@ -1187,6 +1197,7 @@
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
+    border: 0;
     flex: 0 0 auto;
   }
   .senders .who {
@@ -1208,7 +1219,7 @@
     display: grid;
     place-items: center;
     font-size: 0.78rem;
-    border: 1px solid var(--border);
+    border: 0;
   }
   .senders .who.anon {
     color: var(--text-dim);
@@ -1702,7 +1713,6 @@
     padding: 1rem;
   }
   :global(body.site-led-page) .pavatar {
-    border-color: rgba(241, 243, 244, 0.28);
     filter: saturate(0.86) contrast(1.04);
     box-shadow: none;
   }
@@ -1726,7 +1736,7 @@
     border-radius: 0;
   }
   :global(body.site-led-page) .credibility,
-  :global(body.site-led-page) .ziprank,
+  :global(body.site-led-page) .djrank,
   :global(body.site-led-page) .zaps-recv,
   :global(body.site-led-page) .liked {
     margin-top: 0.7rem;
@@ -1772,7 +1782,7 @@
     :global(body.site-led-page) .howto-block { margin-bottom: 0.55rem; }
     :global(body.site-led-page) .phead { min-height: 112px; padding: 0.8rem; }
     :global(body.site-led-page) .credibility,
-    :global(body.site-led-page) .ziprank,
+    :global(body.site-led-page) .djrank,
     :global(body.site-led-page) .zaps-recv,
     :global(body.site-led-page) .liked,
     :global(body.site-led-page) .clubs,

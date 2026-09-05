@@ -109,4 +109,10 @@ describe('Vibemeter own-track voting', () => {
     expect(vibeMeterSource).toMatch(/const votePos = pos[\s\S]*?await sendMood\(voteClub, votePos, v\)[\s\S]*?optimisticVote\(voteClub, votePos, voter, v\)/)
     expect(vibeMeterSource).toContain("v === 'banger' && clubId === voteClub && sync.live?.pos === votePos")
   })
+
+  it('renders the centre label with the shared blue control treatment', () => {
+    expect(vibeMeterSource).toContain('class="meter-label"')
+    expect(vibeMeterSource).toMatch(/\.meter-label\s*\{[\s\S]*?fill: var\(--lcd-text\);[\s\S]*?text-shadow: var\(--lcd-text-shadow\);/)
+    expect(vibeMeterSource).toContain('drop-shadow(0 0 2px rgba(90, 160, 255, 0.42))')
+  })
 })

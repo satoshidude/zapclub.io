@@ -51,7 +51,7 @@
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    border: 0;
     display: block;
   }
   .avatar-led {

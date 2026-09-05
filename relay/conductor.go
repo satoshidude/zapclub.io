@@ -1302,7 +1302,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 		if now-c.bootstrapAt[club] >= condHeartbeatMS {
 			c.bootstrapAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
-			c.advance(ctx, club, djPks, queues, pb, now, false)
+			c.advance(ctx, club, djPks, queues, pb, now, trackDiscarded)
 		}
 		return
 	}
@@ -1322,13 +1322,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 			return
 		}
 		log.Printf("conductor [%.8s] advance reason=orphan dj=%.8s", club, pb.dj)
-		c.advance(ctx, club, djPks, queues, pb, now, false)
+		c.advance(ctx, club, djPks, queues, pb, now, trackPlayed)
 		return
 	}
 	// Skip requested (kind 30107, owner/mod/playing-DJ — validated in skipRequested).
 	if c.skipRequested(ctx, club, pb) {
 		log.Printf("conductor [%.8s] advance reason=skip pos=%d", club, pb.pos)
-		c.advance(ctx, club, djPks, queues, pb, now, false)
+		c.advance(ctx, club, djPks, queues, pb, now, trackDiscarded)
 		return
 	}
 	// Track reported unplayable (kind 20102) by an authorized user or a quorum of members.
@@ -1339,7 +1339,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 			c.brokenSkipAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
 			c.recordBrokenVid(club, pb.videoID, now)
-			c.advance(ctx, club, djPks, queues, pb, now, false)
+			c.advance(ctx, club, djPks, queues, pb, now, trackDiscarded)
 			return
 		}
 	}
@@ -1348,7 +1348,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 		if now-c.moodSkipAt[club] >= condHeartbeatMS {
 			c.moodSkipAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=mood-skip pos=%d", club, pb.pos)
-			c.advance(ctx, club, djPks, queues, pb, now, true)
+			c.advance(ctx, club, djPks, queues, pb, now, trackCommunitySkipped)
 			return
 		}
 	}
@@ -1359,7 +1359,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 	}
 	if (now-pb.startedAt)/1000 >= int64(dur) {
 		log.Printf("conductor [%.8s] advance reason=duration elapsed=%ds dur=%ds vid=%s", club, (now-pb.startedAt)/1000, dur, pb.videoID)
-		c.advance(ctx, club, djPks, queues, pb, now, false)
+		c.advance(ctx, club, djPks, queues, pb, now, trackPlayed)
 		return
 	}
 	// Otherwise: heartbeat on cadence (republish the frozen track — pos is a stable token).
@@ -1374,8 +1374,8 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 // effect immediately. The visible queue is the only truth — a played track is `off` (client-
 // marked) and drops out; truly nothing playable → lobby (stop). No hidden played-set. `pos` is
 // an opaque monotonic token per started track (skip-request matching + now_playing/play-log).
-func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64, moodSkipped bool) {
-	c.settleTrack(ctx, club, pb, moodSkipped)
+func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64, settlement trackSettlement) {
+	c.settleTrack(ctx, club, pb, settlement)
 	if len(djPks) == 0 {
 		c.stop(ctx, club, pb, now)
 		delete(c.played, club)
@@ -1582,7 +1582,7 @@ func (c *conductor) skipRequested(_ context.Context, club string, pb *condClub) 
 }
 
 func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int64) {
-	c.settleTrack(ctx, club, pb, false)
+	c.settleTrack(ctx, club, pb, trackPlayed)
 	// Publish a paused now_playing so clients switch to the lobby immediately instead of waiting
 	// for the event to go stale (LIVE_STALE_MS = 150 s). Only send if a track was ever playing
 	// (videoID non-empty); on a cold start there is nothing to retract.
@@ -1601,14 +1601,14 @@ func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int
 }
 
 // settleTrack applies a real DJ track's result exactly once and mirrors the new aggregate as a
-// relay-signed NIP-78 event. Auto-DJ transitions intentionally do not call this method: passive
-// playlist playback should not build a person's DJ credibility.
-func (c *conductor) settleTrack(ctx context.Context, club string, pb *condClub, moodSkipped bool) {
+// relay-signed NIP-78 event. Auto-DJ transitions are ignored: passive playlist playback should
+// not build a person's DJ credibility.
+func (c *conductor) settleTrack(ctx context.Context, club string, pb *condClub, settlement trackSettlement) {
 	if c.cred == nil || pb == nil || !pb.playing || pb.auto {
 		return
 	}
 	bangers, _ := c.moodCounts(club, pb.pos)
-	entry, changed := c.cred.record(club, pb.pos, pb.startedAt, pb.dj, bangers, moodSkipped)
+	entry, changed := c.cred.record(club, pb.pos, pb.startedAt, pb.videoID, pb.title, pb.dj, bangers, settlement, c.clubIsPublic(ctx, club))
 	if !changed {
 		return
 	}
@@ -1628,6 +1628,21 @@ func (c *conductor) settleTrack(ctx context.Context, club string, pb *condClub, 
 		},
 		Content: "",
 	}, true)
+}
+
+// clubIsPublic prevents activity in an unlisted private club from making that
+// club discoverable through the public track leaderboard. DJ credibility stays
+// aggregate across all eligible plays; only the attributable performance row
+// requires explicit public metadata.
+func (c *conductor) clubIsPublic(_ context.Context, club string) bool {
+	if c.state == nil || club == "" {
+		return false
+	}
+	group, _ := c.state.Groups.Load(club)
+	// relay29's global metadata listing uses the same condition. Closed groups
+	// are omitted even when their content isn't private, so exposing their ID
+	// here would still turn an unlisted club into a discoverable one.
+	return group != nil && !group.Private && !group.Closed
 }
 
 // nextAddressableTimestamp guarantees that an aggregate replacement is newer
@@ -2074,7 +2089,11 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		advanceAutoOrder(pb, len(tracks))
 	}
 
-	startTrack := func() {
+	startTrack := func(settlement trackSettlement) {
+		// A real DJ may have left the stage while their last track was still running.
+		// Settle that result before Auto DJ replaces it; Auto-DJ-to-Auto-DJ changes
+		// remain excluded by settleTrack's pb.auto guard.
+		c.settleTrack(ctx, club, pb, settlement)
 		t := tracks[pb.autoOrder[pb.autoIdx]]
 		pb.pos++
 		pb.dj = st.owner
@@ -2089,13 +2108,13 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 	}
 
 	if !pb.playing {
-		startTrack()
+		startTrack(trackDiscarded)
 		return
 	}
 
 	if c.skipRequested(ctx, club, pb) {
 		nextTrack()
-		startTrack()
+		startTrack(trackDiscarded)
 		return
 	}
 	if c.brokenSkip(club, pb, now) && now-c.brokenSkipAt[club] >= condHeartbeatMS {
@@ -2103,14 +2122,14 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		log.Printf("conductor [%.8s] advance reason=broken-auto vid=%s", club, pb.videoID)
 		c.recordBrokenVid(club, pb.videoID, now)
 		nextTrack()
-		startTrack()
+		startTrack(trackDiscarded)
 		return
 	}
 	if c.moodSkip(club, pb) && now-c.moodSkipAt[club] >= condHeartbeatMS {
 		c.moodSkipAt[club] = now
 		log.Printf("conductor [%.8s] advance reason=mood-skip-auto pos=%d", club, pb.pos)
 		nextTrack()
-		startTrack()
+		startTrack(trackCommunitySkipped)
 		return
 	}
 
@@ -2120,7 +2139,7 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 	}
 	if (now-pb.startedAt)/1000 >= int64(dur) {
 		nextTrack()
-		startTrack()
+		startTrack(trackPlayed)
 		return
 	}
 

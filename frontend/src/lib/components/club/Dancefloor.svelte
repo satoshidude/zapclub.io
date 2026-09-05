@@ -316,7 +316,7 @@
   .stagerow .nm {
     max-width: 92px;
     --nm-w: 92px;
-    font-size: 0.7rem;
+    font-size: 13px;
   }
   /* Open slot / leave control as a dancer-shaped column so it lines up with the row. */
   .dancer.open .ring {
@@ -457,8 +457,14 @@
     --nm-w: 66px;
     overflow: hidden;
     white-space: nowrap;
-    font-size: 0.62rem;
-    color: var(--lcd-text-soft);
+    color: var(--lcd-text);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: 0.07em;
+    text-shadow: 0 0 3px rgba(179, 222, 255, 0.72), 0 0 8px rgba(90, 160, 255, 0.2);
+    text-transform: uppercase;
   }
   .nm .mq-inner {
     display: inline-block;
@@ -633,6 +639,6 @@
       padding-top: 0.85rem;
     }
     .dancer.open .ring svg { width: 25px; height: 25px; }
-    .stagerow .nm { max-width: 68px; --nm-w: 68px; font-size: 0.64rem; }
+    .stagerow .nm { max-width: 68px; --nm-w: 68px; font-size: 13px; }
   }
 </style>

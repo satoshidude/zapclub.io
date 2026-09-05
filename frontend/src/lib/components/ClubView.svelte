@@ -18,7 +18,6 @@
     KIND_MEMBERS,
     KIND_PUT_USER,
     KIND_REMOVE_USER,
-    shareNote,
     selectClubMemberCounts,
   } from '../nostr/groups'
   import { untrack } from 'svelte'
@@ -59,6 +58,8 @@
   import ChatMembers from './club/ChatMembers.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
+
+  const PLAYER_MINI_ARTWORK = '/images/club-cover-turntable.webp'
 
   let { groupId }: { groupId: string } = $props()
 
@@ -398,89 +399,11 @@
   }
 
 
-  // Share this club: copy the link, share via the OS sheet, post to a social network, or — with
-  // an explicit extra confirm, since it publishes a public note — post it to Nostr.
-  let shareOpen = $state(false)
-  let shareMsg = $state('')
-  let sharing = $state(false)
-  let sharedAt = $state(0)
-  let nostrConfirm = $state(false) // second-step confirm before the public Nostr post
-  const SHARE_COOLDOWN_MS = 3_600_000 // don't re-post the same club to Nostr within an hour
-  const shareKey = $derived(`zapclub:shared:${groupId}`)
-  // Load the last-shared timestamp for this club (so the button reflects the cooldown).
-  $effect(() => {
-    try {
-      sharedAt = Number(localStorage.getItem(shareKey) || 0)
-    } catch {
-      sharedAt = 0
-    }
-  })
-  const sharedRecently = $derived(sharedAt > 0 && Date.now() - sharedAt < SHARE_COOLDOWN_MS)
-  const clubUrl = $derived(`${location.origin}/club/${groupId}`)
-  const shareText = $derived(`🎧 ${club?.name ?? 'A club'} on zapclub! Join the club and become a DJ - Just music, sats, and a crew with mighty playlists`)
-  const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
-  // Social share-intent links (open the network's own composer in a new tab — the user posts
-  // there, we never post on their behalf). Not Nostr-only.
-  const socials = $derived([
-    { id: 'x', label: '𝕏 Share on X', url: `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(clubUrl)}` },
-    { id: 'tg', label: '✈️ Share on Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(clubUrl)}&text=${encodeURIComponent(shareText)}` },
-    { id: 'wa', label: '💬 Share on WhatsApp', url: `https://wa.me/?text=${encodeURIComponent(`${shareText} ${clubUrl}`)}` },
-  ])
-  function closeShare() {
-    shareOpen = false
-    nostrConfirm = false
-    shareMsg = ''
-  }
-  function shareSocial(url: string) {
-    window.open(url, '_blank', 'noopener,noreferrer')
-    closeShare()
-  }
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(clubUrl)
-      shareMsg = 'Link copied ✓'
-      setTimeout(() => (shareMsg = ''), 1500)
-    } catch {
-      shareMsg = 'Copy failed'
-    }
-  }
-  async function shareNative() {
-    try {
-      await navigator.share({ title: club?.name ?? 'zapclub', url: clubUrl })
-    } catch {
-      /* user cancelled */
-    }
-    closeShare()
-  }
-  // Step 1: a tap on "Share on Nostr" doesn't post — it asks for confirmation first (a public note).
-  function askNostrShare() {
-    let last = 0
-    try { last = Number(localStorage.getItem(shareKey) || 0) } catch { /* ignore */ }
-    if (Date.now() - last < SHARE_COOLDOWN_MS) {
-      shareMsg = 'Already shared this club in the last hour'
-      return
-    }
-    shareMsg = ''
-    nostrConfirm = true
-  }
-  // Step 2: confirmed → publish the public Nostr note.
-  async function confirmNostrShare() {
-    if (sharing) return // guard a rapid double-click
-    sharing = true
-    try {
-      await shareNote(`${shareText}\n${clubUrl}`, clubUrl)
-      const now = Date.now()
-      try { localStorage.setItem(shareKey, String(now)) } catch { /* ignore */ }
-      sharedAt = now
-      nostrConfirm = false
-      shareMsg = 'Posted to Nostr ✓'
-      setTimeout(() => { closeShare() }, 1400)
-    } catch (e) {
-      shareMsg = String((e as Error)?.message ?? 'Post failed')
-    } finally {
-      sharing = false
-    }
-  }
+  // The external composer receives a canonical public URL, including during local development.
+  // Zapclub never needs the visitor's Nostr identity or signing key for this hand-off.
+  const clubUrl = $derived(`https://zapclub.io/club/${groupId}`)
+  const shareText = $derived(`🎧 ${club?.name ?? 'A club'} on zapclub — Drop in. Take the stage. Own the night.`)
+  const nostrShareUrl = $derived(`https://nostter.app/post?content=${encodeURIComponent(`${shareText}\n${clubUrl}`)}`)
 
   // Owner: edit the club (name / about / picture / access / privacy).
   let editing = $state(false)
@@ -611,41 +534,17 @@
       </div>
       <div class="actions">
         <div class="action-btns">
-          <div class="share-wrap">
-            <button class="design-btn share-btn" onclick={() => { if (shareOpen) closeShare(); else { shareOpen = true; shareMsg = '' } }} title="Share this club" aria-label="Share this club"><span aria-hidden="true">⇧</span> Share</button>
-            {#if shareOpen}
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <div class="share-backdrop" role="presentation" onclick={closeShare}></div>
-              <div class="share-menu" role="menu">
-                {#if nostrConfirm}
-                  <div class="share-confirm">
-                    <div class="share-confirm-q">Post this club publicly to Nostr?</div>
-                    <div class="share-confirm-btns">
-                      <button class="share-item confirm-yes" role="menuitem" onclick={confirmNostrShare} disabled={sharing}>
-                        {sharing ? '⚡ Posting…' : '⚡ Post'}
-                      </button>
-                      <button class="share-item" role="menuitem" onclick={() => (nostrConfirm = false)} disabled={sharing}>Cancel</button>
-                    </div>
-                  </div>
-                {:else}
-                  <button class="share-item" role="menuitem" onclick={copyLink}>🔗 Copy link</button>
-                  {#if canNativeShare}
-                    <button class="share-item" role="menuitem" onclick={shareNative}>📤 Share…</button>
-                  {/if}
-                  {#each socials as s (s.id)}
-                    <button class="share-item" role="menuitem" onclick={() => shareSocial(s.url)}>{s.label}</button>
-                  {/each}
-                  {#if auth.canSign}
-                    <div class="share-sep"></div>
-                    <button class="share-item" role="menuitem" onclick={askNostrShare} disabled={sharedRecently}>
-                      {sharedRecently ? '✓ Shared on Nostr (within 1h)' : '⚡ Share on Nostr'}
-                    </button>
-                  {/if}
-                {/if}
-                {#if shareMsg}<div class="share-msg">{shareMsg}</div>{/if}
-              </div>
-            {/if}
-          </div>
+          <a
+            class="design-btn share-btn"
+            href={nostrShareUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open a prefilled note in Nostter"
+            aria-label="Share this club on Nostr"
+          >
+            <img class="nostr-share-icon" src="/nostrich.png" alt="" aria-hidden="true" />
+            Share on Nostr
+          </a>
           <a class="design-btn community-btn" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
             <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
             Join {club?.link ? communityLinkLabel(club.link) : 'Telegram'}
@@ -758,7 +657,7 @@
           stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
           clubId={groupId}
           clubName={club?.name ?? ''}
-          clubImage={club?.picture || clubAvatar(owner || groupId)}
+          clubImage={PLAYER_MINI_ARTWORK}
           canHear={canHear}
           ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
           onCta={doPaidJoin}
@@ -855,7 +754,9 @@
     flex: 0 0 72px;
     border-radius: 14px;
     overflow: hidden;
-    background: var(--bg-elev-2);
+    background:
+      linear-gradient(var(--bg-elev-2), var(--bg-elev-2)),
+      #03040a;
   }
   .pic-img {
     width: 100%;
@@ -1054,86 +955,11 @@
     display: flex;
     gap: 0.4rem;
   }
-  .share-wrap {
-    position: relative;
-  }
-  .share-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 30;
-  }
-  .share-menu {
-    position: absolute;
-    top: calc(100% + 0.4rem);
-    right: 0;
-    z-index: 31;
-    min-width: 168px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.35rem;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
-  }
-  .share-item {
-    text-align: left;
-    background: none;
-    border: none;
-    color: var(--text);
-    font-size: 0.85rem;
-    padding: 0.5rem 0.6rem;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-  }
-  .share-item:hover:not(:disabled) {
-    background: var(--bg);
-    color: var(--accent);
-  }
-  .share-item:disabled {
-    opacity: 0.55;
-    cursor: default;
-    color: var(--text-dim);
-  }
-  .share-msg {
-    font-size: 0.72rem;
-    color: var(--accent);
-    padding: 0.3rem 0.6rem;
-  }
-  .share-sep {
-    height: 1px;
-    margin: 0.2rem 0.3rem;
-    background: var(--border);
-  }
-  .share-confirm {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    padding: 0.2rem;
-  }
-  .share-confirm-q {
-    font-size: 0.8rem;
-    color: var(--text);
-    padding: 0.3rem 0.4rem 0.1rem;
-    line-height: 1.4;
-  }
-  .share-confirm-btns {
-    display: flex;
-    gap: 0.3rem;
-  }
-  .share-confirm-btns .share-item {
-    flex: 1;
-    text-align: center;
-    border: 1px solid var(--border);
-  }
-  .share-item.confirm-yes {
-    color: var(--amber);
-    border-color: var(--amber);
-  }
-  .share-item.confirm-yes:hover:not(:disabled) {
-    background: var(--amber);
-    color: #07070a;
+  .nostr-share-icon {
+    width: 1.15em;
+    height: 1.15em;
+    object-fit: contain;
+    filter: grayscale(1) brightness(2.1) drop-shadow(0 0 2px rgba(235, 241, 244, 0.35));
   }
   .desc {
     margin: 0.9rem 0 0;
@@ -1195,17 +1021,15 @@
     width: 240px;
     height: 124px;
     flex-basis: auto;
-    border: 1px solid rgba(207, 233, 255, 0.3);
+    border: 0;
     border-radius: 7px;
-    box-shadow: inset 0 0 18px rgba(4, 16, 38, 0.45);
+    box-shadow: none;
   }
   .pic::after {
     content: '';
     position: absolute;
     inset: 0;
-    background:
-      linear-gradient(110deg, rgba(44, 110, 190, 0.12), transparent 48%),
-      repeating-linear-gradient(180deg, rgba(3, 13, 31, 0.16) 0 1px, transparent 1px 3px);
+    background: none;
     pointer-events: none;
   }
   .pic-img { filter: saturate(0.82) contrast(1.06); }
@@ -1328,7 +1152,7 @@
   }
   .player-section {
     margin-top: 0.7rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.7rem;
     padding-top: 0;
     border-top: 0;
   }
@@ -1398,7 +1222,7 @@
     }
     .player-section {
       margin-top: 0.55rem;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.55rem;
     }
     .club-body,
     .stage-grid {
@@ -1441,13 +1265,6 @@
       min-height: 42px;
       padding-inline: 0.45rem;
       font-size: 0.78rem;
-    }
-    .share-wrap {
-      width: 100%;
-    }
-    .share-menu {
-      left: 0;
-      right: auto;
     }
   }
 </style>

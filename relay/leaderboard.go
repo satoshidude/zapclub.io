@@ -13,12 +13,12 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Global all-time Zapclub leaderboard. Club zaps arrive as kind-20101 broadcasts; direct profile
-// zaps arrive through the authenticated HTTP endpoint below. Both are the same soft, self-reported
-// payment signal: many LNURL providers never publish a NIP-57 receipt, so the client reports a
-// confirmed invoice. Self-zaps are dropped, each invoice is counted once, and the recipient comes
-// from the explicit target rather than a wallet provider's global receipt history. Public totals
-// are served at GET /leaderboard; the sender breakdown is only returned to its NIP-98-authenticated
+// Zapclub zap history. Club zaps arrive as kind-20101 broadcasts; direct profile zaps arrive
+// through the authenticated HTTP endpoint below. Both are the same soft, self-reported payment
+// signal: many LNURL providers never publish a NIP-57 receipt, so the client reports a confirmed
+// invoice. Self-zaps are dropped, each invoice is counted once, and the recipient comes from the
+// explicit target rather than a wallet provider's global receipt history. These totals do not
+// affect the DJ leaderboard; the sender breakdown is returned only to its NIP-98-authenticated
 // recipient at GET /zaps/received.
 
 const (
@@ -27,7 +27,6 @@ const (
 	lbMaxRecipients  = 100_000 // memory-DoS cap on tracked recipients
 	lbMaxSenders     = 5_000   // cap distinct senders tracked per recipient
 	lbSeenCap        = 500_000 // bounded in-memory dedup of counted zaps
-	lbTopN           = 100     // entries returned by the public (no-pubkey) board
 )
 
 type zapEntry struct {
@@ -133,90 +132,6 @@ func (b *zapBoard) record(sender, recipient string, sats int64, dedupKey string)
 	} else if len(e.BySender) < lbMaxSenders {
 		e.BySender[sender] = &zapSenderEntry{Sats: sats, Zaps: 1}
 	}
-}
-
-// ── snapshots ────────────────────────────────────────────────────────────────
-
-type lbEntry struct {
-	Pubkey  string `json:"pubkey"`
-	Sats    int64  `json:"sats"`
-	Zaps    int    `json:"zaps"`
-	Zappers int    `json:"zappers"`
-	Rank    int    `json:"rank"`
-}
-
-// rankOf returns one recipient's entry incl. global rank (competition ranking: 1 + the number
-// of recipients with strictly more sats), the total participant count, and whether they're on
-// the board at all.
-func (b *zapBoard) rankOf(pubkey string) (entry lbEntry, total int, ok bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	total = len(b.By)
-	e := b.By[pubkey]
-	if e == nil {
-		return lbEntry{}, total, false
-	}
-	rank := 1
-	for pk, other := range b.By {
-		if pk != pubkey && other.Sats > e.Sats {
-			rank++
-		}
-	}
-	return lbEntry{Pubkey: pubkey, Sats: e.Sats, Zaps: e.Zaps, Zappers: len(e.Senders), Rank: rank}, total, true
-}
-
-// top returns the n highest recipients (sats desc, pubkey tiebreak), each with an ordinal rank,
-// plus the total participant count.
-func (b *zapBoard) top(n int) (entries []lbEntry, total int) {
-	b.mu.Lock()
-	all := make([]lbEntry, 0, len(b.By))
-	for pk, e := range b.By {
-		all = append(all, lbEntry{Pubkey: pk, Sats: e.Sats, Zaps: e.Zaps, Zappers: len(e.Senders)})
-	}
-	total = len(b.By)
-	b.mu.Unlock()
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].Sats != all[j].Sats {
-			return all[i].Sats > all[j].Sats
-		}
-		return all[i].Pubkey < all[j].Pubkey
-	})
-	for i := range all {
-		all[i].Rank = i + 1
-	}
-	if len(all) > n {
-		all = all[:n]
-	}
-	return all, total
-}
-
-// handleHTTP serves the public leaderboard. ?pubkey=<hex> → that user's rank + totals;
-// otherwise the top N. No auth — public ranking data; CORS open for read-only use.
-func (b *zapBoard) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Vary", "Origin")
-	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=30")
-	enc := json.NewEncoder(w)
-	if pk := r.URL.Query().Get("pubkey"); pk != "" {
-		e, total, ok := b.rankOf(pk)
-		if !ok {
-			_ = enc.Encode(map[string]any{"ranked": false, "total": total})
-			return
-		}
-		_ = enc.Encode(map[string]any{
-			"ranked": true, "total": total, "pubkey": e.Pubkey,
-			"sats": e.Sats, "zaps": e.Zaps, "zappers": e.Zappers, "rank": e.Rank,
-		})
-		return
-	}
-	entries, total := b.top(lbTopN)
-	_ = enc.Encode(map[string]any{"total": total, "top": entries})
 }
 
 type receivedSender struct {

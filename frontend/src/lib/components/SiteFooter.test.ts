@@ -10,9 +10,10 @@ describe('project footer contract', () => {
     expect(source).not.toMatch(/sunnyhill\.io|site-footer__attribution|made by/i)
   })
 
-  it('links About, Disclaimer and GitHub from one footer menu', () => {
+  it('links TOP DJs, About, Disclaimer and GitHub from one footer menu', () => {
     expect(source).toContain('<nav class="footer-nav"')
-    expect(source.match(/<a\b/g)).toHaveLength(4)
+    expect(source.match(/<a\b/g)).toHaveLength(5)
+    expect(source).toContain('<a href="/leaderboard" onclick={(event) => follow(event, \'/leaderboard\')}>TOP DJs</a>')
     expect(source).toContain('>About</a>')
     expect(source).toContain('>Disclaimer</a>')
     expect(source).toContain('href={repository} target="_blank" rel="noopener noreferrer">GitHub</a>')

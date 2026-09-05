@@ -207,6 +207,9 @@ await sleep(400)
 const replay = await joinWith(joiner, good) // try to rejoin reusing the SAME receipt
 assert(replay[0] === false && /already used/i.test(replay[1] || ''), 'replayed entry proof rejected: ' + ok(replay))
 
+let settledTrackClub = ''
+let settledTrackVoter = ''
+
 // 4c. Server conductor: with a DJ on stage and a non-empty queue, the RELAY itself (not any
 //     client) publishes now_playing and advances the round-robin — the autonomous-playback
 //     core. Also verifies the relay honors a skip-request (kind 30107). Long track durations
@@ -214,6 +217,7 @@ assert(replay[0] === false && /already used/i.test(replay[1] || ''), 'replayed e
 if (process.env.RELAY_PK) {
   const RPK = process.env.RELAY_PK
   const C = 'zc' + Math.random().toString(16).slice(2, 16)
+  settledTrackClub = C
   await host.ev({ kind: 9007, created_at: now(), tags: [['h', C]], content: '' })
   await host.ev({ kind: 9002, created_at: now(), tags: [['h', C], ['name', 'Conductor'], ['open'], ['public']], content: '' })
   await sleep(500)
@@ -273,14 +277,18 @@ if (process.env.RELAY_PK) {
   // cooldown. The resulting -1 credibility snapshot is relay-signed NIP-78 app data and
   // publicly queryable by its p tag.
   const voter = await conn(generateSecretKey())
+  const bangerVoter = await conn(generateSecretKey())
+  settledTrackVoter = bangerVoter.pub
   await Promise.all([
     stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }),
     voter.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }),
+    bangerVoter.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }),
   ])
   await sleep(800)
   const moodTags = [['h', C], ['pos', posOf(np)]]
   const ownVote = await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
   assert(ownVote[0] === false && /own track/i.test(ownVote[1] || ''), 'vibemeter: the playing DJ cannot vote on their own track')
+  await bangerVoter.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'banger']], content: '' })
   await mem.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
   const tooSoon = await mem.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'banger']], content: '' })
   assert(tooSoon[0] === false && /10 seconds/i.test(tooSoon[1] || ''), 'vibemeter: Banger and Skip share the 10-second cooldown')
@@ -409,28 +417,42 @@ if (process.env.RELAY_PK) {
   await privHost.ev({ kind: 9008, created_at: now(), tags: [['h', GP]], content: '' }) // cleanup
 }
 
-// 4d. Zap leaderboard: a member's kind-20101 zap broadcast is aggregated by the relay and
-//     surfaced at the public GET /leaderboard endpoint (relay/leaderboard.go). Deduped by
-//     bolt11, self-zaps ignored, distinct senders counted. Needs the HTTP base (ADMIN_URL).
-if (process.env.ADMIN_URL) {
+// 4d. DJ leaderboard: the conductor's settled real-DJ tracks and Vibemeter aggregate drive
+//     GET /leaderboard. Zap broadcasts still feed private payment history but cannot move rank.
+//     Needs the conductor identity and HTTP base.
+if (process.env.ADMIN_URL && process.env.RELAY_PK) {
   const LB = process.env.ADMIN_URL
-  console.log('\n-- zap leaderboard --')
-  // mem zaps host 210 sats; a duplicate (same bolt11) must NOT double-count.
+  console.log('\n-- DJ leaderboard --')
+  const beforeZap = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(beforeZap.ranked === true && beforeZap.pubkey === host.pub, `leaderboard: settled real DJ is ranked — got ${JSON.stringify(beforeZap)}`)
+  assert(Number.isInteger(beforeZap.score) && beforeZap.tracks === 2 && beforeZap.vibeScore === -1 && beforeZap.skipped === 1,
+    `leaderboard: only one naturally finished and one community-skipped song count; manual/broken skips do not — got ${JSON.stringify(beforeZap)}`)
+  assert(!('sats' in beforeZap) && !('zaps' in beforeZap), 'leaderboard: payment totals are absent from the DJ rank')
+  const publicBoard = await fetch(LB + '/leaderboard').then((x) => x.json())
+  const ratedTrack = publicBoard.topTracks?.find((track) => track.club === settledTrackClub && track.videoId === 'VIDfirst001')
+  assert(ratedTrack?.title === 'First' && ratedTrack.dj === host.pub && ratedTrack.bangers === 1 && ratedTrack.skipped === true,
+    `leaderboard: settled Vibemeter result retains title, club and DJ — got ${JSON.stringify(publicBoard.topTracks)}`)
+  assert(!JSON.stringify(publicBoard.topTracks).includes(settledTrackVoter), 'leaderboard: track aggregate does not expose voter identities')
+
+  // mem zaps host 210 sats; a duplicate still must not affect payment history or DJ rank.
   const zb = await mem.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
-  assert(zb[0] === true, 'leaderboard: member zap broadcast (20101) accepted: ' + ok(zb))
+  assert(zb[0] === true, 'zap history: member zap broadcast (20101) accepted: ' + ok(zb))
   await mem.ev({ kind: 20101, created_at: now() + 1, tags: [['h', G], ['p', host.pub], ['amount', '210'], ['bolt11', 'lnbc_e2e_1']], content: '' })
   await sleep(900)
-  const r = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
-  assert(r.ranked === true && r.sats === 210, `leaderboard: host ranked with 210 sats (bolt11 dedup) — got ${JSON.stringify(r)}`)
-  assert(r.zappers === 1, `leaderboard: 1 distinct zapper — got ${r.zappers}`)
-  // a self-zap (sender == recipient) must be ignored.
+  const afterZap = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(afterZap.score === beforeZap.score && afterZap.tracks === beforeZap.tracks &&
+    afterZap.vibeScore === beforeZap.vibeScore && afterZap.rank === beforeZap.rank,
+    `leaderboard: zap cannot change DJ performance rank — before ${JSON.stringify(beforeZap)}, after ${JSON.stringify(afterZap)}`)
+
+  // A self-zap is ignored by the separate history and likewise cannot change the board.
   await host.ev({ kind: 20101, created_at: now(), tags: [['h', G], ['p', host.pub], ['amount', '9999'], ['bolt11', 'self_e2e']], content: '' })
   await sleep(700)
-  const r2 = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
-  assert(r2.sats === 210, `leaderboard: self-zap ignored (still 210) — got ${r2.sats}`)
-  // someone with no received zaps is unranked.
-  const r3 = await fetch(LB + '/leaderboard?pubkey=' + stranger.pub).then((x) => x.json())
-  assert(r3.ranked === false, 'leaderboard: a user with no received zaps is unranked')
+  const afterSelfZap = await fetch(LB + '/leaderboard?pubkey=' + host.pub).then((x) => x.json())
+  assert(afterSelfZap.score === beforeZap.score && afterSelfZap.tracks === beforeZap.tracks,
+    `leaderboard: self-zap leaves DJ score unchanged — got ${JSON.stringify(afterSelfZap)}`)
+  // A member who reacted but never played a settled song is unranked.
+  const nonDJ = await fetch(LB + '/leaderboard?pubkey=' + stranger.pub).then((x) => x.json())
+  assert(nonDJ.ranked === false, 'leaderboard: a member without a settled DJ song is unranked')
 }
 
 // 5. Superadmin HTTP API (NIP-98): ban + purge + replay + unban + delete-club.

@@ -14,7 +14,7 @@
   let shared = $state(false)
   let confirmNostr = $state(false)
 
-  const shareText = $derived(`🎧 Listening in "${clubName}" on zapclub.io`)
+  const shareText = $derived(`🎧 Listening in "${clubName}" on zapclub — Drop in. Take the stage. Own the night.`)
   const shareUrl = $derived(`https://zapclub.io/club/${clubId}`)
   const fullText = $derived(`${shareText}\n\n${shareUrl}`)
 
@@ -94,7 +94,7 @@
     </div>
     <p class="post-text">{shareText}</p>
     <div class="og-card">
-      <img src="/og.png" alt="zapclub.io" class="og-thumb" />
+      <img src="/og.png" alt="zapclub.io — Drop in. Take the stage. Own the night." class="og-thumb" />
       <div class="og-meta">
         <span class="og-domain">zapclub.io</span>
         <span class="og-title">{clubName}</span>

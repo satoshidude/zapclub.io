@@ -86,9 +86,9 @@ html[data-zap-led-theme='green'] {
 }
 
 html[data-zap-led-theme='blue'] {
-  --card-led-a: rgba(13, 31, 66, 0.86);
-  --card-led-b: rgba(9, 28, 60, 0.76);
-  --card-led-c: rgba(3, 10, 24, 0.84);
+  --card-led-a: #2f5aa8;
+  --card-led-b: #1c3e78;
+  --card-led-c: #0d1f42;
   --page-led-a: #08162e;
   --page-led-b: #040b19;
   --page-led-c: #01040a;
@@ -111,9 +111,18 @@ html[data-zap-led-theme='black'] {
   --card-led-a: transparent;
   --card-led-b: transparent;
   --card-led-c: transparent;
-  --page-led-a: #0b0c0f;
-  --page-led-b: #07080a;
-  --page-led-c: #040507;
+  --page-led-a: #0b1328;
+  --page-led-b: #060b18;
+  --page-led-c: #02040b;
+}
+
+html[data-zap-led-theme='black'] body.site-led-page {
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0 1px, transparent 1px 3px),
+    radial-gradient(1100px 680px at 82% -8%, rgba(63, 107, 178, 0.24), transparent 62%),
+    radial-gradient(900px 720px at 8% 72%, rgba(25, 46, 94, 0.17), transparent 68%),
+    linear-gradient(150deg, var(--page-led-a) 0%, var(--page-led-b) 54%, var(--page-led-c) 100%);
+  background-attachment: fixed;
 }
 
 body.site-led-page .site-footer {
@@ -188,6 +197,36 @@ body.site-led-page .led-zone {
     ) !important;
 }
 
+/* Blue and default black share the same luminous LCD copy. Typography metrics and
+   component geometry stay untouched; only blue receives the colored panel below. */
+:is(html[data-zap-led-theme='blue'], html[data-zap-led-theme='black']) body.site-led-page {
+  --blue-lcd-shadow: 0 0 3px rgba(179, 222, 255, 0.8), 0 0 10px rgba(90, 160, 255, 0.25);
+}
+
+:is(html[data-zap-led-theme='blue'], html[data-zap-led-theme='black']) body.site-led-page :is(.led-zone, .card) {
+  --lcd-text: #cfe9ff;
+  --lcd-text-bright: #cfe9ff;
+  --lcd-text-soft: #b7d8ff;
+  --lcd-text-dim: #b7d8ff;
+  --text: var(--lcd-text);
+  --text-dim: var(--lcd-text-dim);
+  --lcd-text-shadow: var(--blue-lcd-shadow);
+  --lcd-copy-shadow: var(--blue-lcd-shadow);
+  color: var(--lcd-text);
+  text-shadow: var(--lcd-copy-shadow);
+}
+
+:is(html[data-zap-led-theme='blue'], html[data-zap-led-theme='black']) body.site-led-page .topbar-wordmark.lcd-card-title {
+  --lcd-text-shadow: var(--blue-lcd-shadow);
+}
+
+html[data-zap-led-theme='blue'] body.site-led-page :is(.led-zone, .card) {
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.12) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 140% at 30% 15%, var(--card-led-a) 0%, var(--card-led-b) 45%, var(--card-led-c) 100%) !important;
+}
+
+
 /* Portal tribute: original CSS geometry and palette inspired by unruly sci-fi cartoons,
    without copying characters or artwork from the show. */
 html[data-zap-led-theme='portal'] body.site-led-page {
@@ -215,12 +254,10 @@ html[data-zap-led-theme='portal'] body.site-led-page .led-zone {
 
 html[data-zap-led-theme='portal'] body.site-led-page h2,
 html[data-zap-led-theme='portal'] body.site-led-page h3,
-html[data-zap-led-theme='portal'] body.site-led-page .lcd-card-title,
 html[data-zap-led-theme='portal'] body.site-led-page .lcd-track,
 html[data-zap-led-theme='portal'] body.site-led-page .name,
 html[data-zap-led-theme='portal'] body.site-led-page .club-name,
-html[data-zap-led-theme='portal'] body.site-led-page .pod-name,
-html[data-zap-led-theme='portal'] body.site-led-page .lb-pod-name {
+html[data-zap-led-theme='portal'] body.site-led-page .pod-name {
   color: #b8ff3d;
   text-shadow: 2px 2px 0 #167f8d, -1px -1px 0 #24331d;
 }
@@ -315,16 +352,26 @@ body.site-led-page h1.site-h1 {
   word-spacing: 0;
 }
 
-/* Shared title treatment for every blue LCD card and the compact DJ label. */
+/* Shared title treatment for every LCD card and the compact DJ label. */
 .lcd-card-title {
-  color: var(--lcd-text, #cfe9ff);
-  font-family: var(--font-display);
+  color: #f4e04d;
+  font-family: var(--font-headline);
   font-size: 18px;
   font-weight: 400;
-  letter-spacing: 0.06em;
-  line-height: 1.1;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
   text-shadow: var(--lcd-text-shadow, 0 0 3px rgba(179, 222, 255, 0.8));
+  -webkit-text-stroke: 0.25px currentColor;
   text-transform: uppercase;
+}
+
+body.site-led-page .lcd-card-title {
+  color: #f4e04d;
+  font-family: var(--font-headline) !important;
+  font-size: 18px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.15 !important;
 }
 
 .lcd-card-heading {
@@ -572,9 +619,10 @@ body.site-led-page .club-page .hero-main h1.site-h1 {
 }
 
 body.site-led-page :is(h2, h3).lcd-card-title,
+body.site-led-page .topbar-wordmark.lcd-card-title,
 body.site-led-page :is(.vm-title, .cn-label),
 body.site-led-page .queue > .head h3 > .lcd-card-title {
-  color: #e8e6e3;
+  color: #f4e04d;
   font-family: var(--font-headline) !important;
   font-size: 18px !important;
   font-style: normal;
@@ -585,8 +633,12 @@ body.site-led-page .queue > .head h3 > .lcd-card-title {
   text-transform: uppercase;
 }
 
+body.site-led-page .topbar-wordmark.lcd-card-title {
+  font-size: 20px !important;
+}
+
 body.site-led-page h2:not(.site-h1) {
-  color: #e8e6e3;
+  color: #f4e04d;
   font-family: var(--font-headline) !important;
   font-size: 18px !important;
   font-style: normal;
@@ -633,7 +685,7 @@ body.site-led-page :is(.live-label, .live-badge, .stage-label, .suggestion-state
   letter-spacing: 0.04em !important;
 }
 
-body.site-led-page :is(.enter-club, .enter-stage, .design-btn, .all-clubs-link, .lb-all) {
+body.site-led-page :is(.enter-club, .enter-stage, .design-btn, .all-clubs-link) {
   font-family: var(--font-display) !important;
   font-size: 13px !important;
   font-style: normal;
@@ -670,7 +722,7 @@ body.site-led-page :is(.club-player-title, .lt-title, .t-title, .r-title, .hit-t
   text-shadow: none;
 }
 
-body.site-led-page :is(.lb-name, .lb-pod-name, .pod-name, .board .name) {
+body.site-led-page :is(.pod-name, .board .name) {
   color: #e8e6e3;
   font-family: var(--font) !important;
   font-size: 14px !important;
@@ -680,7 +732,7 @@ body.site-led-page :is(.lb-name, .lb-pod-name, .pod-name, .board .name) {
   text-shadow: none;
 }
 
-body.site-led-page :is(.lb-sats, .lb-pod-sats, .pod-sats, .sats, .zap-sats, .s-sats) {
+body.site-led-page :is(.pod-score, .leaderboard-page .score, .zap-sats, .s-sats) {
   color: #f4e04d !important;
   font-family: var(--font-display) !important;
   font-size: 13px !important;
@@ -701,11 +753,12 @@ body.site-led-page .lcd-shell .lcd-status {
 }
 
 body.site-led-page .lcd-shell .lcd-status .live-label.lcd-card-title {
-  color: var(--accent);
-  font-family: var(--font-display) !important;
-  font-size: 11px !important;
+  color: #f4e04d;
+  font-family: var(--font-headline) !important;
+  font-size: 18px !important;
   font-weight: 400 !important;
-  letter-spacing: 0.04em !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.15 !important;
 }
 
 body.site-led-page .lcd-shell .lcd-track {
@@ -724,6 +777,42 @@ body.site-led-page .lcd-shell .lcd-byline {
   font-size: 12px !important;
   font-weight: 400 !important;
   text-shadow: none;
+}
+
+:is(html[data-zap-led-theme='blue'], html[data-zap-led-theme='black']) body.site-led-page :is(.led-zone, .card) :is(
+  h1.site-h1,
+  h3:not(.lcd-card-title):not(.led-modal-title),
+  .club-player-name,
+  .suggestion-copy strong,
+  .club-player-title,
+  .lt-title,
+  .t-title,
+  .r-title,
+  .hit-title,
+  .pod-name,
+  .board .name,
+  .lcd-shell .lcd-track
+) {
+  color: var(--lcd-text) !important;
+  text-shadow: var(--lcd-copy-shadow);
+}
+
+:is(html[data-zap-led-theme='blue'], html[data-zap-led-theme='black']) body.site-led-page :is(.led-zone, .card) :is(
+  .hero-sub,
+  .chip,
+  .page-hero > p,
+  .legal-hero > p,
+  .desc,
+  .hero-main .tags .tag.lcd-card-title,
+  .club-player-status,
+  .club-player-tags,
+  .club-player-artist,
+  .club-player-byline,
+  .club-meta,
+  .lcd-shell .lcd-byline
+) {
+  color: var(--lcd-text-dim) !important;
+  text-shadow: var(--lcd-copy-shadow);
 }
 
 body.site-led-page .lcd-shell .zap-stage-action .icon-dj-name {
@@ -755,21 +844,17 @@ body.site-led-page .site-footer small {
   font-weight: 400;
 }
 
-body.site-led-page .home-page > :is(.hero, .clubs-panel, .tg-block, .lb-preview),
 body.site-led-page .info-page > :is(.page-hero, .info-module, .vision),
 body.site-led-page .leaderboard-page > :is(.lb-head, .ranking-panel) {
   margin-bottom: 0 !important;
 }
 
-body.site-led-page .home-page > :is(.clubs-panel, .tg-block, .lb-preview),
 body.site-led-page .info-page > :is(.info-module, .vision),
 body.site-led-page .leaderboard-page > .ranking-panel,
-body.site-led-page .club-page > .club-body,
 body.site-led-page .profile-page > :is(.phead, .card, .clubs, .pls) {
   margin-top: 64px !important;
 }
 
-body.site-led-page .club-page .club-body,
 body.site-led-page .profile-page {
   gap: 64px !important;
 }
@@ -793,15 +878,12 @@ body.site-led-page .legal-card > .legal-section {
     transform: translate(-50%, -50%);
   }
 
-  body.site-led-page .home-page > :is(.clubs-panel, .tg-block, .lb-preview),
   body.site-led-page .info-page > :is(.info-module, .vision),
   body.site-led-page .leaderboard-page > .ranking-panel,
-  body.site-led-page .club-page > .club-body,
   body.site-led-page .profile-page > :is(.phead, .card, .clubs, .pls) {
     margin-top: 40px !important;
   }
 
-  body.site-led-page .club-page .club-body,
   body.site-led-page .profile-page {
     gap: 40px !important;
   }

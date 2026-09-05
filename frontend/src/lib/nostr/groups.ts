@@ -676,8 +676,7 @@ export function subscribeClubPresence(
   return () => sub.close()
 }
 
-/** Every distinct pubkey that is a member or admin/owner of ANY club — the candidate set of DJs
- *  for the zap leaderboard (anyone who could have received zaps on stage). */
+/** Every distinct pubkey visible as a member or admin/owner of any queryable club. */
 export async function fetchClubPeople(): Promise<string[]> {
   const [members, admins] = await Promise.all([
     pool.querySync(RELAYS, { kinds: [KIND_MEMBERS] }, { maxWait: 4000 }),

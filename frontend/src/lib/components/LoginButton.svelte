@@ -20,7 +20,7 @@
   </a>
 {:else}
   <div class="login-actions">
-    <button class="btn btn-sm sign-in" onclick={launchLogin}>Sign in</button>
+    <button class="btn btn-sm sign-in lcd-card-title" onclick={launchLogin}>Sign in</button>
   </div>
 {/if}
 
@@ -47,19 +47,11 @@
     border: 0;
     border-radius: 0;
     background: transparent;
-    color: var(--accent);
-    font-family: var(--font-display);
-    font-size: 13px;
-    font-weight: 400;
-    letter-spacing: 0.08em;
-    text-shadow: 0 0 3px rgba(74, 222, 94, 0.65), 0 0 9px rgba(74, 222, 94, 0.22);
   }
   .sign-in:hover {
     border-color: transparent;
     background: transparent;
-    color: #8cf29a;
     filter: none;
-    text-shadow: 0 0 4px rgba(74, 222, 94, 0.8), 0 0 11px rgba(74, 222, 94, 0.3);
   }
   .sign-in:focus-visible {
     outline: 1px solid currentColor;

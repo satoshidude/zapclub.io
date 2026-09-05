@@ -1,7 +1,7 @@
 # zapclub.io
 
 <a href="https://zapclub.io">
-  <img src="frontend/public/og.png" alt="zapclub.io — DJ and listen together" width="100%">
+  <img src="frontend/public/og.png" alt="zapclub.io — Drop in. Take the stage. Own the night." width="100%">
 </a>
 
 Zapclub is a collaborative live music club built on Nostr and Lightning. One
@@ -26,8 +26,10 @@ account is required.
   privacy-preserving member and listener counts.
 - Adds floor reactions and a Vibemeter: reactions from other members build or
   lower DJ credibility, while the playing DJ cannot vote on their own track.
-- Sends NIP-57 Lightning zaps directly to DJs and aggregates a public
-  leaderboard.
+- Sends NIP-57 Lightning zaps directly to DJs; payments do not buy leaderboard
+  placement.
+- Ranks human DJs by relay-settled songs and the room's Vibemeter response,
+  with small samples deliberately damped.
 - Supports open, closed, private and Lightning entry-fee clubs.
 - Connects Telegram groups through a dedicated bridge bot.
 
@@ -64,8 +66,9 @@ listener heartbeats. Individual heartbeats remain server-side; the relay
 publishes only an aggregate count. Member identities remain protected in the
 roster; the relay exposes a separate signed total containing only club ID and
 count. Profiles are read from public Nostr relays. Zap receipts are used only to
-confirm the currently open invoice; profile and leaderboard history contains
-exclusively Zapclub-marked zaps recorded by the Zapclub relay.
+confirm the currently open invoice; private profile payment history contains
+exclusively Zapclub-marked zaps recorded by the Zapclub relay. The public DJ
+leaderboard is independent of payments and comes from relay-settled credibility.
 
 Playback state, public aggregates and DJ credibility are relay-authored.
 Closed/private membership and paid entry are enforced by the relay;
@@ -85,6 +88,25 @@ from the DJ whose track is playing. A real-DJ slot remains sticky for up to five
 minutes after its last heartbeat. An armed Auto DJ owns one of the same three
 stage slots and is always shown there. Its shuffled playlist drives playback
 only while no real DJ is active and does not affect a person's DJ credibility.
+Every naturally finished or community-skipped real-DJ track contributes to the
+public DJ leaderboard when it is settled. Manual and broken-track skips do not
+count; the relay also settles the outgoing human track before an Auto DJ
+takeover.
+
+The leaderboard turns the canonical aggregate into a confidence-adjusted score:
+`earned = clamp(tracks + vibeScore, 0, 6 × tracks)` and
+`DJ SCORE = 100 × earned / (6 × (tracks + 10))`. A normal track earns one base
+point plus up to five accepted bangers; a community-skipped track earns zero.
+Manual and broken-track skips add neither a song nor points.
+The ten-track prior gives ten settled songs 50% experience weight, so neither a
+tiny perfect sample nor sheer volume without positive feedback dominates.
+The public leaderboard response also carries a Top 10 of individual settled
+track performances by accepted Banger votes, including the public club ID and
+DJ pubkey for each play. It exposes only the aggregate result, never the voters;
+track-level history starts when the supporting relay release is activated and
+is not reconstructed retroactively from ephemeral Vibemeter events.
+Performances from unlisted private clubs are excluded from the attributable
+track list even though their anonymous contribution to DJ credibility remains.
 
 ## Nostr event model
 
@@ -110,8 +132,8 @@ use milliseconds.
 
 BadgerDB is the Nostr event store and source of truth. SQLite maintains derived
 conductor state, the offline-DJ played set and immutable club-owner lookups for
-constant-time hot paths. Small JSON sidecars hold bans, listener analytics, DJ
-credibility and the zap leaderboard.
+constant-time hot paths. Small JSON sidecars hold bans, listener analytics,
+DJ credibility (the leaderboard source) and private Zapclub payment history.
 
 All mutable data and secrets live outside release directories. The SQLite state
 can be rebuilt from events, but persisting it avoids a cold-start scan.

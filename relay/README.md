@@ -47,10 +47,42 @@ minus one, and stores the settled DJ score in
 `30078` event with `h=zapclub-credibility` and
 `d=zapclub:credibility:<pubkey>`.
 
-## Zap history
+## DJ leaderboard and Zap history
 
-The public `GET /leaderboard` and private `GET /zaps/received` use only zaps
-recorded on Zapclub. Club zaps enter through kind `20101`; browser-confirmed
+Public `GET /leaderboard` ranks only DJs with at least one rank-eligible human
+track. Its source is the same durable `credibility.json` aggregate that backs
+the signed kind `30078` snapshots; Auto-DJ tracks and Lightning payments are
+excluded. For `tracks=T` and canonical Vibemeter `score=V`, the relay calculates:
+
+```text
+earned   = clamp(T + V, 0, 6 × T)
+DJ SCORE = 100 × earned / (6 × (T + 10))
+```
+
+A naturally finished track supplies one play point plus zero to five accepted
+bangers; a community-skipped track supplies zero. Manual and broken-track skips
+are persisted as handled for deduplication but add neither a track nor score.
+The ten-track prior makes ten songs 50% experienced and prevents tiny samples
+or unreviewed volume from dominating. The JSON `score` is an integer in tenths
+(`333` means `33.3`) and is returned with `tracks`, `bangers`, `skipped` and the
+canonical `vibeScore`.
+Ranks compare the unrounded formula, then the larger settled sample, then the
+pubkey for a deterministic order. An outgoing real-DJ track is settled before
+an Auto-DJ takeover.
+
+The same response includes `topTracks`, the ten settled human-DJ performances
+with the most accepted Banger votes. Every row carries `title`, `videoId`,
+`club`, `dj`, `bangers`, `skipped` and `startedAt`, so one play is attributable
+to its club and DJ without publishing voter identities. Equal Banger totals are
+ordered by the newer play. The durable performance history is capped at 100;
+tracks with no Banger vote are omitted from the public Top 10. Existing
+credibility files remain compatible, but track-level history begins only after
+a relay version that records these performances is active. Plays in unlisted
+private clubs continue to affect the DJ's aggregate credibility but never add
+an attributable public track row.
+
+Private `GET /zaps/received` remains a separate payment history containing only
+zaps recorded on Zapclub. Club zaps enter through kind `20101`; browser-confirmed
 profile and guest zaps are submitted to `POST /zaps` with their signed kind
 `9734` request carrying `client=zapclub.io`. The request signature binds sender,
 recipient and amount. The private sender list additionally requires a fresh

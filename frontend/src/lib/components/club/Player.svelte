@@ -22,6 +22,8 @@
     embedded?: boolean
     /** Optional artwork shown instead of the live video. */
     cover?: string
+    /** Render cover artwork as a subdued LED display rather than a plain image. */
+    ledCover?: boolean
     /** Artwork shown while the club is in the lobby. */
     poster?: string
     oncontrolstate?: (state: { ready: boolean; muted: boolean; volume: number; fullscreen: boolean; playing: boolean }) => void
@@ -40,6 +42,7 @@
     headless = false,
     embedded = false,
     cover = '',
+    ledCover = false,
     poster = '',
     oncontrolstate,
     onmeta,
@@ -300,7 +303,7 @@
     </div>
 
     {#if sync.live && cover}
-      <div class="cover" aria-hidden="true">
+      <div class="cover" class:led-cover={ledCover} aria-hidden="true">
         <img src={cover} alt="" />
       </div>
     {/if}
@@ -411,6 +414,34 @@
   .cover {
     position: absolute;
     inset: 0;
+  }
+  .cover.led-cover {
+    isolation: isolate;
+    overflow: hidden;
+    background: #02050a;
+  }
+  .cover.led-cover img {
+    transform: scale(1.015);
+    filter: saturate(0.82) contrast(1.18) brightness(0.76);
+  }
+  .cover.led-cover::before,
+  .cover.led-cover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .cover.led-cover::before {
+    background:
+      radial-gradient(circle at 46% 42%, rgba(116, 180, 255, 0.12), transparent 58%),
+      linear-gradient(180deg, rgba(2, 5, 10, 0.04), rgba(2, 5, 10, 0.26));
+  }
+  .cover.led-cover::after {
+    background:
+      repeating-linear-gradient(0deg, rgba(207, 233, 255, 0.045) 0 1px, transparent 1px 4px),
+      radial-gradient(circle, rgba(224, 238, 250, 0.1) 0 0.55px, transparent 0.8px) 0 0 / 4px 4px;
+    opacity: 0.52;
   }
   .cover img,
   .poster {
