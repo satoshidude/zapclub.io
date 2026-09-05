@@ -815,7 +815,7 @@
     overflow: hidden;
     color: var(--lcd-text);
     font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: 0.74rem;
+    font-size: 1rem;
     letter-spacing: 0;
     line-height: 1;
     text-overflow: ellipsis;
