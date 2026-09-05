@@ -375,6 +375,13 @@ body.site-led-page .led-modal-backdrop {
   backdrop-filter: blur(8px) saturate(0.72);
 }
 
+body.site-led-page .led-zone:has(.led-modal-backdrop) {
+  position: relative;
+  z-index: 230;
+  overflow: visible;
+  isolation: auto;
+}
+
 body.site-led-page .led-modal-sheet {
   border: 0;
   border-radius: 0;
@@ -391,6 +398,7 @@ body.site-led-page .led-modal-sheet {
       color-mix(in srgb, var(--card-led-b) 70%, #070a0c) 56%,
       color-mix(in srgb, var(--card-led-c) 62%, #030405)
     );
+  background-color: #050708;
   box-shadow: 0 26px 88px rgba(0, 0, 0, 0.72), inset 0 1px rgba(241, 243, 244, 0.08);
 }
 
