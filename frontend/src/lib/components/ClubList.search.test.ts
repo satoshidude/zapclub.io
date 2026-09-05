@@ -59,6 +59,8 @@ describe('club search suggestions', () => {
     expect(source).toContain('.club-player-tags > .club-player-separator:first-child { display: none; }')
     expect(source).toMatch(/\.club-player-tags\s*\{[\s\S]*?flex-wrap: nowrap;[\s\S]*?font-size: 14px;[\s\S]*?white-space: nowrap;/)
     expect(source).toContain('.club-player-tags { font-size: 12px; }')
+    expect(source).toMatch(/:global\(body\.site-led-page\) \.list\s*\{\s*gap: 0\.7rem;/)
+    expect(source).toContain(':global(body.site-led-page) .list { gap: 0.55rem; }')
     expect(source).toContain('min-height: 112px;')
     expect(source).toMatch(/\.club-player-row\s*\{[\s\S]*?grid-template-columns: 128px minmax\(0, 1fr\);[\s\S]*?align-items: stretch;[\s\S]*?padding: 0;/)
     expect(source).toMatch(/\.club-player-pic\s*\{[\s\S]*?align-self: stretch;/)

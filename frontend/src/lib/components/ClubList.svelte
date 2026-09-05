@@ -1052,7 +1052,7 @@
     margin: 0 0 0.7rem;
   }
   :global(body.site-led-page) .list {
-    gap: 0;
+    gap: 0.7rem;
   }
   :global(body.site-led-page) .club-player-row.onstage {
     animation: none;
@@ -1116,6 +1116,7 @@
     :global(body.site-led-page) .suggestion-copy span { display: none; }
     :global(body.site-led-page) .suggestion-state { font-size: 0.66rem; }
     :global(body.site-led-page) .clubs-panel { padding: 0.8rem; }
+    :global(body.site-led-page) .list { gap: 0.55rem; }
     :global(body.site-led-page) .tg-block { margin-top: 0.55rem; padding: 0.8rem; }
   }
 
