@@ -1,16 +1,30 @@
 # zapclub.io
 
-[![zapclub.io — DJ and listen together](frontend/public/og.png)](https://zapclub.io)
+<a href="https://zapclub.io">
+  <img src="frontend/public/og.png" alt="zapclub.io — DJ and listen together" width="100%">
+</a>
 
-Decentralized social music streaming with Nostr identities, NIP-29 clubs,
-Lightning zaps and synchronized YouTube playback.
+Zapclub is a collaborative live music club built on Nostr and Lightning. One
+shared turntable keeps everyone in sync: members bring playlists, take the
+stage, react to tracks and zap DJs directly. Identity is a Nostr key — no email
+account is required.
 
-This README is the authoritative product and architecture concept. The current
-production and release plan lives in [`deploy/README.md`](deploy/README.md).
+- Web app: [zapclub.io](https://zapclub.io)
+- NIP-29 relay: `wss://relay.zapclub.io`
+- Source: [github.com/satoshidude/zapclub.io](https://github.com/satoshidude/zapclub.io)
+- Interface language: English
 
-- Frontend: `https://zapclub.io`
-- Relay: `wss://relay.zapclub.io`
-- UI language: English only
+## What Zapclub does
+
+- Lists currently active clubs and makes all eligible clubs discoverable through search.
+- Lets up to three DJs share a stage and interleaves their active playlists round-robin.
+- Keeps YouTube playback synchronized from relay-authored timing events.
+- Falls back to an owner-configured, shuffled Auto DJ playlist when no real DJ is active.
+- Provides member-only chat, presence and roster data with live listener counts.
+- Adds floor reactions and a Vibemeter: bangers build DJ credibility, three skips advance the track.
+- Sends NIP-57 Lightning zaps directly to DJs and aggregates a public leaderboard.
+- Supports open, closed, private and Lightning entry-fee clubs.
+- Connects Telegram groups through a dedicated bridge bot.
 
 ## Architecture
 
@@ -18,210 +32,97 @@ production and release plan lives in [`deploy/README.md`](deploy/README.md).
 Browser (Svelte 5) ── NIP-07/46 ── Nostr signer
         │
         ├── HTTPS/WSS ── Caddy ─┬── static frontend
-        │                       ├── NIP-29 relay + conductor
-        │                       └── LNURL/NIP-05 proxy
+        │                       ├── NIP-29 relay + playback conductor
+        │                       └── LNURL / NIP-05 proxy
         ├── YouTube IFrame API
         └── NIP-57 ── Lightning zaps to DJs
 
 Telegram ── bridge bot ── NIP-29 relay
 ```
 
-The relay is the authoritative shared-state component. It manages group
-membership and roles, enforces write permissions and limits, and acts as the
-always-on playback conductor. The radio stream and club metadata remain public;
-chat, presence and the member roster require NIP-42 authentication plus current
-membership in that club. Profiles and zap receipts remain on public Nostr
-relays. Caddy terminates TLS and serves the frontend; the remaining services are
-small adapters without application state.
+The Go relay is the authoritative shared-state component. It manages club
+membership and roles, enforces access, rate and stage limits, and acts as the
+always-on playback conductor. Browsers consume its state; they do not elect a
+leader or write authoritative playback events.
 
-## Event model
+Caddy terminates TLS and serves the built frontend. The LNURL/NIP-05 proxy and
+Telegram bot are small adapters without application state.
+
+## Access and privacy
+
+Club metadata, stage state and playback are public. Chat, presence and the
+member roster require NIP-42 authentication and current club membership; that
+boundary also applies to history, direct event queries and live subscriptions.
+
+Logged-out visitors use an ephemeral local key for schema- and rate-limited
+listener heartbeats. Individual heartbeats remain server-side; the relay
+publishes only an aggregate count. Profiles and verified zap receipts are read
+from public Nostr relays.
+
+Playback state, listener aggregates and DJ credibility are relay-authored.
+Private and paid clubs are gated by the relay, and administrative HTTP routes
+require fresh NIP-98 authorization.
+
+## Playback model
+
+Only the relay signs and stores `now_playing` and playback-log events. For each
+club, the conductor indexes stage and queue events, orders DJs by their stable
+stage timestamp, selects the next playable track and republishes timing state
+roughly every 15 seconds. Clients correct playback when their drift exceeds
+three seconds.
+
+Tracks advance on duration, an authorized skip, a broken-track quorum or three
+Vibemeter skips. A stage slot remains sticky for up to five minutes after its
+last heartbeat. Auto DJ is a fallback only and does not affect a person's DJ
+credibility.
+
+## Nostr event model
 
 All club content carries an `h` tag. NIP-29 metadata is queried separately by
 `#d`; relay29 rejects subscriptions that mix metadata kinds with content kinds.
 
-| Kind | Purpose |
+| Kinds | Purpose |
 |---|---|
-| `9007`, `9002`, `9008` | Create group, edit metadata, delete group |
-| `9000`, `9001`, `9005`, `9021`, `9022` | Roles, kick, delete event, join, leave |
-| `39000–39002` | Relay-signed group metadata, admins, members |
-| `30100` | Relay-authored `now_playing` state |
-| `30101` | Owner-authored club/access configuration |
-| `30102` | DJ stage heartbeat and stable `since` ordering |
-| `30103` | Parameterized-replaceable queue per DJ and club |
-| `30104` | Saved user playlist |
-| `30105` | Owner-authored Auto DJ configuration |
-| `30106` | Stage kick marker |
-| `30107` | Authorized skip request |
-| `30111` | Relay-authored Auto DJ disarm marker |
-| `1313` | Relay-authored playback log |
+| `9000–9022`, `39000–39002` | NIP-29 administration, metadata, roles and members |
+| `30100`, `1313` | Relay-authored playback state and log |
+| `30101–30105` | Club configuration, stage, DJ queue, saved playlist and Auto DJ |
+| `30106`, `30107`, `30111` | Stage kick, authorized skip and Auto DJ handover |
 | `9`, `20100` | Member-only chat and ephemeral presence |
-| `20101` | Zap broadcast used by the leaderboard |
-| `20102–20104` | Broken-track report, floor reaction and Vibemeter reaction |
-| `20105`, `20106` | Anonymous club-page listener heartbeat and relay-authored aggregate count |
-| `30078` | Relay-signed NIP-78 DJ credibility snapshot |
+| `20101–20104` | Zap broadcast, broken-track report, floor reaction and Vibemeter |
+| `20105`, `20106` | Anonymous listener heartbeat and relay-authored aggregate |
+| `30078` | Relay-signed DJ credibility snapshot |
 | `9734`, `9735` | NIP-57 zap request and receipt |
 
-Nostr `created_at` values use seconds. Playback timestamps (`started_at`,
-`sent_at`) and all client calculations use milliseconds.
-
-## Playback conductor
-
-Only the relay signs and stores `30100` and `1313`. Browsers are consumers and
-never participate in leader election. For each club, the conductor:
-
-1. indexes active stage events and DJ queues;
-2. interleaves playable tracks round-robin;
-3. publishes a new `now_playing` event on track changes;
-4. republishes it roughly every 15 seconds with a fresh `sent_at`;
-5. advances on duration, authorized skip, broken-track quorum or three Vibemeter skips;
-6. settles each real DJ track at up to five banger points, or minus one when the room skips it.
-
-DJ order is determined by the persisted `since` value in the newest `30102`
-event. A stage slot remains sticky for at most five minutes after the last
-heartbeat. When no staged DJ has a playable queue, the stream returns to the
-lobby track.
-
-Round-robin uses a global position:
-
-```text
-djIndex    = pos % djCount
-trackIndex = floor(pos / djCount)
-```
-
-Tracks marked `off` are masked. For offline DJs without a recent presence beat,
-a persisted played-set prevents old queues from looping indefinitely.
-
-## Client synchronization
-
-Clients derive their target playback position from the relay heartbeat:
-
-```text
-offsetMs = sent_at - Date.now()
-targetMs = Date.now() + offsetMs - started_at
-```
-
-The player loads at `targetMs`. Every five seconds it compares local playback
-with the target and seeks when absolute drift exceeds three seconds.
-
-Auto-DJ `now_playing` heartbeats also carry repeated `next` tags. They expose
-the relay's preplanned shuffled order so every client's “Up next” preview
-matches the tracks the conductor will actually play.
+Nostr `created_at` values use seconds. Playback timing and client calculations
+use milliseconds.
 
 ## Storage
 
-BadgerDB is the Nostr event store and source of truth. SQLite contains derived
-state for constant-time hot-path lookups:
+BadgerDB is the Nostr event store and source of truth. SQLite maintains derived
+conductor state, the offline-DJ played set and immutable club-owner lookups for
+constant-time hot paths. Small JSON sidecars hold bans, listener analytics, DJ
+credibility and the zap leaderboard.
 
-| Table | Data |
-|---|---|
-| `conductor_state` | Current position, video, DJ and start time per club |
-| `played` | Offline-DJ played-set |
-| `club_owners` | Immutable club creator lookup |
+All mutable data and secrets live outside release directories. The SQLite state
+can be rebuilt from events, but persisting it avoids a cold-start scan.
 
-`modernc.org/sqlite` is pure Go, so Linux binaries remain static without CGO.
-The SQLite database can be rebuilt from events, but `SQLITE_PATH` should persist
-across deployments to avoid a cold-start scan.
-
-Ban state, listener analytics, DJ credibility and the zap leaderboard are stored as small JSON
-sidecars in the same persistent directory. Releases contain no mutable state.
-
-## Enforcement and security
-
-- Group content is writable only by current members, except for schema-limited anonymous listener heartbeats.
-- `30100`, `1313`, aggregate listener counts and credibility snapshots are accepted only from the relay key.
-- Vibemeter reactions require club membership and share a relay-enforced 10-second cooldown. Repeated reactions from the same member count; each banger scores one point up to five, while three skips settle the track at minus one.
-- Club limits and the three-DJ stage limit are enforced by relay hooks.
-- Private and entry-fee clubs are relay-gated.
-- NIP-42 authentication protects member/social writes; anonymous listener beats remain schema- and rate-limited.
-- Admin endpoints require fresh NIP-98 authorization.
-- Chat, search and HTTP endpoints are rate-limited.
-- The relay listens on `127.0.0.1` behind Caddy/TLS.
-- `RELAY_SECRET_KEY` is persistent, mode `600`, and never committed.
-
-Important relay29 constraints:
-
-- Keep relay29 pinned to the known-good `master` revision.
-- Register `db.ReplaceEvent`, otherwise addressable events accumulate.
-- Never mix kinds `39000–39003` with content kinds in one subscription.
-
-## Repository layout
+## Repository
 
 ```text
 frontend/      Svelte 5 / TypeScript client
-relay/         Go NIP-29 relay and conductor
+relay/         Go NIP-29 relay and playback conductor
 telegram-bot/  Telegram integration
-deploy/        sunnyhill Caddy, systemd, monitoring and backup configuration
+deploy/        Project-specific Caddy, systemd, monitoring and backup files
 ```
 
-## Local development
+## Production
 
-Requirements: Node.js 22/npm, Go 1.26 and `yt-dlp`.
+Production runs on `sunnyhill.io` as immutable, commit-addressed releases. A
+clean local `main` is released exclusively through `./release.sh`; the script
+validates the exact commit, transfers it as a Git bundle, invokes the restricted
+server-side validator, activates it atomically and finishes with public smoke
+checks. A failed activation rolls back to the preceding verified release.
 
-```sh
-cd frontend
-npm ci
-npm run dev
-```
-
-```sh
-cd relay
-relay_state="$(mktemp -d)"
-export RELAY_SECRET_KEY="$(openssl rand -hex 32)"
-export RELAY_DB="$relay_state/db"
-export SQLITE_PATH="$relay_state/conductor.db"
-export RELAY_BANLIST="$relay_state/banned.json"
-export RELAY_LISTENERS="$relay_state/listeners.json"
-export RELAY_LEADERBOARD="$relay_state/leaderboard.json"
-export RELAY_CREDIBILITY="$relay_state/credibility.json"
-go run .
-```
-
-The frontend defaults to the live relay. The local relay listens on
-`127.0.0.1:3334` unless configured otherwise. Remove `$relay_state` after the
-relay stops; no runtime state belongs in the repository.
-
-## Test and build
-
-```sh
-cd frontend
-npm run check
-npm test
-npm run build
-```
-
-```sh
-cd relay
-go vet ./...
-go test ./...
-./e2e.sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/zapclub-relay-linux .
-```
-
-```sh
-cd telegram-bot
-go vet ./...
-go test ./...
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/zapclub-telegram-bot-linux .
-```
-
-## Installation and deployment
-
-Production runs on `sunnyhill` as the unprivileged `zapclub` user. Each commit is
-built into `/srv/zapclub/releases/<commit>` and `/srv/zapclub/current` points to
-the active release. Caddy serves the frontend directly from that symlink; the
-relay, LNURL/NIP-05 proxy and Telegram bot are systemd services. Persistent data
-lives in `/var/lib/zapclub-relay`, secrets in `/etc/zapclub` and backups in
-`/var/backups/zapclub`.
-
-Run `./release.sh` from a clean local `main` for a complete release. It performs
-all local checks, pushes the exact commit, transfers a Git bundle to the VPS,
-invokes the restricted root validator and finishes with public HTTP, NIP-05 and
-Nostr WebSocket smoke tests. Production is checked every five minutes by
-`zapclub-monitor.timer`; failures trigger a rate-limited mail alert. Daily
-backups are independently managed by `zapclub-backup.timer`.
-
-See [`deploy/README.md`](deploy/README.md) for the authoritative file mapping,
-release procedure, rollback and verification checklist.
-
-Do not run `go get` or `go mod tidy` on the server. Dependencies are pinned in
-`go.mod` and `go.sum`; build inside the new release before switching `current`.
+Persistent state, secrets, backups and monitoring remain outside the release.
+See [`deploy/README.md`](deploy/README.md) for the authoritative release,
+rollback, service, monitoring and backup procedures.
