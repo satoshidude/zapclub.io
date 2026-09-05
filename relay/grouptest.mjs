@@ -4,6 +4,7 @@
 //      (v0.5.1 inverts open/closed and breaks this)
 //   2. now_playing (kind 30100) ReplaceEvent dedup — two writes → exactly ONE row
 //   3. non-members cannot write content events
+//   4. no more than three DJs can occupy a club stage
 //
 // Run: RELAY_URL=ws://127.0.0.1:3334 NODE_PATH=<nostr-tools dir> node grouptest.mjs
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -13,19 +14,21 @@ import { minePow } from 'nostr-tools/nip13'
 const POWBITS = { 9: 12, 9021: 15 }
 
 const URL = process.env.RELAY_URL || 'ws://127.0.0.1:3334'
+const RELAY_PK = process.env.RELAY_PK || ''
 const now = () => Math.floor(Date.now() / 1000)
 const G = 'zc' + Math.random().toString(16).slice(2, 16)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function conn(sk) {
+function conn(sk, authenticate = true) {
   const ws = new WebSocket(URL)
   const pend = new Map()
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data.toString())
-    if (m[0] === 'AUTH') ws.send(JSON.stringify(['AUTH', finalizeEvent({ kind: 22242, created_at: now(), tags: [['relay', URL], ['challenge', m[1]]], content: '' }, sk)]))
+    if (m[0] === 'AUTH' && authenticate) ws.send(JSON.stringify(['AUTH', finalizeEvent({ kind: 22242, created_at: now(), tags: [['relay', URL], ['challenge', m[1]]], content: '' }, sk)]))
     else if (m[0] === 'OK') { const p = pend.get(m[1]); if (p) { pend.delete(m[1]); p([m[2], m[3]]) } }
     else if (m[0] === 'EVENT') { const p = pend.get('r:' + m[1]); if (p) p.got.push(m[2]) }
-    else if (m[0] === 'EOSE') { const p = pend.get('r:' + m[1]); if (p) { pend.delete('r:' + m[1]); p.res(p.got) } }
+    else if (m[0] === 'EOSE') { const p = pend.get('r:' + m[1]); if (p) { if (p.live) p.ready(); else { pend.delete('r:' + m[1]); p.res({ events: p.got, closed: '' }) } } }
+    else if (m[0] === 'CLOSED') { const p = pend.get('r:' + m[1]); if (p) { pend.delete('r:' + m[1]); p.res?.({ events: p.got, closed: m[2] || '' }); p.ready?.() } }
   }
   const send = (e) => new Promise((r) => { pend.set(e.id, r); ws.send(JSON.stringify(['EVENT', e])) })
   return new Promise((res) => { ws.onopen = () => setTimeout(() => res({
@@ -38,7 +41,16 @@ function conn(sk) {
       return send(finalizeEvent(tt, sk))
     },
     evRaw: (t) => send(finalizeEvent(t, sk)),
-    query: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: r, got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
+    queryResult: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: r, got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
+    query: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: (result) => r(result.events), got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
+    watch: (filter) => {
+      const id = 's' + Math.random(), got = []
+      let markReady
+      const ready = new Promise((r) => { markReady = r })
+      pend.set('r:' + id, { got, live: true, ready: markReady })
+      ws.send(JSON.stringify(['REQ', id, filter]))
+      return { got, ready, close: () => { pend.delete('r:' + id); ws.send(JSON.stringify(['CLOSE', id])) } }
+    },
   }), 400) })
 }
 const ok = (r) => (r[0] ? 'OK' : 'REJECT ' + r[1])
@@ -83,6 +95,59 @@ const noPow = await mem.evRaw({ kind: 9, created_at: now(), tags: [['h', G]], co
 assert(noPow[0] === false && /pow/i.test(noPow[1] || ''), 'chat without PoW rejected: ' + ok(noPow))
 const yesPow = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'mined' })
 assert(yesPow[0] === true, 'chat with PoW accepted: ' + ok(yesPow))
+
+// 2c. The public stream stays public, but chat + member roster require current membership.
+// Direct id queries must not bypass the history filter, and an already-open subscription must
+// stop receiving immediately after a kick.
+await sleep(400)
+const memberChat = await mem.query({ kinds: [9], '#h': [G] })
+const mined = memberChat.find((e) => e.content === 'mined')
+assert(!!mined, 'member can read chat history')
+const strangerChat = await stranger.queryResult({ kinds: [9], '#h': [G] })
+assert(/restricted/i.test(strangerChat.closed), 'non-member chat subscription rejected')
+const strangerMembers = await stranger.queryResult({ kinds: [39002], '#d': [G] })
+assert(/restricted/i.test(strangerMembers.closed), 'non-member member-roster subscription rejected')
+const directLeak = mined ? await stranger.query({ ids: [mined.id] }) : []
+assert(directLeak.length === 0, 'direct event-id query cannot leak a chat message')
+
+const liveChat = mem.watch({ kinds: [9], '#h': [G], since: now() })
+await liveChat.ready
+await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'before kick' })
+await sleep(300)
+assert(liveChat.got.some((e) => e.content === 'before kick'), 'member receives live chat')
+await host.ev({ kind: 9001, created_at: now(), tags: [['h', G], ['p', mem.pub]], content: '' })
+await sleep(300)
+await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'after kick' })
+await sleep(300)
+assert(!liveChat.got.some((e) => e.content === 'after kick'), 'kick revokes an already-open chat subscription')
+liveChat.close()
+const postKickRejoin = await mem.ev({ kind: 9021, created_at: now() + 1, tags: [['h', G]], content: '' })
+await sleep(500)
+assert(postKickRejoin[0] === true, 'kicked member can rejoin an open club')
+
+// 2d. Listener sessions are independent of login/member presence. An unauthenticated browser
+// can heartbeat an open club; clients receive only the relay-authored aggregate count.
+const listener = await conn(generateSecretKey(), false)
+const listenerCounts = host.watch({ kinds: [20106], '#h': [G], since: now() })
+const rawListenerBeats = host.watch({ kinds: [20105], '#h': [G], since: now() })
+await listenerCounts.ready
+await rawListenerBeats.ready
+const listenerOn = await listener.evRaw({ kind: 20105, created_at: now(), tags: [['h', G], ['state', 'on']], content: '' })
+assert(listenerOn[0] === true, 'logged-out club page can register an anonymous listener session: ' + ok(listenerOn))
+await sleep(600)
+const liveCount = listenerCounts.got.at(-1)
+assert(liveCount?.kind === 20106 && liveCount.pubkey === RELAY_PK, 'listener aggregate is emitted by the relay conductor')
+assert(liveCount?.tags.find((t) => t[0] === 'count')?.[1] === '1', 'listener aggregate reports one live session')
+assert(rawListenerBeats.got.length === 0, 'individual anonymous listener heartbeats are not exposed')
+const forgedCount = await mem.evRaw({ kind: 20106, created_at: now(), tags: [['h', G], ['count', '99'], ['sent_at', String(Date.now())]], content: '' })
+assert(forgedCount[0] === false && /relay-authored/i.test(forgedCount[1] || ''), 'client-forged listener aggregate is rejected')
+const malformedListener = await listener.evRaw({ kind: 20105, created_at: now(), tags: [['h', G], ['state', 'maybe']], content: '' })
+assert(malformedListener[0] === false && /listener update/i.test(malformedListener[1] || ''), 'malformed listener heartbeat is rejected')
+await listener.evRaw({ kind: 20105, created_at: now(), tags: [['h', G], ['state', 'off']], content: '' })
+await sleep(600)
+assert(listenerCounts.got.at(-1)?.tags.find((t) => t[0] === 'count')?.[1] === '0', 'listener departure updates the aggregate to zero')
+listenerCounts.close()
+rawListenerBeats.close()
 
 // 3. now_playing (30100) + play-log (1313) are relay-authored ONLY — even a MEMBER's write is
 //    rejected (the relay is the sole conductor). Guards against per-author tombstones. The
@@ -196,20 +261,37 @@ if (process.env.RELAY_PK) {
   np = await npNow()
   assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
 
-  // broken-track quorum: 2 members report the running track (First) unplayable → relay skips it.
-  // Active tracks now: First (current), Fourth. Second/Third off → next active is Fourth.
+  // Vibemeter: three reactions can skip the current track, but one account cannot react twice
+  // inside the shared 10-second cooldown. The resulting -1 credibility snapshot is relay-signed
+  // NIP-78 app data and publicly queryable by its p tag.
   await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
   await sleep(800)
-  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
-  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfirst001' })
+  const moodTags = [['h', C], ['pos', posOf(np)]]
+  await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
+  const tooSoon = await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'banger']], content: '' })
+  assert(tooSoon[0] === false && /10 seconds/i.test(tooSoon[1] || ''), 'vibemeter: Banger and Skip share the 10-second cooldown')
+  await mem.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
+  await stranger.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
   await sleep(4000)
   np = await npNow()
-  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: broken-track quorum (2 members) skips to the next active track')
+  assert(trackOf(np) === 'yt:VIDfourth004', 'vibemeter: three skips advance to the next active track')
+  const cred = (await host.query({ kinds: [30078], authors: [RPK], '#h': ['zapclub-credibility'], '#d': [`zapclub:credibility:${host.pub}`], '#p': [host.pub] }))[0]
+  const credTag = (name) => Number(cred?.tags.find((t) => t[0] === name)?.[1])
+  assert(!!cred && credTag('score') === -1 && credTag('skipped') === 1, 'credibility: relay-signed NIP-78 snapshot records exactly one minus point')
+
+  // broken-track quorum: 2 members report the running track (Fourth) unplayable → relay skips it.
+  // Re-activate First so there is a deterministic next track.
+  await postQueue(['VIDsecond02', 'VIDthird0003', 'VIDfourth004'])
+  await mem.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfourth004' })
+  await stranger.ev({ kind: 20102, created_at: now(), tags: [['h', C]], content: 'VIDfourth004' })
+  await sleep(4000)
+  np = await npNow()
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: broken-track quorum (2 members) skips to the next active track')
 
   // All tracks off → the stream stops to the lobby (nothing active to play; no auto-loop).
   await postQueue(['VIDfirst001', 'VIDsecond02', 'VIDthird0003', 'VIDfourth004'])
   await skip(np); np = await npNow()
-  assert(trackOf(np) === 'yt:VIDfourth004', 'conductor: all tracks off → stops to the lobby (no active track, no loop)')
+  assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: all tracks off → stops to the lobby (no active track, no loop)')
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', C]], content: '' }) // cleanup
 }
 
@@ -236,6 +318,35 @@ if (process.env.RELAY_PK) {
   await sleep(9000) // 1s track ends; several ticks pass — buggy code would re-pick and loop
   assert(posN(await npL()) === pos1, `anti-loop: last track did NOT loop (pos stayed ${pos1}, got ${posN(await npL())})`)
   await host.ev({ kind: 9008, created_at: now(), tags: [['h', L]], content: '' }) // cleanup
+}
+
+// 4d. Stage capacity: owner plus two members fill the three slots; a fourth member is rejected.
+//     This covers the actual RejectEvent wiring in addition to the stage-gate unit tests.
+{
+  const S = 'zcs' + Math.random().toString(16).slice(2, 16)
+  const [stageHost, stage2, stage3, stage4] = await Promise.all(
+    Array.from({ length: 4 }, () => conn(generateSecretKey())),
+  )
+  console.log('\n-- three-DJ stage cap --')
+  await stageHost.ev({ kind: 9007, created_at: now(), tags: [['h', S]], content: '' })
+  await stageHost.ev({ kind: 9002, created_at: now(), tags: [['h', S], ['name', 'Three DJs'], ['open'], ['public']], content: '' })
+  await Promise.all(
+    [stage2, stage3, stage4].map((dj) => dj.ev({ kind: 9021, created_at: now(), tags: [['h', S]], content: '' })),
+  )
+  await sleep(700)
+
+  const takeSlot = (dj, since) => dj.ev({ kind: 30102, created_at: now(), tags: [['h', S], ['d', S], ['since', String(since)]], content: '' })
+  const firstThree = await Promise.all([
+    takeSlot(stageHost, 1),
+    takeSlot(stage2, 2),
+    takeSlot(stage3, 3),
+  ])
+  assert(firstThree.every((result) => result[0] === true), 'stage cap: first three DJs accepted')
+  await sleep(500)
+  const fourth = await takeSlot(stage4, 4)
+  assert(fourth[0] === false && /stage is full/i.test(fourth[1] || ''), 'stage cap: fourth DJ rejected: ' + ok(fourth))
+
+  await stageHost.ev({ kind: 9008, created_at: now(), tags: [['h', S]], content: '' })
 }
 
 // 4e. Private / invite-only clubs.
@@ -331,16 +442,15 @@ if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
   const noAuth = await fetch(ADMIN_URL + '/admin/bans')
   assert(noAuth.status === 401, 'admin without auth → 401 (got ' + noAuth.status + ')')
 
-  // Listener analytics: a member's presence beat (kind 20100) is recorded and surfaces in
-  // /admin/listeners as a live listener of the club.
-  await mem.ev({ kind: 20100, created_at: now(), tags: [['h', G]], content: '' })
+  // Listener analytics use anonymous club-page sessions rather than member presence.
+  await listener.evRaw({ kind: 20105, created_at: now(), tags: [['h', G], ['state', 'on']], content: '' })
   await sleep(400)
   const lis = await adminReq('/admin/listeners', 'GET')
   let lj = {}
   try { lj = JSON.parse(lis.body) } catch { /* ignore */ }
   const clubL = (lj.clubs || []).find((c) => c.id === G)
-  assert(lis.status === 200 && !!clubL && clubL.live.includes(mem.pub), 'listeners: member shows as live in the club')
-  assert(!!clubL && clubL.seen.some((s) => s.pubkey === mem.pub), 'listeners: member appears in the 24h seen list')
+  assert(lis.status === 200 && !!clubL && clubL.live.includes(listener.pub), 'listeners: anonymous session shows as live in the club')
+  assert(!!clubL && clubL.seen.some((s) => s.pubkey === listener.pub), 'listeners: anonymous session appears in the 24h seen list')
 
   const ban = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub, reason: 'e2e' })
   assert(ban.status === 200, 'ban → 200 (got ' + ban.status + ' ' + ban.body.slice(0, 60) + ')')

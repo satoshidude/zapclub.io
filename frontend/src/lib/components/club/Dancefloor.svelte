@@ -5,13 +5,10 @@
   import { npubEncode } from 'nostr-tools/nip19'
   import { goUser } from '../../router.svelte'
   import type { ClubMember } from '../../nostr/types'
-  import { emotes, sendEmote } from '../../nostr/emotes.svelte'
   import { zaps } from '../../nostr/zaps.svelte'
   import { stage, joinStage, leaveStage, MAX_DJS } from '../../nostr/stage.svelte'
   import { kickFromStage } from '../../nostr/groups'
   import { reactivateMyQueue } from '../../nostr/queue.svelte'
-  import VibeMeter from './VibeMeter.svelte'
-  import ComingNext from './ComingNext.svelte'
 
   let {
     groupId,
@@ -78,18 +75,6 @@
     }
   }
 
-  // Crowd = the club's members minus the stage row. ONLINE members (recent presence beat)
-  // dance; the rest are part of the club but shown dimmed + still ("here vs away").
-  const online = $derived(members.filter((m) => !stageSet.has(m.pubkey) && presence.isOnline(m.pubkey)))
-  const offline = $derived(members.filter((m) => !stageSet.has(m.pubkey) && !presence.isOnline(m.pubkey)))
-
-  const CAP = 48
-  const shownOnline = $derived(online.slice(0, CAP))
-  const moreOnline = $derived(Math.max(0, online.length - CAP))
-  const OFF_CAP = 24
-  const shownOffline = $derived(offline.slice(0, OFF_CAP))
-  const moreOffline = $derived(Math.max(0, offline.length - OFF_CAP))
-
   // A DJ is actually playing → the floor dances; otherwise it just idles (no one's on).
   const playing = $derived(!!currentDj)
 
@@ -106,29 +91,9 @@
     }
   })
 
-  // Energy: recent emotes and zaps make the floor a touch faster.
-  const hyped = $derived(emotes.items.length + (zapped ? 2 : 0) >= 4)
-
-  // Send an ASCII shortcode (not the raw emoji): some signers/extensions choke on signing
-  // multi-byte unicode content, so we sign a stable code and render the emoji client-side.
-  const EMOTES = [
-    { e: '🔥', c: 'fire' },
-    { e: '🙌', c: 'raise' },
-    { e: '💜', c: 'love' },
-    { e: '🕺', c: 'dance' },
-    { e: '👏', c: 'clap' },
-  ]
-  const CODE2EMOJI: Record<string, string> = { fire: '🔥', raise: '🙌', love: '💜', dance: '🕺', clap: '👏' }
-  const showEmote = (content: string) => CODE2EMOJI[content] ?? content // fallback: raw emoji from other clients
-  function emit(code: string) {
-    if (groupId) void sendEmote(groupId, code)
-  }
-  // Deterministic horizontal lane (10–90%) for a flying emote, from its id.
-  const emoteX = (id: string) => (hash(id) % 80) + 10
-
   // Deterministic per-pubkey dance — stable across renders (no Math.random), so the crowd looks
-  // varied but doesn't reshuffle. Encodes variant, duration, phase offset, amplitude and a small
-  // scatter offset as CSS vars.
+  // varied but doesn't reshuffle. Each avatar gets 89–110 BPM, a phase, a motion variant and a
+  // small scatter offset. One animation cycle equals one beat.
   function hash(pk: string): number {
     let h = 2166136261
     for (let i = 0; i < pk.length; i++) h = (Math.imul(h ^ pk.charCodeAt(i), 16777619)) >>> 0
@@ -136,15 +101,17 @@
   }
   function danceVars(pk: string): string {
     const h = hash(pk)
-    const dur = (0.7 + ((h >>> 0) % 60) / 100).toFixed(2) // 0.70–1.29s (varied tempo)
-    const delay = (-(((h >>> 5) % 130) / 100)).toFixed(2) // 0 to -1.29s (phase offset → no lockstep)
+    const bpm = 89 + ((h >>> 0) % 22)
+    const dur = 60 / bpm
+    const phase = ((h >>> 5) % 100) / 100
+    const delay = -(dur * phase)
     const dx = (((h >>> 17) % 9) - 4).toFixed(0) // -4..4 px scatter
     const dy = (((h >>> 21) % 7) - 3).toFixed(0) // -3..3 px scatter
     // Only time/offset vars here — NO CSS var inside the keyframe transforms or animation-name
     // (iOS Safari resolves those unreliably → no animation). Amplitude is baked into the keyframes.
-    return `--dur:${dur}s;--delay:${delay}s;--dx:${dx}px;--dy:${dy}px`
+    return `--dur:${dur.toFixed(4)}s;--delay:${delay.toFixed(4)}s;--dx:${dx}px;--dy:${dy}px`
   }
-  const variantOf = (pk: string) => hash(pk) % 4
+  const variantOf = (pk: string) => (hash(pk) >>> 9) % 6
 
   // Click an avatar → a small card (profile link + moderation).
   let selected = $state<string | null>(null)
@@ -161,28 +128,23 @@
 
 </script>
 
-<section class="floor card" class:playing class:hyped>
-  <div class="head">
-    <h3>In Da Club</h3>
-    <span class="count" title="dancing now / club members">{online.length + stageDjs.length} / {members.length}</span>
+<section class="floor stage-card card led-zone" class:playing>
+  <div class="led-scanlines" aria-hidden="true"></div>
+  <div class="head lcd-card-heading">
+    <span class="head-title"><h3 class="lcd-card-title">On stage</h3><span class="count">{stageDjs.length}/{MAX_DJS}</span></span>
+    {#if auth.canSign && isMember && onStage}
+      <button class="leave-stage lcd-card-title" onclick={offStage} disabled={stageBusy}>Leave stage</button>
+    {/if}
   </div>
 
-  <VibeMeter clubId={groupId} ownerPubkey={owner} />
-
-  {#if online.length === 0 && offline.length === 0 && stageDjs.length === 0}
-    <p class="dim">No one here yet — be the first on the floor.</p>
+  {#if stageDjs.length === 0}
+    <p class="dim">No one is on stage yet.</p>
   {/if}
 
   <!-- Stage row: the on-stage DJs dance up front, right against the crowd. Open slots are
        joinable in place; the people live ONLY here (not repeated in the crowd below). -->
   <div class="stagerow">
     <span class="stage-tag" aria-hidden="true">{stageDjs.length}/{MAX_DJS} ON STAGE</span>
-    {#if auth.canSign && isMember && onStage}
-      <button class="dancer open leave" onclick={offStage} disabled={stageBusy} title="Leave the stage">
-        <span class="ring">↩</span>
-        <span class="nm">Leave</span>
-      </button>
-    {/if}
     {#each stageDjs as dj (dj.pubkey)}
       {@const profile = useProfile(dj.pubkey)}
       <button
@@ -208,59 +170,14 @@
         disabled={!canJoin || stageBusy}
         title={canJoin ? 'Take this spot' : ''}
       >
-        <span class="ring">+</span>
-        <span class="nm">{canJoin ? 'Join' : 'open'}</span>
+        <span class="ring"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6.5 11a5.5 5.5 0 0 0 11 0M12 16.5V21M9 21h6"></path></svg></span>
+        <span class="nm">{canJoin ? 'Join stage' : 'open'}</span>
       </button>
     {/each}
   </div>
   {#if stageError}<p class="dim err">⚠ {stageError}</p>{/if}
 
-  <ComingNext clubId={groupId} />
-
-  <!-- The dancing crowd (online members) — loose flat cluster. -->
-  {#if shownOnline.length > 0}
-    <div class="crowd">
-      {#each shownOnline as m (m.pubkey)}
-        {@const profile = useProfile(m.pubkey)}
-        <button
-          class="dancer"
-          class:zapped={zapped === m.pubkey}
-          style={danceVars(m.pubkey)}
-          title={displayName(m.pubkey, profile)}
-          onclick={() => (selected = selected === m.pubkey ? null : m.pubkey)}
-        >
-          <span class="bob v{variantOf(m.pubkey)}">
-            <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="58" height="58" loading="lazy" />
-          </span>
-          <span class="nm"><span class="mq-inner">{displayName(m.pubkey, profile)}</span></span>
-        </button>
-      {/each}
-      {#if moreOnline > 0}<span class="more">+{moreOnline}</span>{/if}
-
-      <!-- Flying emotes rise over the floor (ephemeral floor reactions). -->
-      <div class="emote-layer" aria-hidden="true">
-        {#each emotes.items as e (e.id)}
-          <span class="fly" style={`left:${emoteX(e.id)}%`}>{showEmote(e.emoji)}</span>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
-  <!-- Offline members: in the club, but not here right now (dimmed, still). -->
-  {#if shownOffline.length > 0}
-    <div class="backrow" title="club members not here right now">
-      {#each shownOffline as m (m.pubkey)}
-        {@const profile = useProfile(m.pubkey)}
-        <button class="away" title={displayName(m.pubkey, profile)} onclick={() => (selected = selected === m.pubkey ? null : m.pubkey)}>
-          <img class="av" src={avatarUrl(m.pubkey, profile)} alt="" width="26" height="26" loading="lazy" />
-        </button>
-      {/each}
-      {#if moreOffline > 0}<span class="more sm">+{moreOffline}</span>{/if}
-    </div>
-  {/if}
-
-  <!-- Tapped-avatar card: profile + moderation. -->
-  {#if sel}
+  {#if sel && stageSet.has(sel.pubkey)}
     {@const profile = useProfile(sel.pubkey)}
     <div class="card-pop">
       <img class="av" src={avatarUrl(sel.pubkey, profile)} alt="" width="36" height="36" />
@@ -270,7 +187,7 @@
         {#if presence.isOnline(sel.pubkey)}<span class="here">● here</span>{/if}
       </div>
       <button class="link" onclick={() => openProfile(sel.pubkey)}>Profile ↗</button>
-      {#if canModerate && stageSet.has(sel.pubkey) && sel.pubkey !== auth.pubkey}
+      {#if canModerate && sel.pubkey !== auth.pubkey}
         <button class="mini" onclick={() => { void unstage(sel.pubkey); selected = null }}>off stage</button>
       {/if}
       {#if canModerate && sel.pubkey !== owner && sel.pubkey !== auth.pubkey}
@@ -282,95 +199,118 @@
       <button class="x" aria-label="Close" onclick={() => (selected = null)}>✕</button>
     </div>
   {/if}
-
 </section>
 
 <style>
+  .stage-card {
+    grid-area: stage;
+  }
   .floor {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.9rem 1rem;
+    position: relative;
+    overflow: hidden;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0.8rem 1rem 1rem;
+    min-width: 0;
+    height: 100%;
+    color: var(--lcd-text);
+    box-shadow: none;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    text-shadow: none;
+  }
+  .floor > :not(.led-scanlines) {
+    position: relative;
+    z-index: 1;
+  }
+  .led-scanlines {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: none;
+    pointer-events: none;
   }
   .head {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .head-title {
+    display: flex;
     align-items: baseline;
     gap: 0.45rem;
-    margin-bottom: 0.7rem;
   }
   h3 {
     margin: 0;
-    font-size: 1rem;
   }
   .count {
-    color: var(--text-dim);
+    color: var(--lcd-text);
+    font-weight: 700;
     font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
   }
+  .leave-stage {
+    border: 0;
+    background: transparent;
+  }
   .dim {
-    color: var(--text-dim);
+    color: var(--lcd-text-dim);
     font-size: 0.85rem;
     margin: 0.3rem 0;
-  }
-
-  /* Loose flat cluster: wrap with per-avatar scatter offsets. */
-  .crowd {
-    position: relative;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 0.7rem;
-    align-items: flex-end;
-    padding: 0.6rem 0.2rem;
-    min-height: 70px;
   }
 
   /* Stage row: the front of the floor. Slightly bigger dancers, a soft platform glow, and a
      dashed edge towards the crowd right below. */
   .stagerow {
+    --stage-avatar-size: 88px;
     position: relative;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 0.9rem;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(88px, 1fr));
+    gap: 0.75rem;
     align-items: flex-end;
-    padding: 1.7rem 0.2rem 0.7rem; /* headroom for the stage tag */
-    margin-top: 0.75rem;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px dashed var(--border);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 7%, transparent), transparent 70%);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    padding: 1rem 0 0.85rem;
+    margin-top: 0;
+    border: 0;
+    background: transparent;
   }
   .stage-tag {
-    position: absolute;
-    top: 0.35rem;
-    left: 0.4rem;
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    pointer-events: none;
+    display: none;
   }
   .stagerow .dancer {
-    width: 72px;
+    width: 100%;
+  }
+  .stagerow .dancer .av {
+    width: var(--stage-avatar-size);
+    height: var(--stage-avatar-size);
   }
   .stagerow .nm {
-    max-width: 72px;
-    --nm-w: 72px;
-    font-size: 0.66rem;
+    max-width: 92px;
+    --nm-w: 92px;
+    font-size: 0.7rem;
   }
   /* Open slot / leave control as a dancer-shaped column so it lines up with the row. */
   .dancer.open .ring {
-    width: 64px;
-    height: 64px;
+    width: var(--stage-avatar-size, 58px);
+    height: var(--stage-avatar-size, 58px);
     border-radius: 50%;
-    border: 2px dashed var(--border);
+    border: 2px dashed rgba(201, 206, 209, 0.42);
     display: grid;
     place-items: center;
-    font-size: 1.4rem;
-    color: var(--text-dim);
+    font-size: 1.25rem;
+    color: var(--lcd-text-dim);
+  }
+  .dancer.open .ring svg {
+    width: 30px;
+    height: 30px;
+    fill: currentColor;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .dancer.open {
-    opacity: 0.45;
+    opacity: 0.58;
     cursor: default;
   }
   .dancer.open.joinable,
@@ -379,19 +319,11 @@
     cursor: pointer;
   }
   .dancer.open.joinable .ring {
-    border-color: var(--accent);
-    color: var(--accent);
+    border-color: var(--lcd-text);
+    color: var(--lcd-text);
   }
   .dancer.open.joinable:hover:not(:disabled) .ring {
-    background: rgba(74, 222, 94, 0.12);
-  }
-  .dancer.open.leave .ring {
-    border-color: var(--danger);
-    color: var(--danger);
-    font-size: 1.1rem;
-  }
-  .dancer.open.leave:hover:not(:disabled) .ring {
-    background: rgba(255, 90, 90, 0.12);
+    background: rgba(241, 243, 244, 0.08);
   }
   .dancer.open:disabled {
     cursor: default;
@@ -400,44 +332,12 @@
     color: var(--danger);
   }
 
-  /* Flying floor emotes. */
-  .emote-layer {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-  .fly {
-    position: absolute;
-    bottom: 8px;
-    font-size: 1.5rem;
-    animation: floatUp 3.4s ease-out forwards;
-    will-change: transform, opacity;
-  }
   @keyframes floatUp {
     0% { opacity: 0; transform: translateY(0) scale(0.6); }
     15% { opacity: 1; transform: translateY(-10px) scale(1.1); }
     100% { opacity: 0; transform: translateY(-150px) scale(1); }
   }
 
-  .emote-bar {
-    display: flex;
-    gap: 0.4rem;
-  }
-  .emo {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    width: 34px;
-    height: 34px;
-    font-size: 1rem;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .emo:hover {
-    border-color: var(--accent-2);
-    transform: scale(1.08);
-  }
   .dancer {
     position: relative;
     background: none;
@@ -451,32 +351,49 @@
     width: 66px;
     transform: translate(var(--dx, 0), var(--dy, 0));
   }
+  .dancer:focus-visible {
+    outline: 1px dashed #cfe9ff;
+    outline-offset: 3px;
+  }
   .bob {
+    position: relative;
     display: block;
+    border-radius: 50%;
+    -webkit-mask-image: none;
+    mask-image: none;
     will-change: transform;
     transform-origin: center bottom;
+  }
+  .bob::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(244, 246, 247, 0.12) 0 0.55px, transparent 0.72px);
+    background-size: 4px 4px;
+    mix-blend-mode: screen;
+    pointer-events: none;
   }
   .av {
     border-radius: 50%;
     object-fit: cover;
-    background: var(--bg-elev-2);
+    background: #1a1d20;
     display: block;
   }
   .dancer .av {
-    border: 2px solid transparent;
+    border: 0;
+    opacity: 0.94;
+    filter: grayscale(0.25) saturate(0.85) brightness(1.03) contrast(1.08);
   }
-  /* On-stage DJ (front row): a frame. The currently-playing DJ (.dj) additionally glows. */
+  /* The playing DJ is brighter, not glowing. */
   .dancer.up-front .av {
-    border-color: var(--accent-2);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 40%, transparent);
+    opacity: 0.97;
   }
   .dancer.up-front.no-ring .av {
-    border-color: transparent;
-    box-shadow: none;
+    opacity: 0.92;
   }
   .dancer.dj .av {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent), 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent);
+    opacity: 1;
+    filter: grayscale(0.18) saturate(0.9) brightness(1.1) contrast(1.12);
   }
   .nm {
     max-width: 66px;
@@ -484,7 +401,7 @@
     overflow: hidden;
     white-space: nowrap;
     font-size: 0.62rem;
-    color: var(--text-dim);
+    color: var(--lcd-text-soft);
   }
   .nm .mq-inner {
     display: inline-block;
@@ -503,39 +420,10 @@
     0%, 25%  { transform: translateX(0); }
     75%, 100% { transform: translateX(min(0px, calc(var(--nm-w) - 100%))); }
   }
-  .more {
-    align-self: center;
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    font-weight: 600;
-  }
-  .more.sm {
-    font-size: 0.7rem;
-  }
-
-  /* Offline = dimmed, still, smaller, at the back. */
-  .backrow {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    align-items: center;
-    margin-top: 0.5rem;
-    padding-top: 0.55rem;
-    border-top: 1px dashed var(--border);
-    opacity: 0.4;
-  }
-  .away {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    filter: grayscale(0.6);
-  }
-
-  /* The dance: 4 deterministic variants, only while a DJ is playing. Per-pubkey duration/delay
+  /* The dance: 6 deterministic variants, only while a DJ is playing. Per-pubkey duration/delay
      (vars, iOS-safe) give varied phases → no lockstep. animation-name comes from the concrete
-     variant class (NOT a CSS var) so iOS Safari resolves the keyframes. All variants bounce up
-     and down (the crowd moving to the beat); sway/two-step add a little side motion. */
+     variant class (NOT a CSS var) so iOS Safari resolves the keyframes. Every variant has exactly
+     one vertical peak per cycle, keeping its visible bounce inside the 89–110 BPM range. */
   .floor.playing .bob {
     animation-duration: var(--dur, 0.9s);
     animation-delay: var(--delay, 0s);
@@ -546,6 +434,8 @@
   .floor.playing .v1 { animation-name: dance1; }
   .floor.playing .v2 { animation-name: dance2; }
   .floor.playing .v3 { animation-name: dance3; }
+  .floor.playing .v4 { animation-name: dance4; }
+  .floor.playing .v5 { animation-name: dance5; }
 
   @keyframes dance0 { /* bounce */
     0%, 100% { transform: translateY(0) scaleY(1); }
@@ -561,21 +451,22 @@
   }
   @keyframes dance3 { /* two-step bounce */
     0%, 100% { transform: translateX(-4px) translateY(0); }
-    25% { transform: translateX(0) translateY(-8px); }
-    50% { transform: translateX(4px) translateY(0); }
-    75% { transform: translateX(0) translateY(-8px); }
+    50% { transform: translateX(4px) translateY(-8px); }
+  }
+  @keyframes dance4 { /* soft hop with a small tilt */
+    0%, 100% { transform: translateY(0) rotate(3deg) scale(1); }
+    50% { transform: translateY(-9px) rotate(-4deg) scale(1.04); }
+  }
+  @keyframes dance5 { /* diagonal club step */
+    0%, 100% { transform: translateX(3px) translateY(0) rotate(4deg); }
+    50% { transform: translateX(-3px) translateY(-6px) rotate(-5deg); }
   }
 
-  /* Energy: when the floor is busy, everyone dances a bit faster (iOS-safe calc on duration). */
-  .floor.hyped.playing .bob {
-    animation-duration: calc(var(--dur, 0.9s) * 0.7);
-  }
-
-  /* Zap landed on this DJ → a gold pulse + a spark rising. */
+  /* Zap landed on this DJ → a brief brighter LCD pulse, without glow. */
   .dancer.zapped .av {
     animation: zapPulse 0.4s ease-out 3;
-    border-color: var(--amber);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 45%, transparent), 0 0 16px color-mix(in srgb, var(--amber) 55%, transparent);
+    opacity: 1;
+    filter: grayscale(0.15) saturate(0.95) brightness(1.24) contrast(1.16);
   }
   @keyframes zapPulse {
     0%, 100% { transform: scale(1); }
@@ -590,6 +481,7 @@
     z-index: 4;
     pointer-events: none;
     animation: floatUp 1.4s ease-out;
+    color: #eef9ff;
   }
 
   .card-pop {
@@ -598,8 +490,8 @@
     gap: 0.5rem;
     margin-top: 0.6rem;
     padding: 0.5rem 0.6rem;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    background: rgba(9, 28, 60, 0.9);
+    border: 1px solid rgba(207, 233, 255, 0.3);
     border-radius: var(--radius-sm);
   }
   .card-pop .av {
@@ -629,16 +521,16 @@
   }
   .role {
     font-size: 0.68rem;
-    color: var(--accent);
+    color: #b8dcfa;
   }
   .here {
     font-size: 0.66rem;
-    color: var(--accent-2);
+    color: #d2ecff;
   }
   .link {
     background: none;
-    border: 1px solid var(--border);
-    color: var(--accent);
+    border: 1px solid rgba(207, 233, 255, 0.3);
+    color: #cfe9ff;
     border-radius: 7px;
     padding: 0.25rem 0.5rem;
     font-size: 0.76rem;
@@ -646,9 +538,9 @@
     flex: 0 0 auto;
   }
   .mini {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
+    background: rgba(13, 31, 66, 0.7);
+    border: 1px solid rgba(207, 233, 255, 0.25);
+    color: #9fc8ed;
     border-radius: 7px;
     padding: 0.25rem 0.45rem;
     font-size: 0.72rem;
@@ -670,10 +562,20 @@
 
   @media (prefers-reduced-motion: reduce) {
     .floor.playing .bob,
-    .fly,
     .dancer.zapped .av,
     .dancer.zapped::after {
       animation: none !important;
     }
+  }
+  @media (max-width: 560px) {
+    .floor { padding-inline: 0.75rem; }
+    .stagerow {
+      --stage-avatar-size: 64px;
+      grid-template-columns: repeat(3, minmax(64px, 1fr));
+      gap: 0.3rem;
+      padding-top: 0.85rem;
+    }
+    .dancer.open .ring svg { width: 25px; height: 25px; }
+    .stagerow .nm { max-width: 68px; --nm-w: 68px; font-size: 0.64rem; }
   }
 </style>

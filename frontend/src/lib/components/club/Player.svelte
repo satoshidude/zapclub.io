@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
   import { createPlayer, type YouTubePlayer } from '../../player/youtube'
   import { sync, targetPosition } from '../../nostr/sync.svelte'
   import { stage } from '../../nostr/stage.svelte'
@@ -16,25 +16,49 @@
     onCta?: () => void
     /** Compact (small thumbnail) mode → hide the full control bar; tap-to-mute still works. */
     compact?: boolean
+    /** Keep the YouTube engine active but expose it through a custom external control surface. */
+    headless?: boolean
+    /** Fit the video flush into a parent-owned media frame. */
+    embedded?: boolean
+    /** Optional artwork shown instead of the live video. */
+    cover?: string
+    /** Artwork shown while the club is in the lobby. */
+    poster?: string
+    oncontrolstate?: (state: { ready: boolean; muted: boolean; volume: number; fullscreen: boolean; playing: boolean }) => void
     /** Live embed metadata (channel + title) once a real track plays — no extraction, no bot
      *  gate. Lets the card show the artist (from a "Artist - Topic" channel) for bare titles. */
     onmeta?: (author: string, title: string) => void
     onduration?: (seconds: number) => void
   }
-  let { onended, onerror, canHear = false, ctaText = '', onCta, compact = false, onmeta, onduration }: Props = $props()
+  let {
+    onended,
+    onerror,
+    canHear = false,
+    ctaText = '',
+    onCta,
+    compact = false,
+    headless = false,
+    embedded = false,
+    cover = '',
+    poster = '',
+    oncontrolstate,
+    onmeta,
+    onduration,
+  }: Props = $props()
 
   const elementId = 'yt-player'
   let player: YouTubePlayer | null = null
   let destroyed = false
   let ready = $state(false)
 
-  // Start MUTED everywhere. Muted autoplay is allowed by every browser without a user gesture
-  // (unlike unmuted, which iOS Safari / Chrome's autoplay policy block), so the synced stream
-  // always starts visually. A persistent "🔊 Tap for sound" overlay shows whenever we're muted;
-  // one tap unmutes inside the gesture (the only way iOS lets audio start) and re-syncs.
+  // The iframe always starts muted so autoplay remains reliable. Browsers such as
+  // Safari only allow audio to start inside a user gesture, so the UI must keep
+  // reporting the real muted state until enableSound() is called from a control.
   let muted = $state(true)
+  let lastCanHear = untrack(() => canHear)
   let volume = $state(70)
   let isFullscreen = $state(false)
+  let playing = $state(false)
   let playerEl: HTMLDivElement
   let loadedVideoId: string | null = null
   let idleMode = false
@@ -44,9 +68,15 @@
 
   createPlayer(elementId, {
     controls: false,
-    muted: true, // muted autoplay (always allowed); the "Tap for sound" overlay unmutes.
+    muted: true,
     onStateChange(s) {
+      if (s === 1) playing = true
+      else if (s === -1 || s === 0 || s === 2 || s === 5) playing = false
       if (s === 1) {
+        if (canHear && !muted && player) {
+          player.setVolume(volume)
+          player.unMute()
+        }
         // Surface the embed's channel + title (no extraction → no bot gate) for a real track.
         if (!idleMode && player) {
           const d = player.getVideoData()
@@ -166,9 +196,9 @@
     }
   }
 
-  // Show the "Tap for sound" prompt whenever we're muted (and the user may hear) — i.e. the
-  // muted autostart, or after the user mutes again.
-  const needsSoundTap = $derived(canHear && ready && muted)
+  $effect(() => {
+    oncontrolstate?.({ ready, muted, volume, fullscreen: isFullscreen, playing })
+  })
 
   /** Volume slider: sets volume, unmutes (0 = muted). */
   function applyVolume(v: number) {
@@ -186,10 +216,14 @@
     }
   }
 
-  // Non-members don't hear: mute the player as soon as canHear is false (and it stays —
-  // they don't get the control bar to undo it).
+  // Revoking access mutes immediately. Gaining access stays muted until the user
+  // explicitly enables sound, preserving strict autoplay-policy compatibility.
   $effect(() => {
-    if (!canHear && player && !muted) {
+    void ready
+    const allowed = canHear
+    if (!player || !ready || allowed === lastCanHear) return
+    lastCanHear = allowed
+    if (!allowed) {
       player.mute()
       muted = true
     }
@@ -198,6 +232,20 @@
   function toggleFullscreen() {
     if (document.fullscreenElement) void document.exitFullscreen()
     else void playerEl?.requestFullscreen?.()
+  }
+
+  /** Control hooks used by the LCD surface in NowPlaying. */
+  export function toggleAudio() {
+    if (muted) enableSound()
+    else toggleMute()
+  }
+
+  export function setAudioVolume(value: number) {
+    applyVolume(Math.max(0, Math.min(100, value)))
+  }
+
+  export function toggleVideoFullscreen() {
+    toggleFullscreen()
   }
   function onFsChange() {
     isFullscreen = !!document.fullscreenElement
@@ -228,47 +276,46 @@
   })
 </script>
 
-<div class="player-wrap" bind:this={playerEl}>
+<div class="player-wrap" class:headless class:embedded bind:this={playerEl}>
   <div class="player">
     <div class="frame">
       <div id={elementId}></div>
     </div>
 
-    <!-- Click shield: catches mouse events → no YouTube hover overlays / clicks.
-         For members a click on the video toggles mute. -->
-    <button
-      class="shield"
-      class:clickable={canHear}
-      onclick={() => {
-        if (!canHear) return
-        // Muted → tapping turns sound on (inside the gesture, re-syncs); unmuted → mute.
-        if (muted) enableSound()
-        else toggleMute()
-      }}
-      aria-label={canHear ? (needsSoundTap ? 'Tap for sound' : muted ? 'Unmute' : 'Mute') : ''}
-      tabindex={canHear ? 0 : -1}
-    ></button>
-
-    <!-- iOS: muted autoplay is running in sync; one tap (anywhere on the video) turns on sound.
-         pointer-events:none so the full-area shield button underneath catches the tap. -->
-    {#if needsSoundTap}
-      <div class="sound-tap" aria-hidden="true">
-        <span class="sound-pill">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none" />
-            <path d="M16 8.8a4.5 4.5 0 0 1 0 6.4" />
-            <path d="M18.7 6a8 8 0 0 1 0 12" />
-          </svg>
-        </span>
+    {#if sync.live && cover}
+      <div class="cover" aria-hidden="true">
+        <img src={cover} alt="" />
       </div>
+    {/if}
+
+    <!-- Shield catches mouse events so YouTube never adds hover chrome. In the embedded LCD
+         it is deliberately non-interactive; standalone players may still use video-tap mute. -->
+    {#if embedded}
+      <div class="shield" aria-hidden="true"></div>
+    {:else}
+      <button
+        class="shield"
+        class:clickable={canHear}
+        onclick={() => {
+          if (!canHear) return
+          // Muted → tapping turns sound on (inside the gesture, re-syncs); unmuted → mute.
+          if (muted) enableSound()
+          else toggleMute()
+        }}
+        aria-label={canHear ? (muted ? 'Unmute' : 'Mute') : ''}
+        tabindex={canHear ? 0 : -1}
+      ></button>
     {/if}
 
     <!-- Lobby overlay: always full opaque when no live track.
          When a DJ is on stage without tracks the lobby video plays behind it (audio only). -->
     {#if !sync.live}
-      <div class="lobby" aria-hidden="true">
-        <span class="lobby-icon">🎧</span>
-        <span class="lobby-text">{stage.djs.length > 0 ? 'DJ is loading tracks…' : 'Lobby — no DJ on stage'}</span>
+      <div class="lobby" class:has-poster={!!poster} aria-hidden="true">
+        {#if poster}<img class="poster" src={poster} alt="" />{/if}
+        {#if !poster}
+          <span class="lobby-icon">🎧</span>
+          <span class="lobby-text">{stage.djs.length > 0 ? 'DJ is loading tracks…' : 'Lobby — no DJ on stage'}</span>
+        {/if}
       </div>
     {/if}
 
@@ -305,6 +352,24 @@
   .player-wrap {
     width: 100%;
   }
+  .player-wrap.headless {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    clip-path: inset(50%);
+  }
+  .player-wrap.embedded,
+  .player-wrap.embedded .player {
+    height: 100%;
+  }
+  .player-wrap.embedded .player {
+    aspect-ratio: auto;
+    border: 0;
+    border-radius: 0;
+  }
   .player {
     position: relative;
     width: 100%;
@@ -326,6 +391,17 @@
     height: 100%;
     border: 0;
   }
+  .cover {
+    position: absolute;
+    inset: 0;
+  }
+  .cover img,
+  .poster {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
   .shield {
     position: absolute;
     inset: 0;
@@ -337,43 +413,6 @@
   }
   .shield.clickable {
     cursor: pointer;
-  }
-  /* iOS "tap for sound" prompt — visible hint over the (muted) synced stream; the tap is
-     handled by the full-area shield button beneath it. */
-  /* Subtle, finer "tap for sound": just a small speaker icon (no heavy overlay / text). */
-  .sound-tap {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    display: grid;
-    place-items: center;
-    pointer-events: none;
-  }
-  .sound-pill {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 999px;
-    line-height: 1;
-    color: #0b0a10;
-    background: #fff;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 0 rgba(255, 255, 255, 0.5);
-    animation: sound-pulse 2.2s ease-in-out infinite;
-  }
-  @keyframes sound-pulse {
-    0%,
-    100% {
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 0 rgba(255, 255, 255, 0.55);
-    }
-    50% {
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 8px rgba(255, 255, 255, 0);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .sound-pill {
-      animation: none;
-    }
   }
   /* Lobby overlay covers the (muted) idle stream with a calm placeholder. */
   .lobby {
@@ -390,6 +429,10 @@
       radial-gradient(600px 300px at 50% 40%, rgba(177, 77, 255, 0.22), transparent 70%),
       #07070a;
     pointer-events: none;
+  }
+  .lobby.has-poster {
+    display: block;
+    background: #07070a;
   }
   .lobby-icon {
     font-size: 2.4rem;
@@ -499,6 +542,14 @@
     display: flex;
     flex-direction: column;
     background: #000;
+  }
+  .player-wrap.headless:fullscreen {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    opacity: 1;
+    pointer-events: auto;
+    clip-path: none;
   }
   .player-wrap:fullscreen .player {
     flex: 1;

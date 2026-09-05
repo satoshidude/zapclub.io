@@ -6,7 +6,7 @@
 
   const now = () => Math.floor(Date.now() / 1000)
 
-  let { clubId, clubName }: { clubId: string; clubName: string } = $props()
+  let { clubId, clubName, embedded = false }: { clubId: string; clubName: string; embedded?: boolean } = $props()
 
   type Target = 'nostr' | 'x'
   let target = $state<Target>('nostr')
@@ -57,7 +57,7 @@
   }
 </script>
 
-<div class="share-block">
+<div class="share-block" class:embedded>
   <div class="share-head">
     <span class="share-label">Share</span>
     <div class="toggle">
@@ -143,6 +143,12 @@
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
+  }
+  .share-block.embedded {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
   }
 
   .share-head {

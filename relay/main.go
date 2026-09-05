@@ -13,7 +13,6 @@ import (
 	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru/policies"
 	"github.com/fiatjaf/relay29"
-	"github.com/fiatjaf/relay29/khatru29"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip13"
 	"github.com/nbd-wtf/go-nostr/nip29"
@@ -65,11 +64,10 @@ func pruneOldPlays(db *badger.BadgerBackend, cutoffSec int64) int {
 	return total
 }
 
-// isForeignConductorWrite reports whether an event is a now_playing (30100) / play-log (1313)
-// write from anyone but the relay key. The relay is the sole conductor; clients must not author
-// these kinds.
+// isForeignConductorWrite reports whether an event in the relay-authored state surface came from
+// anyone but the relay key. Clients must not forge playback or credibility snapshots.
 func isForeignConductorWrite(kind int, pubkey, relayPub string) bool {
-	return (kind == kindNowPlaying || kind == kindPlay) && pubkey != relayPub
+	return (kind == kindNowPlaying || kind == kindPlay || kind == kindCredibility || kind == kindListenerCount) && pubkey != relayPub
 }
 
 // purgeForeignNowPlaying deletes any now_playing (30100) NOT authored by the relay key. These
@@ -122,7 +120,7 @@ func main() {
 		log.Fatalf("db init: %v", err)
 	}
 
-	relay, state := khatru29.Init(relay29.Options{
+	relay, state := initRelay29(relay29.Options{
 		Domain:                  domain,
 		DB:                      db,
 		SecretKey:               sk,
@@ -135,6 +133,27 @@ func main() {
 	// derives the URL from the HTTP request Host (localhost), which would make client-side
 	// 22242 signature verification fail and break all private-group reads.
 	relay.ServiceURL = env("RELAY_SERVICE_URL", "wss://relay.zapclub.io")
+
+	// Public clubs keep their radio stream public, while chat, presence and the
+	// member roster form a protected social layer. relay29 only protects these in
+	// groups marked wholly private, so apply Zapclub's membership boundary to all
+	// query handlers, live pushes and kind-9 writes.
+	social := newSocialGuard(state, superadmin)
+	relay.RejectEvent = append(
+		[]func(context.Context, *nostr.Event) (bool, string){social.rejectChatWrite},
+		relay.RejectEvent...,
+	)
+	relay.RejectFilter = append(relay.RejectFilter, social.rejectRead)
+	for i, query := range relay.QueryEvents {
+		relay.QueryEvents[i] = social.protectQuery(query)
+	}
+	relay.PreventBroadcast = append(relay.PreventBroadcast, social.preventBroadcast)
+	// Must precede relay29's observers: a kick/leave has to revoke live access
+	// before relay29 broadcasts its newly generated member list.
+	relay.OnEventSaved = append(
+		[]func(context.Context, *nostr.Event){social.observe},
+		relay.OnEventSaved...,
+	)
 
 	state.AllowAction = func(ctx context.Context, group nip29.Group, role *nip29.Role, action relay29.Action) bool {
 		if _, ok := action.(relay29.PutUser); ok {
@@ -189,7 +208,7 @@ func main() {
 		},
 	)
 
-	// now_playing (30100) and the play-log (1313) are relay-authored ONLY — the relay is the
+	// now_playing, play-log and credibility snapshots are relay-authored ONLY — the relay is the
 	// conductor. The relay's own writes go straight to the store and bypass this chain
 	// (conductor.go), so this only blocks CLIENTS: a member writing 30100/1313 used to be stored-
 	// but-ignored (clients accept now_playing only from the relay key), leaving stale per-author
@@ -197,7 +216,7 @@ func main() {
 	relay.RejectEvent = append(relay.RejectEvent,
 		func(_ context.Context, evt *nostr.Event) (bool, string) {
 			if isForeignConductorWrite(evt.Kind, evt.PubKey, relayPub) {
-				return true, "blocked: now_playing/play-log are relay-authored"
+				return true, "blocked: playback/credibility state is relay-authored"
 			}
 			return false, ""
 		},
@@ -234,10 +253,28 @@ func main() {
 		},
 	)
 
-	// Listener analytics (superadmin dashboard): observe ephemeral presence beats (kind
-	// 20100) and keep a rolling 24h per-club record. Persisted so the window survives deploys.
+	// Listener sessions: every open club page emits an anonymous, tab-scoped heartbeat
+	// (20105), independent of login and membership. The relay counts them, keeps the existing
+	// rolling 24h analytics and broadcasts only a relay-signed aggregate (20106).
 	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
+	listeners.setCountPublisher(func(club string, count int, now int64) {
+		event := &nostr.Event{
+			Kind:      kindListenerCount,
+			CreatedAt: nostr.Timestamp(now / 1000),
+			Tags: nostr.Tags{
+				{"h", club},
+				{"count", fmt.Sprint(count)},
+				{"sent_at", fmt.Sprint(now)},
+			},
+		}
+		if err := event.Sign(sk); err != nil {
+			log.Printf("listener count sign: %v", err)
+			return
+		}
+		relay.BroadcastEvent(event)
+	})
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, listeners.observe)
+	relay.PreventBroadcast = append(relay.PreventBroadcast, preventListenerBeatBroadcast)
 
 	// Club creation cap: at most 3 per account. Existing clubs are grandfathered.
 	cap := newClubCap(db, superadmin)
@@ -254,11 +291,35 @@ func main() {
 	chatLimiter := newKindLimiter(6, 1.0/3.0, "rate-limited: too many chat messages", 9)
 	// Presence/Reaktionen (kind 20100, ephemer): Burst 12, Auffüllung 1/s (~60/min).
 	reactionLimiter := newKindLimiter(12, 1.0, "rate-limited: too many reactions", 20100)
+	// Anonymous listener beats every ~25s; a small burst permits page changes and a clean
+	// on/off pair without allowing one session key to flood the relay.
+	listenerLimiter := newKindLimiter(6, 0.1, "rate-limited: too many listener updates", kindListenerBeat)
+	// Listener identities are intentionally throwaway keys, so close their Sybil gap with a
+	// separate per-IP budget. The defaults sustain about 50 active tabs behind one NAT while
+	// preventing one client from minting hundreds of simultaneous fake sessions.
+	listenerIPLimiter := newIPLimiter(
+		envFloat("RELAY_IP_LISTENER_BURST", 30),
+		envFloat("RELAY_IP_LISTENER_REFILL", 2),
+	)
+	// Vibemeter: Banger and Skip share one exact 10-second budget per account.
+	moodLimiter := newKindLimiter(1, 1.0/10.0, "rate-limited: wait 10 seconds before reacting again", kindMood)
 
 	relay.RejectEvent = append(relay.RejectEvent,
 		// Kind-spezifische, strenge Limiter für Nutzer-Content (vor dem allgemeinen).
 		chatLimiter.reject,
 		reactionLimiter.reject,
+		listenerLimiter.reject,
+		func(ctx context.Context, evt *nostr.Event) (bool, string) {
+			ip := connIP(ctx)
+			if evt.Kind != kindListenerBeat || ipWhitelist[ip] {
+				return false, ""
+			}
+			if !listenerIPLimiter.allow(ip) {
+				return true, "rate-limited: too many listener sessions from your network"
+			}
+			return false, ""
+		},
+		moodLimiter.reject,
 		// Allgemeiner Spam-/Flood-Schutz pro pubkey: Bucket 50 (Burst), 30/min.
 		// Deckt strukturelle Events (now_playing-Heartbeat ~8/min, stage, queue, presence).
 		// IP-Limit greift hinter Caddy nicht (nur localhost), daher pubkey-basiert.
@@ -278,6 +339,9 @@ func main() {
 		// Content-Größe begrenzen (DB-Bloat-Schutz). 16 KB sind großzügig für
 		// Chat/Metadaten; zapclub-Events nutzen Tags, nicht content.
 		func(_ context.Context, evt *nostr.Event) (bool, string) {
+			if evt.Kind == kindListenerBeat && !validListenerBeat(evt, nostr.Now()) {
+				return true, "invalid: listener update must be an empty on/off heartbeat"
+			}
 			if len(evt.Content) > 16*1024 {
 				return true, "content too large"
 			}
@@ -292,15 +356,17 @@ func main() {
 	// (trust their queue flags) from away ones (played-set guard) — same rule as the client.
 	relay.RejectEvent = append(relay.RejectEvent, cap.reject)
 
-	// Stage cap: every club may have at most 5 DJs on stage.
-	stageG := &stageGate{db: db, superadmin: superadmin}
+	// Stage cap: every club may have at most 3 DJs on stage.
+	stageG := &stageGate{db: db}
 	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
 
 	// Auto DJ config (kind 30105): only the club owner may arm/disarm.
 	autoDJG := newAutoDJGate(db, superadmin)
 	relay.RejectEvent = append(relay.RejectEvent, autoDJG.reject)
 
+	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
 	cond := newConductor(db, relay, state, sk)
+	cond.cred = credibility
 	// SQLite for persistent conductor state (played-set + track state survive restarts).
 	// Writer: MaxOpenConns(1), all INSERT/UPDATE/DELETE.
 	// Reader: MaxOpenConns(4), query_only — WAL allows concurrent reads alongside the writer.
@@ -318,7 +384,7 @@ func main() {
 	// After this, the OnEventSaved observers keep everything current — no per-tick DB reads.
 	cond.warmIndexes(context.Background())
 	cap.warmCount(context.Background())
-	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent)
+	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent, stageG.observe)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken, cond.observeMood)
 	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
@@ -359,6 +425,9 @@ func main() {
 			// Per-pubkey content limiters also need sweeping or their maps grow forever.
 			chatLimiter.sweep(10 * time.Minute)
 			reactionLimiter.sweep(10 * time.Minute)
+			listenerLimiter.sweep(10 * time.Minute)
+			listenerIPLimiter.sweep(10 * time.Minute)
+			moodLimiter.sweep(10 * time.Minute)
 			if ipEventLim != nil {
 				ipEventLim.sweep(10 * time.Minute)
 			}
@@ -370,8 +439,20 @@ func main() {
 			// matches the 5-min bucket → at most one bucket lost on an unclean crash).
 			listeners.tick(time.Now().UnixMilli(), true)
 			board.save()
+			credibility.save()
 			// Drop play-log records older than 24h (client reads only a ≤6h window).
 			pruneOldPlays(db, time.Now().Add(-24*time.Hour).Unix())
+		}
+	}()
+
+	// Listener counts expire and refresh on a much tighter cadence than the persisted 5-min
+	// analytics buckets. This gives club pages a near-real-time count without exposing the
+	// anonymous session events themselves.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			listeners.broadcastLive(time.Now().UnixMilli())
 		}
 	}()
 
@@ -383,6 +464,7 @@ func main() {
 		<-sig
 		listeners.save()
 		board.save()
+		credibility.save()
 		os.Exit(0)
 	}()
 

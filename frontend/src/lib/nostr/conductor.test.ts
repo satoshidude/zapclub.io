@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectActiveDjs, STALE_MS, type DjState } from './conductor'
+import { MAX_DJS, selectActiveDjs, STALE_MS, type DjState } from './conductor'
 
 const NOW = 1_000_000_000_000 // fixed "now" in ms
 const dj = (since: number, lastSeenMsAgo = 0, on = true): DjState => ({
@@ -31,8 +31,14 @@ describe('selectActiveDjs', () => {
     expect(selectActiveDjs(djs, { a: NOW - 20_000 }, NOW).map((d) => d.pubkey)).toEqual(['a']) // kick predates last seen
   })
 
-  it('caps at maxDjs', () => {
+  it('caps the stage at three DJs by default', () => {
     const djs = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`d${i}`, dj(i)]))
-    expect(selectActiveDjs(djs, {}, NOW, 5)).toHaveLength(5)
+    expect(MAX_DJS).toBe(3)
+    expect(selectActiveDjs(djs, {}, NOW).map((d) => d.pubkey)).toEqual(['d0', 'd1', 'd2'])
+  })
+
+  it('accepts a smaller explicit cap', () => {
+    const djs = Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`d${i}`, dj(i)]))
+    expect(selectActiveDjs(djs, {}, NOW, 2)).toHaveLength(2)
   })
 })

@@ -4,7 +4,7 @@ import type { StageDj } from './types'
 // what round-robin order), unit-testable in isolation. (Conductor election lived here too but is
 // gone: the RELAY is the sole conductor now, so clients never elect one.)
 
-export const MAX_DJS = 5
+export const MAX_DJS = 3
 // Sticky stage: a DJ stays up to 1h after their last heartbeat (survives backgrounded tabs).
 export const STALE_MS = 300_000 // max 5 min on stage after the last heartbeat (matches relay condStageStaleMS)
 

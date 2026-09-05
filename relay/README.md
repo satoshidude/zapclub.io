@@ -17,12 +17,29 @@ Built on **khatru + relay29** (Go, badger eventstore). Listens only on
   the relay rejects it. Use two separate subs.
 - **`go.mod`/`go.sum` committed.** Never run `go get` / `go mod tidy` during a
   release. Build from the pinned module files before switching the active release.
+- **Keep Khatru on the pinned final commit.** Its `PreventBroadcast` continues with
+  the next listener instead of returning after the first blocked connection. The
+  local `relay29init.go` adapter bridges its delivery-count return value to the
+  archived relay29 interface.
 
 ## Write protection
 
 Only group members may write club content; the relay checks membership against
-the `h`-tag group. `30100` and `1313` are relay-authored only. NIP-42 AUTH runs
-on connect; public clubs stay readable without AUTH.
+the `h`-tag group. The sole exception is the empty, anonymous `20105` listener heartbeat;
+its relay-signed `20106` aggregate exposes only the count. `30100`, `1313`, `20106` and NIP-78 credibility snapshots are relay-authored only. NIP-42 AUTH runs
+on connect. Public club metadata, playback and stage remain readable without
+AUTH, while kind `9`, presence and `39002` are served only to authenticated
+current members. The check applies to history, direct event-id queries and every
+live push, so leave/kick also revokes an already-open subscription.
+
+Vibemeter kind `20104` is ephemeral and membership-gated. Banger and Skip share
+one relay-enforced reaction every 10 seconds, including repeated reactions from
+the same member. The conductor caps each track at five banger clicks, awards
+one point per click, advances after three skips with a score of minus one, and
+stores the settled DJ score in
+`credibility.json`; its current aggregate is mirrored as a relay-signed kind
+`30078` event with `h=zapclub-credibility` and
+`d=zapclub:credibility:<pubkey>`.
 
 ## Secrets
 
@@ -74,5 +91,5 @@ Roles: `owner` (creator) + `moderator`. DJ/stage is a content event (30102),
 not a relay role.
 
 Relay-enforced gates cover paid entry (`entryfee.go`), club count
-(`clubcap.go`), owner-only Auto DJ (`autodjgate.go`) and the DJ slot cap in
+(`clubcap.go`), owner-only Auto DJ (`autodjgate.go`) and the three-DJ slot cap in
 `conductor.go`. Closed-club membership is enforced by relay29.

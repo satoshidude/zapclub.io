@@ -8,24 +8,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fiatjaf/khatru"
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Listener analytics for the superadmin dashboard. Presence heartbeats (kind 20100) are
-// ephemeral — khatru broadcasts but never stores them — so we observe them via
+// Listener analytics for the superadmin dashboard. Anonymous club-page heartbeats (kind
+// 20105) are ephemeral — khatru broadcasts but never stores them — so we observe them via
 // OnEphemeralEvent and keep our OWN rolling 24h record: per club, a per-5-min count series
-// (for the chart) plus, per listener, the first/last time they were seen (who listened,
-// when). This is a deliberate, superadmin-only analytics store — the only place zapclub
-// records who-listened-when. It holds NOTHING about non-members (the relay rejects their
-// writes, so they never beat) and nothing about what was played. Persisted to disk so the
-// 24h window survives relay restarts/deploys.
+// (for the chart) plus, per anonymous browser-tab session, the first/last time it was seen.
+// Login keys are deliberately not used: open club pages count equally for guests, read-only
+// accounts and signed-in members. Persisted to disk so the 24h window survives deploys.
 const (
-	kindPresence    = 20100
-	listenWindowMs  = 24 * 60 * 60 * 1000 // rolling window: 24h
-	listenBucketMs  = 5 * 60 * 1000       // chart resolution: 5 min
-	listenOnlineMs  = 60 * 1000           // a beat keeps a pubkey "live" for 60s (beats are ~25s)
-	listenMaxClubs  = 2000                // safety caps against unbounded growth
-	listenMaxPksClb = 5000
+	kindPresence           = 20100 // signed-in member presence; separate from listener sessions
+	kindListenerBeat       = 20105
+	kindListenerCount      = 20106               // relay-signed aggregate; clients cannot forge it
+	listenWindowMs         = 24 * 60 * 60 * 1000 // rolling window: 24h
+	listenBucketMs         = 5 * 60 * 1000       // chart resolution: 5 min
+	listenOnlineMs         = 70 * 1000           // browser tabs beat about every 25s
+	listenCountBroadcastMs = 15 * 1000           // refresh stable counts for late subscribers
+	listenMaxClubs         = 2000                // safety caps against unbounded growth
+	listenMaxPksClb        = 5000
 )
 
 // listenerSample is one finalized 5-min bucket: T = bucket start (ms), N = distinct
@@ -42,20 +44,27 @@ type span struct {
 }
 
 type listenerStats struct {
-	mu       sync.Mutex
-	path     string
-	Seen     map[string]map[string]*span    `json:"seen"`     // club -> pubkey -> span
-	Series   map[string][]listenerSample    `json:"series"`   // club -> finalized buckets
-	CurStart int64                          `json:"curStart"` // start (ms) of the open bucket
-	CurSets  map[string]map[string]struct{} `json:"-"`        // club -> distinct pubkeys this bucket
+	mu            sync.Mutex
+	path          string
+	Seen          map[string]map[string]*span    `json:"seen"`     // club -> anonymous session pubkey -> span
+	Series        map[string][]listenerSample    `json:"series"`   // club -> finalized buckets
+	CurStart      int64                          `json:"curStart"` // start (ms) of the open bucket
+	CurSets       map[string]map[string]struct{} `json:"-"`        // club -> distinct sessions this bucket
+	active        map[string]map[string]int64    `json:"-"`        // club -> session -> last beat (ms)
+	published     map[string]int                 `json:"-"`        // last aggregate sent per club
+	lastPublished map[string]int64               `json:"-"`
+	publishCount  func(club string, count int, now int64)
 }
 
 func newListenerStats(path string) *listenerStats {
 	s := &listenerStats{
-		path:    path,
-		Seen:    map[string]map[string]*span{},
-		Series:  map[string][]listenerSample{},
-		CurSets: map[string]map[string]struct{}{},
+		path:          path,
+		Seen:          map[string]map[string]*span{},
+		Series:        map[string][]listenerSample{},
+		CurSets:       map[string]map[string]struct{}{},
+		active:        map[string]map[string]int64{},
+		published:     map[string]int{},
+		lastPublished: map[string]int64{},
 	}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, s) // best-effort; CurSets is rebuilt empty (in-flight bucket only)
@@ -70,29 +79,94 @@ func newListenerStats(path string) *listenerStats {
 	return s
 }
 
-// observe records an accepted presence heartbeat. Registered on OnEphemeralEvent, so it
-// only ever sees member beats that already passed the write-protection checks.
+func (s *listenerStats) setCountPublisher(fn func(club string, count int, now int64)) {
+	s.mu.Lock()
+	s.publishCount = fn
+	s.mu.Unlock()
+}
+
+func validListenerBeat(event *nostr.Event, now nostr.Timestamp) bool {
+	if event == nil || event.Kind != kindListenerBeat || event.Content != "" {
+		return false
+	}
+	// Old captured heartbeats must not be replayable as fresh listeners. Future timestamps are
+	// rejected by the relay's shared policy; this enforces the matching lower bound.
+	if event.CreatedAt < now-60 {
+		return false
+	}
+	var h, state int
+	for _, tag := range event.Tags {
+		if len(tag) != 2 {
+			return false
+		}
+		switch tag[0] {
+		case "h":
+			h++
+			if tag[1] == "" {
+				return false
+			}
+		case "state":
+			state++
+			if tag[1] != "on" && tag[1] != "off" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return h == 1 && state == 1
+}
+
+// Raw session heartbeats are input-only. Even though their keys are anonymous and ephemeral,
+// other clients need only the relay-signed aggregate and must not receive the individual beats.
+func preventListenerBeatBroadcast(_ *khatru.WebSocket, event *nostr.Event) bool {
+	return event.Kind == kindListenerBeat
+}
+
+// observe records an accepted anonymous club-page heartbeat. "off" is a best-effort fast
+// departure signal; missing departures age out through listenOnlineMs.
 func (s *listenerStats) observe(_ context.Context, evt *nostr.Event) {
-	if evt.Kind != kindPresence {
+	if evt.Kind != kindListenerBeat {
 		return
 	}
-	var club string
+	var club, state string
 	for _, t := range evt.Tags {
 		if len(t) >= 2 && t[0] == "h" {
 			club = t[1]
-			break
+		}
+		if len(t) >= 2 && t[0] == "state" {
+			state = t[1]
 		}
 	}
 	if club == "" {
 		return
 	}
-	s.record(club, evt.PubKey, time.Now().UnixMilli())
+	now := time.Now().UnixMilli()
+	if state == "off" {
+		s.remove(club, evt.PubKey)
+	} else {
+		s.record(club, evt.PubKey, now)
+	}
+	s.broadcastLive(now)
 }
 
 func (s *listenerStats) record(club, pubkey string, now int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rollLocked(now)
+
+	active := s.active[club]
+	if active == nil {
+		if len(s.active) >= listenMaxClubs {
+			return
+		}
+		active = map[string]int64{}
+		s.active[club] = active
+	}
+	if _, exists := active[pubkey]; !exists && len(active) >= listenMaxPksClb {
+		return
+	}
+	active[pubkey] = now
 
 	set := s.CurSets[club]
 	if set == nil {
@@ -101,6 +175,9 @@ func (s *listenerStats) record(club, pubkey string, now int64) {
 		}
 		set = map[string]struct{}{}
 		s.CurSets[club] = set
+	}
+	if _, exists := set[pubkey]; !exists && len(set) >= listenMaxPksClb {
+		return
 	}
 	set[pubkey] = struct{}{}
 
@@ -113,6 +190,73 @@ func (s *listenerStats) record(club, pubkey string, now int64) {
 		sp.Last = now
 	} else if len(cs) < listenMaxPksClb {
 		cs[pubkey] = &span{First: now, Last: now}
+	}
+}
+
+func (s *listenerStats) remove(club, pubkey string) {
+	s.mu.Lock()
+	if active := s.active[club]; active != nil {
+		delete(active, pubkey)
+		if len(active) == 0 {
+			delete(s.active, club)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *listenerStats) pruneActiveLocked(now int64) {
+	for club, sessions := range s.active {
+		for pubkey, last := range sessions {
+			if now-last >= listenOnlineMs {
+				delete(sessions, pubkey)
+			}
+		}
+		if len(sessions) == 0 {
+			delete(s.active, club)
+		}
+	}
+}
+
+// broadcastLive publishes relay-authoritative aggregate counts when they change and at a
+// low refresh cadence so a newly connected page never waits for another listener to arrive.
+func (s *listenerStats) broadcastLive(now int64) {
+	type update struct {
+		club  string
+		count int
+	}
+
+	s.mu.Lock()
+	s.pruneActiveLocked(now)
+	if s.publishCount == nil {
+		s.mu.Unlock()
+		return
+	}
+	clubs := make(map[string]struct{}, len(s.active)+len(s.published))
+	for club := range s.active {
+		clubs[club] = struct{}{}
+	}
+	for club := range s.published {
+		clubs[club] = struct{}{}
+	}
+	updates := make([]update, 0, len(clubs))
+	for club := range clubs {
+		count := len(s.active[club])
+		previous, sent := s.published[club]
+		if !sent || previous != count || now-s.lastPublished[club] >= listenCountBroadcastMs {
+			updates = append(updates, update{club: club, count: count})
+			s.published[club] = count
+			s.lastPublished[club] = now
+		}
+		if count == 0 {
+			delete(s.published, club)
+			delete(s.lastPublished, club)
+		}
+	}
+	publish := s.publishCount
+	s.mu.Unlock()
+
+	for _, u := range updates {
+		publish(u.club, u.count, now)
 	}
 }
 
@@ -149,6 +293,7 @@ func (s *listenerStats) clubUniverseLocked() map[string]struct{} {
 // trimLocked drops samples and spans older than the window; empties are removed so idle
 // clubs eventually leave the tracker entirely.
 func (s *listenerStats) trimLocked(now int64) {
+	s.pruneActiveLocked(now)
 	cutoff := now - listenWindowMs
 	for club, samples := range s.Series {
 		kept := samples[:0]
@@ -210,10 +355,10 @@ func (s *listenerStats) snapshot(now int64) listenersResp {
 		// finalized buckets + the still-open bucket as the live tail
 		cl.Series = append(cl.Series, s.Series[club]...)
 		cl.Series = append(cl.Series, listenerSample{T: s.CurStart, N: len(s.CurSets[club])})
+		for pk := range s.active[club] {
+			cl.Live = append(cl.Live, pk)
+		}
 		for pk, sp := range s.Seen[club] {
-			if now-sp.Last < listenOnlineMs {
-				cl.Live = append(cl.Live, pk)
-			}
 			cl.Seen = append(cl.Seen, seenListener{Pubkey: pk, First: sp.First, Last: sp.Last})
 		}
 		sort.Slice(cl.Seen, func(i, j int) bool { return cl.Seen[i].Last > cl.Seen[j].Last })

@@ -4,8 +4,8 @@ import { auth } from './auth.svelte'
 
 export type MoodVote = 'banger' | 'skip'
 
-// Per-pubkey vote counts for each (club, pos).
-// { b: banger votes, s: skip votes } — each pubkey can contribute up to 3 per type.
+// Per-pubkey reaction counts for each (club, pos). The relay accepts at most one reaction per
+// account every 10 seconds and caps the room totals at five bangers / three skips.
 const voteMap = $state<Record<string, Record<number, Record<string, { b: number; s: number }>>>>({})
 
 // Authoritative baseline from the conductor's now_playing heartbeat.
@@ -14,6 +14,8 @@ const baseline = $state<Record<string, { b: number; s: number; sentAt: number }>
 
 // Own vote stored separately so it survives baseline clears (used for button highlight).
 const ownVotes = $state<Record<string, MoodVote>>({})
+const ownVoteAt = $state<Record<string, number>>({})
+const clock = $state({ now: Date.now() })
 
 // Dedup relay echoes of own events — own votes are counted optimistically, so we skip
 // the relay echo to avoid double-counting.
@@ -22,36 +24,39 @@ const seenMoodIds = new Set<string>()
 // Track which (club:pos) combos have already fired the banger threshold — one fireworks per track.
 const bangerFired = new Set<string>()
 
-const THRESHOLD = 3
-const MAX_VOTES = 3
+export const SKIP_THRESHOLD = 3
+export const BANGER_MAX = 5
+export const VOTE_COOLDOWN_MS = 10_000
+
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => { clock.now = Date.now() }, 250)
+}
 
 export const vibeMeter = {
   bangerCount(club: string, pos: number): number {
     const base = baseline[`${club}:${pos}`]?.b ?? 0
     const fresh = Object.values(voteMap[club]?.[pos] ?? {}).reduce((s, e) => s + e.b, 0)
-    return base + fresh
+    return Math.min(BANGER_MAX, base + fresh)
   },
   skipCount(club: string, pos: number): number {
     const base = baseline[`${club}:${pos}`]?.s ?? 0
     const fresh = Object.values(voteMap[club]?.[pos] ?? {}).reduce((s, e) => s + e.s, 0)
-    return base + fresh
+    return Math.min(SKIP_THRESHOLD, base + fresh)
   },
   ownVote(club: string, pos: number): MoodVote | null {
     if (!auth.pubkey) return null
     return ownVotes[`${club}:${pos}`] ?? null
   },
-  // Reads from reactive voteMap so $derived(vibeMeter.ownSkipCount(...)) updates properly.
-  ownSkipCount(club: string, pos: number): number {
-    return voteMap[club]?.[pos]?.[auth.pubkey ?? '']?.s ?? 0
-  },
-  ownBangerCount(club: string, pos: number): number {
-    return voteMap[club]?.[pos]?.[auth.pubkey ?? '']?.b ?? 0
+  cooldownSeconds(): number {
+    if (!auth.pubkey) return 0
+    const remaining = (ownVoteAt[auth.pubkey] ?? 0) + VOTE_COOLDOWN_MS - clock.now
+    return Math.max(0, Math.ceil(remaining / 1000))
   },
   /** Returns true once when banger threshold is first crossed for this track; resets on track change. */
   checkBanger(club: string, pos: number): boolean {
     const key = `${club}:${pos}`
     if (bangerFired.has(key)) return false
-    if (vibeMeter.bangerCount(club, pos) >= THRESHOLD) {
+    if (vibeMeter.bangerCount(club, pos) >= BANGER_MAX) {
       bangerFired.add(key)
       return true
     }
@@ -62,9 +67,8 @@ export const vibeMeter = {
 /**
  * Seed vote counts from the conductor's now_playing heartbeat (kind 30100).
  * Called every ~15 s so late-joining users immediately see the current state.
- * Clears stale ephemeral entries for OTHER users; keeps own votes in voteMap so the needle
- * never drops on heartbeat (even if the conductor's tick raced past the vote and hasn't
- * counted it yet). Overcounting from keeping own votes is bounded and clamped at [-2, 2].
+ * Clears stale ephemeral entries and keeps an own optimistic reaction only when it is newer
+ * than the conductor snapshot, so a heartbeat neither drops nor double-counts it.
  */
 export function setMoodBaseline(
   club: string,
@@ -74,10 +78,17 @@ export function setMoodBaseline(
   sentAt: number,
 ): void {
   const key = `${club}:${pos}`
-  baseline[key] = { b: bangers, s: skips, sentAt }
-  // Preserve own vote counts through baseline refresh so the needle doesn't drop.
+  baseline[key] = {
+    b: Math.min(BANGER_MAX, Math.max(0, bangers)),
+    s: Math.min(SKIP_THRESHOLD, Math.max(0, skips)),
+    sentAt,
+  }
+  // Preserve only an own reaction newer than this authoritative heartbeat. Once the relay's
+  // sentAt passes it, retaining the optimistic copy would double-count it.
   const myPk = auth.pubkey
-  const myVotes = myPk ? (voteMap[club]?.[pos]?.[myPk] ?? { b: 0, s: 0 }) : { b: 0, s: 0 }
+  const ownKey = myPk ?? ''
+  const keepOwn = !!ownKey && (ownVoteAt[ownKey] ?? 0) > sentAt
+  const myVotes = keepOwn && myPk ? (voteMap[club]?.[pos]?.[myPk] ?? { b: 0, s: 0 }) : { b: 0, s: 0 }
   if (voteMap[club]) delete voteMap[club][pos]
   if ((myVotes.b > 0 || myVotes.s > 0) && myPk) {
     if (!voteMap[club]) voteMap[club] = {}
@@ -85,7 +96,7 @@ export function setMoodBaseline(
   }
 }
 
-/** Ingest a mood vote event (kind 20104). Accumulates counts per pubkey (up to MAX_VOTES each). */
+/** Ingest a mood reaction event (kind 20104). */
 export function ingestMood(ev: Event): void {
   if (seenMoodIds.has(ev.id)) return
   seenMoodIds.add(ev.id)
@@ -109,9 +120,13 @@ export function ingestMood(ev: Event): void {
   if (!voteMap[club][pos]) voteMap[club][pos] = {}
   const cur = voteMap[club][pos][ev.pubkey] ?? { b: 0, s: 0 }
   if (vote === 'banger') {
-    voteMap[club][pos][ev.pubkey] = { ...cur, b: Math.min(MAX_VOTES, cur.b + 1) }
+    if (vibeMeter.bangerCount(club, pos) < BANGER_MAX) {
+      voteMap[club][pos][ev.pubkey] = { ...cur, b: cur.b + 1 }
+    }
   } else {
-    voteMap[club][pos][ev.pubkey] = { ...cur, s: Math.min(MAX_VOTES, cur.s + 1) }
+    if (vibeMeter.skipCount(club, pos) < SKIP_THRESHOLD) {
+      voteMap[club][pos][ev.pubkey] = { ...cur, s: cur.s + 1 }
+    }
   }
 }
 
@@ -119,18 +134,23 @@ export function ingestMood(ev: Event): void {
 export function optimisticVote(club: string, pos: number, pubkey: string, vote: MoodVote): void {
   if (pubkey === auth.pubkey) {
     ownVotes[`${club}:${pos}`] = vote
+    ownVoteAt[pubkey] = Date.now()
   }
   if (!voteMap[club]) voteMap[club] = {}
   if (!voteMap[club][pos]) voteMap[club][pos] = {}
   const cur = voteMap[club][pos][pubkey] ?? { b: 0, s: 0 }
   if (vote === 'banger') {
-    voteMap[club][pos][pubkey] = { ...cur, b: Math.min(MAX_VOTES, cur.b + 1) }
+    if (vibeMeter.bangerCount(club, pos) < BANGER_MAX) {
+      voteMap[club][pos][pubkey] = { ...cur, b: cur.b + 1 }
+    }
   } else {
-    voteMap[club][pos][pubkey] = { ...cur, s: Math.min(MAX_VOTES, cur.s + 1) }
+    if (vibeMeter.skipCount(club, pos) < SKIP_THRESHOLD) {
+      voteMap[club][pos][pubkey] = { ...cur, s: cur.s + 1 }
+    }
   }
 }
 
-/** Publish a mood vote (kind 20104, ephemeral). */
+/** Publish a Vibemeter reaction (kind 20104, ephemeral). */
 export async function sendMood(clubId: string, pos: number, vote: MoodVote): Promise<void> {
   await publishClub({
     kind: KIND_MOOD,
@@ -148,6 +168,7 @@ export function resetMood(): void {
   for (const k in voteMap) delete voteMap[k]
   for (const k in baseline) delete baseline[k]
   for (const k in ownVotes) delete ownVotes[k]
+  for (const k in ownVoteAt) delete ownVoteAt[k]
   seenMoodIds.clear()
   bangerFired.clear()
 }

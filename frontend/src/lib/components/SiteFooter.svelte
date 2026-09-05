@@ -6,10 +6,14 @@
   const displayVersion = build.version.endsWith('.0') ? build.version.slice(0, -2) : build.version
   const revision = build.commit === 'development' ? build.commit : build.commit.slice(0, 7)
 
-  function follow(event: MouseEvent, path: string): void {
+  function follow(event: MouseEvent, path: string, anchor = ''): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     navigate(path)
+    if (anchor) {
+      history.replaceState({}, '', `${path}#${anchor}`)
+      requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }))
+    }
   }
 </script>
 
@@ -19,9 +23,13 @@
   data-project-version={build.version}
   data-build-commit={build.commit}
 >
-  <a class="info" href="/about" onclick={(event) => follow(event, '/about')}>About &amp; legal</a>
+  <nav class="footer-nav" aria-label="Project information">
+    <a href="/about" onclick={(event) => follow(event, '/about')}>About</a>
+    <a href="/disclaimer" onclick={(event) => follow(event, '/disclaimer')}>Disclaimer</a>
+    <a href="/about#credits" onclick={(event) => follow(event, '/about', 'credits')}>Credits</a>
+  </nav>
   <small>
-    v{displayVersion} <span aria-hidden="true">/</span>
+    v.{displayVersion} <span aria-hidden="true">/</span>
     {#if build.commit === 'development'}
       {revision}
     {:else}
@@ -44,11 +52,19 @@
     font-weight: 600;
   }
 
-  .info {
+  .footer-nav {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem 1.25rem;
+    flex-wrap: wrap;
+    justify-self: start;
+  }
+
+  .footer-nav a {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
-    justify-self: start;
   }
 
   a {
@@ -91,6 +107,10 @@
       grid-template-columns: 1fr;
       gap: 0;
       padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
+    }
+
+    .footer-nav {
+      gap: 0 1rem;
     }
 
     small {

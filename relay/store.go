@@ -63,7 +63,8 @@ func sqlInitSchema(db *sql.DB) error {
 			title      TEXT NOT NULL DEFAULT '',
 			duration   INTEGER NOT NULL DEFAULT 0,
 			started_at INTEGER NOT NULL DEFAULT 0,
-			playing    INTEGER NOT NULL DEFAULT 0
+			playing    INTEGER NOT NULL DEFAULT 0,
+			auto       INTEGER NOT NULL DEFAULT 0
 		);
 
 		CREATE TABLE IF NOT EXISTS played (
@@ -104,6 +105,28 @@ func sqlInitSchema(db *sql.DB) error {
 			return err
 		}
 		log.Printf("sqlite: migrated played table: added played_at column")
+	}
+
+	// Guarded migration for releases that predate explicit Auto-DJ playback state.
+	rows, err = db.Query(`PRAGMA table_info(conductor_state)`)
+	if err != nil {
+		return err
+	}
+	hasAuto := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, dfltVal, pk interface{}
+		if scanErr := rows.Scan(&cid, &name, &colType, &notNull, &dfltVal, &pk); scanErr == nil && name == "auto" {
+			hasAuto = true
+		}
+	}
+	rows.Close()
+	if !hasAuto {
+		if _, err := db.Exec(`ALTER TABLE conductor_state ADD COLUMN auto INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		log.Printf("sqlite: migrated conductor_state table: added auto column")
 	}
 	return nil
 }

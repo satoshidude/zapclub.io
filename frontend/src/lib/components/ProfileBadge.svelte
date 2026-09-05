@@ -31,7 +31,9 @@
 </script>
 
 <span class="badge">
-  <img class="avatar" src={avatar} alt="" width={size} height={size} style:width="{size}px" style:height="{size}px" />
+  <span class="avatar-led" style:width="{size}px" style:height="{size}px">
+    <img class="avatar" src={avatar} alt="" width={size} height={size} />
+  </span>
   <span class="name-clip">
     <span class="name" class:scrolling bind:this={nameEl}>{name}</span>
   </span>
@@ -44,10 +46,19 @@
     gap: 0.5rem;
   }
   .avatar {
+    width: 100%;
+    height: 100%;
     border-radius: 999px;
     object-fit: cover;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
+    display: block;
+  }
+  .avatar-led {
+    position: relative;
+    display: block;
+    flex: none;
+    border-radius: 50%;
   }
   .name-clip {
     max-width: 16ch;

@@ -14,6 +14,10 @@
     parseMembers,
     parseAdmins,
     parseOwner,
+    queryClubAuthed,
+    KIND_MEMBERS,
+    KIND_PUT_USER,
+    KIND_REMOVE_USER,
     shareNote,
   } from '../nostr/groups'
   import { untrack } from 'svelte'
@@ -41,6 +45,7 @@
   import { ingestMood, resetMood } from '../nostr/mood.svelte'
   import { ingestAutoDJ, ingestAutoCtrl, resetAutoDJ } from '../nostr/autodj.svelte'
   import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
+  import { listeners, ingestListenerCount, startListening, stopListening } from '../nostr/listeners.svelte'
   import { subscribeZaps, resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
 import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
@@ -48,7 +53,9 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   import Queue from './club/Queue.svelte'
   import NowPlaying from './club/NowPlaying.svelte'
   import Dancefloor from './club/Dancefloor.svelte'
-  import ShareBlock from './club/ShareBlock.svelte'
+  import VibeMeter from './club/VibeMeter.svelte'
+  import Chat from './club/Chat.svelte'
+  import ChatMembers from './club/ChatMembers.svelte'
   import { clubAvatar } from '../avatar'
   import type { Club, ClubMember } from '../nostr/types'
 
@@ -62,6 +69,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   let error = $state('')
   let stageResumed = false
   let stageEoseReady = $state(false)
+  let chatMembersExpanded = $state(false)
 
   // Private-club state
   let requested = $state(false)        // user sent a join-request to a closed club
@@ -105,11 +113,29 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     configEvs = {}
     stageResumed = false
     stageEoseReady = false
+    chatMembersExpanded = false
     const me = auth.pubkey
     untrack(() => seedStageFromCache(id))
     const stop = subscribeClub(id, {
       onMeta: (ev) => (club = parseClubMetadata(ev)),
       onMembers: (ev) => (members = parseMembers(ev)),
+      onMembershipChange: (ev) => {
+        // Moderation history is replayed on subscribe; only a fresh event can
+        // describe this session's join/leave/kick transition.
+        if (!me || Date.now() - ev.created_at * 1000 > 60_000) return
+        const targets = ev.tags.filter((tag) => tag[0] === 'p').map((tag) => tag[1])
+        if (!targets.includes(me)) return
+        if (ev.kind === KIND_REMOVE_USER) {
+          members = []
+          return
+        }
+        if (ev.kind === KIND_PUT_USER) {
+          void queryClubAuthed({ kinds: [KIND_MEMBERS], '#d': [id] }).then((events) => {
+            const roster = events.find((event) => event.kind === KIND_MEMBERS)
+            if (roster) members = parseMembers(roster)
+          })
+        }
+      },
       onAdmins: (ev) => {
         admins = parseAdmins(ev)
         ownerPk = parseOwner(ev)
@@ -143,6 +169,7 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       onPlay: ingestPlay,
       onEmote: ingestEmote,
       onMood: ingestMood,
+      onListenerCount: (ev) => ingestListenerCount(ev, id),
       onAutoDJ: ingestAutoDJ,
       onAutoDJCtrl: ingestAutoCtrl,
       onEose: () => { stageEoseReady = true },
@@ -181,6 +208,16 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     if (isMember) startPresence(groupId)
     else stopPresence()
     return () => stopPresence()
+  })
+
+  // Listener count is deliberately separate from social member presence. Every browser tab
+  // that has loaded the club and is allowed to hear its conductor stream reports one anonymous
+  // session, regardless of login state.
+  $effect(() => {
+    const id = groupId
+    if (club && stageEoseReady && canHear && (!club.isPrivate || isMember)) startListening(id)
+    else stopListening()
+    return () => stopListening()
   })
 
   // One zap-receipt (9735) subscription per club for everyone shown with a zap chip:
@@ -529,32 +566,53 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
 
 <div class="wrap">
   <header class="hero">
-    <div class="hero-top">
+    <div class="hero-main led-zone">
       <div class="pic">
         <img class="pic-img" src={club?.picture || clubAvatar(owner || groupId)} alt="" />
       </div>
       <div class="info">
         <h1>{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
-          <span class="tag">{members.length} member{members.length === 1 ? '' : 's'}</span>
-          {#if isPaid}<span class="tag paid">🔒 {clubConfig.price} sats entry</span>{/if}
-          {#if club?.isPrivate}<span class="tag private">🔒 Private</span>{/if}
+          {#if isMember}
+            <span class="tag members-tag lcd-card-title" title={`${members.length} member${members.length === 1 ? '' : 's'}`}>
+              <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-4A4.5 4.5 0 0 0 3 18.5V20"></path>
+                <circle cx="9.5" cy="7.5" r="3.5"></circle>
+                <path d="M16 11a3 3 0 1 0 0-6M18 14.5a4 4 0 0 1 3 3.87V20"></path>
+              </svg>
+              {members.length}
+            </span>
+          {/if}
           {#if owner}
             {@const op = useProfile(owner)}
-            <a class="tag host" href={`/user/${npubEncode(owner)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
-              <img class="host-av" src={avatarUrl(owner, op)} alt="" width="14" height="14" />
+            <a class="tag host lcd-card-title" href={`/user/${npubEncode(owner)}`} title={`Host: ${displayName(owner, op)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(owner)) }}>
+              <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m4 8 3.2 3L12 5l4.8 6L20 8l-1.6 10H5.6L4 8Z"></path>
+                <path d="M6 21h12"></path>
+              </svg>
               {displayName(owner, op)}
             </a>
           {/if}
-          {#if presence.count > 0}
-            <span class="tag live-count" title="People listening to the stream right now">🎧 {presence.count} listening</span>
+          {#if listeners.count > 0}
+            <span class="tag live-count lcd-card-title" title="People listening to the stream right now">
+              <svg class="tag-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 14v-2a8 8 0 0 1 16 0v2"></path>
+                <path d="M4 14h3v6H5.5A1.5 1.5 0 0 1 4 18.5V14ZM20 14h-3v6h1.5a1.5 1.5 0 0 0 1.5-1.5V14Z"></path>
+              </svg>
+              {listeners.count}
+            </span>
           {/if}
+          {#if isPaid}<span class="tag paid lcd-card-title">⚡ {clubConfig.price} sats entry</span>{/if}
+          {#if club?.isPrivate}<span class="tag private lcd-card-title">🔒 Private</span>{/if}
         </div>
+        {#if !editing && club?.about}
+          <p class="desc">{club.about}</p>
+        {/if}
       </div>
       <div class="actions">
         <div class="action-btns">
           <div class="share-wrap">
-            <button class="btn btn-ghost btn-sm" onclick={() => { if (shareOpen) closeShare(); else { shareOpen = true; shareMsg = '' } }} title="Share this club" aria-label="Share this club">↗</button>
+            <button class="design-btn share-btn" onclick={() => { if (shareOpen) closeShare(); else { shareOpen = true; shareMsg = '' } }} title="Share this club" aria-label="Share this club"><span aria-hidden="true">⇧</span> Share</button>
             {#if shareOpen}
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
               <div class="share-backdrop" role="presentation" onclick={closeShare}></div>
@@ -588,22 +646,26 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
               </div>
             {/if}
           </div>
+          <a class="design-btn community-btn" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
+            <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
+            Join {club?.link ? communityLinkLabel(club.link) : 'Telegram'}
+          </a>
           {#if isOwner}
-            <button class="btn btn-ghost btn-sm" onclick={openEdit} title="Edit club">✏️</button>
+            <button class="design-btn" onclick={openEdit} title="Edit club"><span aria-hidden="true">✎</span> Edit</button>
           {/if}
           {#if auth.canSign}
             {#if isMember}
-              <button class="btn btn-ghost btn-sm" onclick={doLeave} disabled={busy}>Leave</button>
+              <button class="design-btn leave-btn" onclick={doLeave} disabled={busy}><span aria-hidden="true">↗</span> Leave</button>
             {:else if club?.closed}
               {#if requested}
                 <span class="badge-sent">Request sent</span>
               {:else}
-                <button class="btn btn-primary btn-sm" onclick={doRequestJoin} disabled={busy}>Request to join</button>
+                <button class="design-btn join-btn" onclick={doRequestJoin} disabled={busy}>Request to join</button>
               {/if}
             {:else if isPaid}
-              <button class="btn btn-primary btn-sm" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
+              <button class="design-btn join-btn" onclick={doPaidJoin} disabled={busy}>⚡ Join · {clubConfig.price} sats</button>
             {:else}
-              <button class="btn btn-primary btn-sm" onclick={doJoin} disabled={busy}>Join club</button>
+              <button class="design-btn join-btn" onclick={doJoin} disabled={busy}>Join club</button>
             {/if}
           {/if}
         </div>
@@ -657,10 +719,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
           <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)}>Cancel</button>
         </div>
       </div>
-    {:else}
-      {#if club?.about}
-        <p class="desc">{club.about}</p>
-      {/if}
     {/if}
 
     <!-- Owner panel for invite-only clubs: pending requests + invite by npub. -->
@@ -692,53 +750,67 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
       </div>
     {/if}
 
-    <!-- Player lives inside the hero: no separate card, just a section divider. -->
-    <div class="player-section">
-      <NowPlaying
-        onGoStage={goOnStage}
-        stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
-        clubId={groupId}
-        clubName={club?.name ?? ''}
-        canHear={canHear}
-        ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
-        onCta={doPaidJoin}
-        onended={() => onTrackEnded(groupId)}
-        onerror={(vid) => onTrackError(groupId, vid)}
-        hasDjOnStage={stage.djs.length > 0}
-      />
-    </div>
+    {#if sync.live}
+      <!-- The player occupies space only while a track is active. -->
+      <div class="player-section">
+        <NowPlaying
+          onGoStage={goOnStage}
+          stageLabel={isMember && auth.canSign ? (onStageNow ? 'Add a track →' : 'Enter stage →') : ''}
+          clubId={groupId}
+          clubName={club?.name ?? ''}
+          clubImage={club?.picture || clubAvatar(owner || groupId)}
+          canHear={canHear}
+          ctaText={canHear ? '' : `⚡ Pay ${clubConfig.price} sats to enter`}
+          onCta={doPaidJoin}
+          onended={() => onTrackEnded(groupId)}
+          onerror={(vid) => onTrackError(groupId, vid)}
+          hasDjOnStage={stage.djs.length > 0}
+        />
+      </div>
+    {/if}
   </header>
 
   {#if error}<p class="err">⚠ {error}</p>{/if}
 
   <div class="club-body">
-    <!-- The floor: DJs up front, crowd behind. -->
-    <Dancefloor
-      {groupId}
-      {members}
-      {canModerate}
-      {isOwner}
-      {isMember}
-      {owner}
-      currentDj={sync.live?.dj ?? ''}
-      onkick={kick}
-      onpromote={promote}
-    />
+    <div class="stage-grid">
+      <Dancefloor
+        {groupId}
+        {members}
+        {canModerate}
+        {isOwner}
+        {isMember}
+        {owner}
+        currentDj={sync.live?.dj ?? ''}
+        onkick={kick}
+        onpromote={promote}
+      />
+      <div class="vibe-slot">
+        <VibeMeter clubId={groupId} {isMember} />
+      </div>
+    </div>
 
-    <a class="aside-block aside-tg" href={club?.link ?? 'https://t.me/zapclub_io'} target="_blank" rel="noopener noreferrer">
-      <svg class="tg-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/></svg>
-      {club?.link ? communityLinkLabel(club.link) : 'Join Telegram'}
-    </a>
-
-    <!-- The user's own live playlist — feeds the round-robin. -->
-    {#if isMember}
-      <Queue {groupId} {canModerate} {isOwner} clubName={club?.name ?? ''} />
-    {:else}
-      <section class="join-hint">Join the club to step on stage and queue tracks.</section>
+    {#if isMember && auth.canSign}
+      <div class="chat-slot">
+        <Chat {groupId} memberCount={members.length} membersExpanded={chatMembersExpanded}>
+          <ChatMembers
+            {members}
+            {canModerate}
+            {isOwner}
+            {owner}
+            expanded={chatMembersExpanded}
+            onkick={kick}
+            onpromote={promote}
+            onexpandedchange={(expanded) => (chatMembersExpanded = expanded)}
+          />
+        </Chat>
+      </div>
     {/if}
 
-    {#if auth.pubkey}
-      <ShareBlock clubId={groupId} clubName={club?.name ?? ''} />
+    {#if auth.canSign}
+      <div class="playlist-slot">
+        <Queue {groupId} {canModerate} {isOwner} />
+      </div>
     {/if}
   </div>
 
@@ -766,11 +838,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.1rem;
-  }
-  .hero-top {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
   }
   .edit-form {
     margin-top: 0.9rem;
@@ -809,9 +876,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
   @media (display-mode: standalone) {
     .hero {
       padding: 0.7rem 0.8rem;
-    }
-    .hero-top {
-      gap: 0.7rem;
     }
     .pic {
       width: 44px;
@@ -978,13 +1042,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     font-size: 0.78rem;
     color: var(--text-dim);
   }
-  .host-av {
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    object-fit: cover;
-    background: var(--bg-elev-2);
-  }
   .actions {
     flex: 0 0 auto;
     display: flex;
@@ -1083,30 +1140,6 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     color: var(--text-dim);
     line-height: 1.6;
   }
-  .aside-block {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    padding: 0.65rem 0.9rem;
-    background: var(--bg-elev);
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--text-dim);
-    text-decoration: none;
-    text-align: center;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
-  }
-  /* Telegram block */
-  .aside-tg {
-    border-color: #2CA5E0;
-    color: #2CA5E0;
-  }
-  .aside-tg:hover {
-    background: color-mix(in srgb, #2CA5E0 12%, transparent);
-  }
   .tg-icon {
     width: 1.1em;
     height: 1.1em;
@@ -1124,13 +1157,307 @@ import { CLUB_RELAY_PUBKEY } from '../nostr/pool'
     padding-top: 0.9rem;
     border-top: 1px solid var(--border);
   }
-  .join-hint {
-    background: var(--bg-elev);
+  /* Reference-driven club console. These late rules deliberately override the legacy card stack. */
+  .wrap {
+    width: min(960px, 100%);
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0.8rem;
+    gap: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .hero {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .hero-main {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) auto;
+    gap: 1.15rem;
+    align-items: center;
+    min-height: 142px;
+    padding: 0.55rem;
+    border: 0;
+    border-radius: 0;
+    color: var(--lcd-text);
+    background: transparent;
+    box-shadow: none;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+  }
+  .pic {
+    position: relative;
+    width: 240px;
+    height: 124px;
+    flex-basis: auto;
+    border: 1px solid rgba(207, 233, 255, 0.3);
+    border-radius: 7px;
+    box-shadow: inset 0 0 18px rgba(4, 16, 38, 0.45);
+  }
+  .pic::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(110deg, rgba(44, 110, 190, 0.12), transparent 48%),
+      repeating-linear-gradient(180deg, rgba(3, 13, 31, 0.16) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+  }
+  .pic-img { filter: saturate(0.82) contrast(1.06); }
+  .info {
+    align-self: center;
+  }
+  h1 {
+    font-size: clamp(20px, 2.4vw, 27px);
+    line-height: 1.1;
+    color: var(--lcd-text);
+    letter-spacing: 0.01em;
+    font-weight: 400;
+    text-shadow: var(--lcd-text-shadow);
+  }
+  .tags {
+    flex-wrap: wrap;
+    overflow: visible;
+    gap: 0.65rem 1.15rem;
+    margin-top: 0.8rem;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    color: var(--lcd-text);
+    background: transparent;
+  }
+  .tag-icon {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 19px;
+    color: var(--lcd-text);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 0 2px rgba(235, 241, 244, 0.42));
+  }
+  .tag.members-tag,
+  .tag.host,
+  .tag.live-count,
+  .tag.paid,
+  .tag.private {
+    color: var(--lcd-text);
+    border: 0;
+    background: transparent;
+  }
+  .tag.live-count {
+    padding: 0;
+  }
+  .tag.host:hover { color: #fff; }
+  .desc {
+    min-height: 20px;
+    margin: 0.75rem 0 0;
+    color: var(--lcd-text-soft);
+    font-size: 15px;
+    font-style: normal;
+    line-height: normal;
+    text-shadow: var(--lcd-text-shadow);
+  }
+  .actions {
+    align-self: end;
+    padding: 0 0.55rem 0.3rem 0;
+  }
+  .action-btns {
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+  .design-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    min-height: 42px;
+    padding: 0.35rem 0.45rem;
+    border: 0;
+    border-radius: 0;
+    color: var(--lcd-text);
+    background: transparent;
+    box-shadow: none;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 400;
+    letter-spacing: 0.07em;
+    text-decoration: none;
+    text-shadow: 0 0 3px rgba(179, 222, 255, 0.72), 0 0 8px rgba(90, 160, 255, 0.2);
+    text-transform: uppercase;
+  }
+  .design-btn svg {
+    filter: drop-shadow(0 0 2px rgba(235, 241, 244, 0.36));
+  }
+  .design-btn:hover:not(:disabled) {
+    color: #fff;
+    background: transparent;
+    text-shadow: 0 0 4px rgba(207, 233, 255, 0.9), 0 0 10px rgba(90, 160, 255, 0.3);
+  }
+  .design-btn:focus-visible {
+    outline: 1px solid #d2ecff;
+    outline-offset: 3px;
+  }
+  .design-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .design-btn.leave-btn:hover:not(:disabled),
+  .design-btn.leave-btn:focus-visible {
+    color: #ffd9e1;
+    background: transparent;
+    text-shadow: 0 0 4px rgba(255, 183, 198, 0.58);
+  }
+  .edit-form {
+    margin-top: 0.6rem;
+    padding: 1rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.3rem;
-    color: var(--text-dim);
-    text-align: center;
-    font-size: 0.9rem;
+    border-radius: 10px;
+    background: var(--bg-elev);
+  }
+  .invite-panel {
+    margin-top: 0.6rem;
+    border-radius: 10px;
+  }
+  .player-section {
+    margin-top: 0.7rem;
+    margin-bottom: 0.7rem;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .club-body {
+    gap: 0.7rem;
+  }
+  .stage-grid {
+    order: 1;
+    display: grid;
+    grid-template-areas: 'stage vibe';
+    grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr);
+    gap: 0.7rem;
+    min-width: 0;
+  }
+  .vibe-slot {
+    grid-area: vibe;
+    min-width: 0;
+  }
+  .vibe-slot > :global(*) {
+    height: 100%;
+  }
+  .playlist-slot {
+    order: 3;
+    min-width: 0;
+  }
+  .chat-slot {
+    order: 2;
+    min-width: 0;
+  }
+  @media (max-width: 820px) {
+    .hero-main {
+      grid-template-columns: 130px minmax(0, 1fr);
+    }
+    .pic {
+      width: 130px;
+      height: 104px;
+    }
+    .actions {
+      grid-column: 1 / -1;
+      justify-self: stretch;
+      padding: 0 0.25rem 0.25rem;
+    }
+    .action-btns {
+      justify-content: flex-start;
+    }
+    .stage-grid {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        'stage'
+        'vibe';
+    }
+  }
+
+  @media (max-width: 560px) {
+    .wrap {
+      width: 100%;
+      margin-top: 0;
+      padding: 0.45rem;
+      gap: 0;
+      border-radius: 0;
+    }
+    .hero-main {
+      grid-template-columns: 76px minmax(0, 1fr);
+      gap: 0.75rem;
+      min-height: 0;
+      padding: 0.7rem;
+    }
+    .player-section {
+      margin-top: 0.55rem;
+      margin-bottom: 0.55rem;
+    }
+    .club-body,
+    .stage-grid {
+      gap: 0.55rem;
+    }
+    .pic {
+      width: 76px;
+      height: 76px;
+      border-radius: 7px;
+    }
+    h1 {
+      font-size: 17px;
+    }
+    .tags {
+      gap: 0.45rem 0.8rem;
+      margin-top: 0.6rem;
+    }
+    .tag {
+      min-height: 0;
+      padding: 0;
+    }
+    .tag.host,
+    .tag.paid,
+    .tag.private {
+      display: none;
+    }
+    .desc {
+      grid-column: 1 / -1;
+      margin-top: 0.55rem;
+      font-size: 14px;
+    }
+    .actions {
+      padding: 0;
+    }
+    .action-btns {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: 100%;
+      gap: 0.4rem;
+    }
+    .design-btn {
+      width: 100%;
+      min-height: 42px;
+      padding-inline: 0.45rem;
+      font-size: 0.78rem;
+    }
+    .share-wrap {
+      width: 100%;
+    }
+    .share-menu {
+      left: 0;
+      right: auto;
+    }
   }
 </style>

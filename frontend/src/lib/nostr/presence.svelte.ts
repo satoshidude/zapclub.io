@@ -23,10 +23,8 @@ export const presence = {
   isOnline(pubkey: string): boolean {
     return !!pubkey && state.now - (state.seen[pubkey] ?? 0) < ONLINE_MS
   },
-  /** How many people are present in the club right now (recent heartbeats). These are the
-   *  current listeners — everyone in the club hears the same synced stream. Note: only
-   *  logged-in members beat presence (the relay rejects non-member writes), so anonymous
-   *  guests aren't counted — there is no central listener tracking by design. */
+  /** How many signed-in members are socially present right now (recent heartbeats).
+   *  Stream listeners are counted separately through anonymous browser sessions. */
   get count(): number {
     let n = 0
     for (const pk in state.seen) {

@@ -8,7 +8,7 @@
   // Optional explicit recipient (e.g. the club owner). Defaults to the live DJ.
   // `club` lets a confirmed payment broadcast the zap to the room (kind 20101).
   // `showDj` renders the recipient DJ's avatar + name on the chip (the zap target).
-  let { pubkey = '', club = '', showDj = false }: { pubkey?: string; club?: string; showDj?: boolean } = $props()
+  let { pubkey = '', club = '', showDj = false, iconOnly = false, showName = false, showSelf = false }: { pubkey?: string; club?: string; showDj?: boolean; iconOnly?: boolean; showName?: boolean; showSelf?: boolean } = $props()
 
   const PRESETS = [21, 100, 500, 2100]
   // Fallback payee when the recipient has no lightning address on their profile. The
@@ -20,7 +20,7 @@
   const djProfile = $derived(dj ? useProfile(dj) : null)
   const lud16 = $derived((djProfile?.lud16 as string) || FALLBACK_LUD16)
   const isSelf = $derived(!!dj && dj === auth.pubkey)
-  const show = $derived(!!dj && !isSelf)
+  const show = $derived(!!dj && (showSelf || !isSelf))
   // Total sats this DJ has received in zaps (all-time, from 9735 receipts).
   const total = $derived(dj ? zaps.score(dj) : 0)
 
@@ -52,17 +52,34 @@
 </script>
 
 {#if show}
-  <button class="zap-mini" class:with-dj={showDj} onclick={() => (open = !open)} title="Zap {displayName(dj, djProfile)}">
-    <span class="bolt">⚡</span>
-    {#if showDj}
-      <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
-      <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
+  <button
+    class="zap-mini"
+    class:with-dj={showDj}
+    class:icon-only={iconOnly}
+    class:with-name={iconOnly && showName}
+    class:self-label={isSelf && showSelf}
+    onclick={(event) => {
+      event.stopPropagation()
+      if (!isSelf) open = !open
+    }}
+    title={isSelf ? displayName(dj, djProfile) : `Zap ${displayName(dj, djProfile)}`}
+    aria-label={isSelf ? `Current DJ: ${displayName(dj, djProfile)}` : 'Zap the DJ'}
+  >
+    {#if iconOnly}
+      <svg class="bolt-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path></svg>
+      {#if showName}<span class="icon-dj-name lcd-card-title">{displayName(dj, djProfile)}</span>{/if}
     {:else}
-      <span class="lbl">zap</span>
-      <span class="lbl dj-name divided">{displayName(dj, djProfile)}</span>
-    {/if}
-    {#if total > 0}
-      <span class="score">{total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}</span>
+      <span class="bolt">⚡</span>
+      {#if showDj}
+        <img class="zap-av" src={avatarUrl(dj, djProfile)} alt="" width="16" height="16" />
+        <span class="lbl dj-name">{displayName(dj, djProfile)}</span>
+      {:else}
+        <span class="lbl">zap</span>
+        <span class="lbl dj-name divided">{displayName(dj, djProfile)}</span>
+      {/if}
+      {#if total > 0}
+        <span class="score">{total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}</span>
+      {/if}
     {/if}
   </button>
 
@@ -70,7 +87,10 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="backdrop" role="presentation" onclick={() => (open = false)}>
       <div class="sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
-        <h3>⚡ Zap {displayName(dj, djProfile)}</h3>
+        <h3>
+          <span class="dialog-kicker">⚡ ZAP THE DJ</span>
+          <span class="dialog-name">{displayName(dj, djProfile)}</span>
+        </h3>
         <div class="presets">
           {#each PRESETS as amt (amt)}
             <button class="amt" onclick={() => zapNow(amt)} disabled={busy}>{amt}</button>
@@ -117,6 +137,48 @@
   .zap-mini:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  .zap-mini.icon-only {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    min-height: 0;
+    padding: 2px;
+    border: 0;
+    border-radius: 0;
+    color: currentColor;
+    background: transparent;
+  }
+  .zap-mini.icon-only:hover:not(:disabled),
+  .zap-mini.icon-only:active:not(:disabled) {
+    color: #fff;
+    background: transparent;
+  }
+  .zap-mini.icon-only.with-name {
+    display: inline-flex;
+    justify-content: flex-start;
+    gap: 0.3rem;
+    width: auto;
+    max-width: 128px;
+  }
+  .zap-mini.icon-only.self-label {
+    cursor: default;
+  }
+  .icon-dj-name {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bolt-icon {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .bolt {
     font-size: 0.95rem;
@@ -168,7 +230,26 @@
   }
   h3 {
     margin: 0;
-    font-size: 1.05rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .dialog-kicker {
+    color: var(--amber);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .dialog-name {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .presets {
     display: flex;

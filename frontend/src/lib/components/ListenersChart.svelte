@@ -1,7 +1,4 @@
 <script lang="ts">
-  import { npubEncode } from 'nostr-tools/nip19'
-  import { goUser } from '../router.svelte'
-  import { useProfile, displayName, avatarUrl } from '../nostr/profiles.svelte'
   import type { ListenersResp, ClubListeners } from '../nostr/admin'
 
   let { data, clubName }: { data: ListenersResp; clubName: (id: string) => string } = $props()
@@ -86,7 +83,7 @@
     <div class="stats">
       <span class="stat live">🎧 {liveNow} now</span>
       <span class="stat">▲ peak {peak}</span>
-      <span class="stat">{unique24h} unique</span>
+      <span class="stat">{unique24h} unique sessions</span>
     </div>
   </div>
 
@@ -121,11 +118,10 @@
           {#if expanded[c.id]}
             <ul class="seen">
               {#each c.seen ?? [] as s (s.pubkey)}
-                {@const p = useProfile(s.pubkey)}
-                {@const online = data.generatedAt - s.last < 60_000}
+                {@const online = (c.live ?? []).includes(s.pubkey)}
                 <li>
-                  <img class="av" class:online src={avatarUrl(s.pubkey, p)} alt="" width="20" height="20" />
-                  <a class="who" href={`/user/${npubEncode(s.pubkey)}`} onclick={(e) => { e.preventDefault(); goUser(npubEncode(s.pubkey)) }}>{displayName(s.pubkey, p)}</a>
+                  <span class="session-dot" class:online aria-label={online ? 'Listening now' : 'Not listening now'}></span>
+                  <span class="who">session {s.pubkey.slice(0, 8)}</span>
                   <span class="when">{fmtTime(s.first)}–{online ? 'now' : fmtTime(s.last)}</span>
                 </li>
               {/each}
@@ -285,23 +281,21 @@
     align-items: center;
     gap: 0.45rem;
   }
-  .av {
+  .session-dot {
+    width: 8px;
+    height: 8px;
     border-radius: 999px;
-    object-fit: cover;
     background: var(--bg-elev-2);
     flex: 0 0 auto;
   }
-  .av.online {
-    box-shadow: 0 0 0 2px var(--accent);
+  .session-dot.online {
+    background: var(--accent);
+    box-shadow: 0 0 5px var(--accent);
   }
   .who {
     color: var(--text);
-    text-decoration: none;
     font-weight: 600;
     font-size: 0.82rem;
-  }
-  .who:hover {
-    color: var(--accent-2);
   }
   .when {
     margin-left: auto;

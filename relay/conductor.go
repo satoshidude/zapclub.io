@@ -33,7 +33,7 @@ import (
 // / membership / PoW gating.
 
 const (
-	condMaxDJs            = 5       // maximum DJs per club
+	condMaxDJs            = 3       // maximum DJs per club
 	condStageStaleMS      = 300_000 // sticky stage: max 5 min after last heartbeat (STALE_MS; client beats every 2 min)
 	condOnlineMS          = 50_000  // a DJ is "present" within this of their last 20100 beat
 	condHeartbeatMS       = 15_000  // now_playing republish cadence (latecomers + drift)
@@ -53,12 +53,28 @@ const (
 	brokenWindowMS        = 120_000    // a broken-track report counts as fresh this long
 	brokenQuorum          = 2          // distinct members reporting a track broken → skip it
 	brokenVidBlockMS      = 21_600_000 // a broken-SKIPPED video stays out of the rotation this long (6 h)
-	moodSkipThreshold     = 3          // distinct "skip" votes → advance to next track
+	moodSkipThreshold     = 3          // three accepted skip reactions → advance to next track
+	moodBangerMax         = 5          // at most five accepted banger reactions/points per track
 )
 
 type condDJ struct {
 	pubkey string
 	since  int64
+}
+
+// orderAndCapDJs applies the authoritative stage ordering and limit. The conductor and the
+// join gate both use it so a rolling upgrade cannot keep legacy slots above the current cap.
+func orderAndCapDJs(list []condDJ) []condDJ {
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].since != list[j].since {
+			return list[i].since < list[j].since
+		}
+		return list[i].pubkey < list[j].pubkey
+	})
+	if len(list) > condMaxDJs {
+		return list[:condMaxDJs]
+	}
+	return list
 }
 
 type condTrack struct {
@@ -78,6 +94,7 @@ type condClub struct {
 	startedAt int64 // ms (relay clock)
 	lastBeat  int64 // ms of the last now_playing publish
 	playing   bool
+	auto      bool // current track came from the passive Auto DJ playlist
 	// Auto DJ state (zero-value = not initialized; reinit on playlist-length change).
 	autoOrder     []int
 	autoNextOrder []int // preplanned next cycle so clients can see the real upcoming track
@@ -106,6 +123,7 @@ type conductor struct {
 	state *relay29.State // group membership/roles (skip authorization)
 	sk    string
 	pub   string
+	cred  *credibilityBoard
 	mu    sync.Mutex
 	clubs map[string]*condClub
 	// played tracks per (club, dj, videoID) → ms timestamp when played; guarded by mu.
@@ -121,8 +139,8 @@ type conductor struct {
 	broken   map[string]map[string]map[string]int64 // club → videoId → reporter → ts (ms)
 
 	moodMu     sync.Mutex
-	moods      map[string]map[int]map[string]string // club → pos → pubkey → "banger" (bangers only)
-	skipCounts map[string]map[int]map[string]int    // club → pos → pubkey → skip count (≤ moodSkipThreshold)
+	moods      map[string]map[int]map[string]int // club → pos → pubkey → banger count
+	skipCounts map[string]map[int]map[string]int // club → pos → pubkey → skip count (≤ moodSkipThreshold)
 
 	// Per-club throttle timestamps; guarded by mu.
 	// Stored at conductor level (not inside condClub) so they survive condClub being
@@ -162,7 +180,7 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 		played:        map[string]map[string]map[string]int64{},
 		pres:          map[string]map[string]int64{},
 		broken:        map[string]map[string]map[string]int64{},
-		moods:         map[string]map[int]map[string]string{},
+		moods:         map[string]map[int]map[string]int{},
 		skipCounts:    map[string]map[int]map[string]int{},
 		bootstrapAt:   map[string]int64{},
 		brokenSkipAt:  map[string]int64{},
@@ -535,9 +553,13 @@ func (c *conductor) sqSaveState(club string, pb *condClub) {
 	if pb.playing {
 		playing = 1
 	}
+	auto := 0
+	if pb.auto {
+		auto = 1
+	}
 	if _, err := c.sq.Exec(
-		`INSERT OR REPLACE INTO conductor_state(club,pos,video_id,dj,title,duration,started_at,playing) VALUES(?,?,?,?,?,?,?,?)`,
-		club, pb.pos, pb.videoID, pb.dj, pb.title, pb.duration, pb.startedAt, playing,
+		`INSERT OR REPLACE INTO conductor_state(club,pos,video_id,dj,title,duration,started_at,playing,auto) VALUES(?,?,?,?,?,?,?,?,?)`,
+		club, pb.pos, pb.videoID, pb.dj, pb.title, pb.duration, pb.startedAt, playing, auto,
 	); err != nil {
 		log.Printf("sqlite save_state [%.8s]: %v", club, err)
 	}
@@ -582,14 +604,15 @@ func (c *conductor) sqLoadState(club string) *condClub {
 		return nil
 	}
 	row := c.sqr.QueryRow(
-		`SELECT pos,video_id,dj,title,duration,started_at,playing FROM conductor_state WHERE club=?`, club,
+		`SELECT pos,video_id,dj,title,duration,started_at,playing,auto FROM conductor_state WHERE club=?`, club,
 	)
 	var pb condClub
-	var playing int
-	if err := row.Scan(&pb.pos, &pb.videoID, &pb.dj, &pb.title, &pb.duration, &pb.startedAt, &playing); err != nil {
+	var playing, auto int
+	if err := row.Scan(&pb.pos, &pb.videoID, &pb.dj, &pb.title, &pb.duration, &pb.startedAt, &playing, &auto); err != nil {
 		return nil
 	}
 	pb.playing = playing != 0
+	pb.auto = auto != 0
 	return &pb
 }
 
@@ -650,14 +673,12 @@ func (c *conductor) restoreMoodFromEvent(club string, pos int, ev *nostr.Event) 
 	c.moodMu.Lock()
 	if bangers > 0 {
 		if c.moods[club] == nil {
-			c.moods[club] = map[int]map[string]string{}
+			c.moods[club] = map[int]map[string]int{}
 		}
 		if c.moods[club][pos] == nil {
-			c.moods[club][pos] = map[string]string{}
+			c.moods[club][pos] = map[string]int{}
 		}
-		for i := 0; i < bangers; i++ {
-			c.moods[club][pos][fmt.Sprintf("_r%d_", i)] = "banger"
-		}
+		c.moods[club][pos]["_restored_"] = min(bangers, moodBangerMax)
 	}
 	if skips > 0 {
 		if c.skipCounts[club] == nil {
@@ -696,23 +717,24 @@ func (c *conductor) sqLoadOwner(club string) string {
 
 // ── stageGate in-memory helpers ───────────────────────────────────────────────
 
-// countActiveOtherDJs counts DJs currently on stage in `club` (excluding `senderPubkey`),
-// and reports whether `senderPubkey` is already on stage (= heartbeat, always allowed).
-// Reads from the in-memory stageIdx + kickIdx — no DB access.
+// countActiveOtherDJs counts the capped stage occupants excluding `senderPubkey`, and reports
+// whether the sender owns one of those slots. During a rolling upgrade, legacy occupants beyond
+// the cap therefore cannot extend their heartbeat and age out normally.
 func (c *conductor) countActiveOtherDJs(club, senderPubkey string) (active int, alreadyOnStage bool) {
 	now := time.Now().UnixMilli()
 	staleThreshold := now - condStageStaleMS
 	c.idxMu.Lock()
-	stageMap := c.stageIdx[club]
-	kickMap := c.kickIdx[club]
+	stageMap := make(map[string]stageEntry, len(c.stageIdx[club]))
+	for pk, entry := range c.stageIdx[club] {
+		stageMap[pk] = entry
+	}
+	kickMap := make(map[string]int64, len(c.kickIdx[club]))
+	for pk, kickMs := range c.kickIdx[club] {
+		kickMap[pk] = kickMs
+	}
 	c.idxMu.Unlock()
+	list := make([]condDJ, 0, len(stageMap))
 	for pk, entry := range stageMap {
-		if pk == senderPubkey {
-			alreadyOnStage = entry.on &&
-				entry.lastSeen >= staleThreshold &&
-				(kickMap[pk] == 0 || entry.lastSeen > kickMap[pk])
-			continue
-		}
 		if !entry.on {
 			continue
 		}
@@ -722,7 +744,14 @@ func (c *conductor) countActiveOtherDJs(club, senderPubkey string) (active int, 
 		if km := kickMap[pk]; km > 0 && entry.lastSeen <= km {
 			continue
 		}
-		active++
+		list = append(list, condDJ{pubkey: pk, since: entry.since})
+	}
+	for _, dj := range orderAndCapDJs(list) {
+		if dj.pubkey == senderPubkey {
+			alreadyOnStage = true
+		} else {
+			active++
+		}
 	}
 	return
 }
@@ -755,8 +784,9 @@ func (c *conductor) observeBroken(_ context.Context, ev *nostr.Event) {
 	c.brokenMu.Unlock()
 }
 
-// observeMood records a vibe vote (kind 20104) from a club member.
-// Tags: h=club, pos=track-pos (int), v=banger|skip. One vote per (club, pos, pubkey) counted.
+// observeMood records an already rate-limited vibe reaction (kind 20104).
+// Tags: h=club, pos=track-pos (int), v=banger|skip. Bangers stop at five; the third skip
+// advances the track. The relay's kind limiter enforces one reaction per pubkey per 10 seconds.
 func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
 	if ev.Kind != kindMood {
 		return
@@ -771,47 +801,65 @@ func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
 	if err != nil || pos < 0 {
 		return
 	}
+	// Only the currently running position may collect reactions. This prevents stale tabs and
+	// hand-crafted far-future positions from growing maps or preloading a later score.
+	c.mu.Lock()
+	current := c.clubs[club]
+	validPosition := current != nil && current.playing && current.pos == pos
+	c.mu.Unlock()
+	if !validPosition {
+		return
+	}
 	c.moodMu.Lock()
 	if vote == "banger" {
 		if c.moods[club] == nil {
-			c.moods[club] = map[int]map[string]string{}
+			c.moods[club] = map[int]map[string]int{}
 		}
 		if c.moods[club][pos] == nil {
-			c.moods[club][pos] = map[string]string{}
+			c.moods[club][pos] = map[string]int{}
 		}
-		c.moods[club][pos][ev.PubKey] = "banger"
+		total := 0
+		for _, count := range c.moods[club][pos] {
+			total += count
+		}
+		if total < moodBangerMax {
+			c.moods[club][pos][ev.PubKey]++
+		}
 	} else {
-		// skip: accumulate per-pubkey (one user can press skip up to moodSkipThreshold times)
+		// Skip reactions may come from one or several people, but never count past the threshold.
 		if c.skipCounts[club] == nil {
 			c.skipCounts[club] = map[int]map[string]int{}
 		}
 		if c.skipCounts[club][pos] == nil {
 			c.skipCounts[club][pos] = map[string]int{}
 		}
-		if c.skipCounts[club][pos][ev.PubKey] < moodSkipThreshold {
+		total := 0
+		for _, count := range c.skipCounts[club][pos] {
+			total += count
+		}
+		if total < moodSkipThreshold {
 			c.skipCounts[club][pos][ev.PubKey]++
 		}
 	}
 	c.moodMu.Unlock()
 }
 
-// moodCounts returns the banger and skip vote counts for club/pos (caller must NOT hold moodMu).
-// Bangers are distinct per pubkey; skips accumulate (one user may vote skip up to moodSkipThreshold).
+// moodCounts returns the accepted reaction counts for club/pos (caller must NOT hold moodMu).
 func (c *conductor) moodCounts(club string, pos int) (bangers, skips int) {
 	c.moodMu.Lock()
-	for _, v := range c.moods[club][pos] {
-		if v == "banger" {
-			bangers++
-		}
+	for _, count := range c.moods[club][pos] {
+		bangers += count
 	}
 	for _, cnt := range c.skipCounts[club][pos] {
 		skips += cnt
 	}
 	c.moodMu.Unlock()
+	bangers = min(bangers, moodBangerMax)
+	skips = min(skips, moodSkipThreshold)
 	return
 }
 
-// moodSkip reports whether ≥ moodSkipThreshold distinct members voted "skip" for the current track.
+// moodSkip reports whether the track has reached the three-reaction skip threshold.
 func (c *conductor) moodSkip(club string, pb *condClub) bool {
 	if !pb.playing {
 		return false
@@ -1111,16 +1159,7 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 		if len(list) == 0 {
 			continue
 		}
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].since != list[j].since {
-				return list[i].since < list[j].since
-			}
-			return list[i].pubkey < list[j].pubkey
-		})
-		if len(list) > condMaxDJs {
-			list = list[:condMaxDJs]
-		}
-		out[club] = list
+		out[club] = orderAndCapDJs(list)
 	}
 	return out
 }
@@ -1231,7 +1270,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 		if now-c.bootstrapAt[club] >= condHeartbeatMS {
 			c.bootstrapAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=bootstrap pos=%d", club, pb.pos)
-			c.advance(ctx, club, djPks, queues, pb, now)
+			c.advance(ctx, club, djPks, queues, pb, now, false)
 		}
 		return
 	}
@@ -1251,13 +1290,13 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 			return
 		}
 		log.Printf("conductor [%.8s] advance reason=orphan dj=%.8s", club, pb.dj)
-		c.advance(ctx, club, djPks, queues, pb, now)
+		c.advance(ctx, club, djPks, queues, pb, now, false)
 		return
 	}
 	// Skip requested (kind 30107, owner/mod/playing-DJ — validated in skipRequested).
 	if c.skipRequested(ctx, club, pb) {
 		log.Printf("conductor [%.8s] advance reason=skip pos=%d", club, pb.pos)
-		c.advance(ctx, club, djPks, queues, pb, now)
+		c.advance(ctx, club, djPks, queues, pb, now, false)
 		return
 	}
 	// Track reported unplayable (kind 20102) by an authorized user or a quorum of members.
@@ -1268,16 +1307,16 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 			c.brokenSkipAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=broken vid=%s", club, pb.videoID)
 			c.recordBrokenVid(club, pb.videoID, now)
-			c.advance(ctx, club, djPks, queues, pb, now)
+			c.advance(ctx, club, djPks, queues, pb, now, false)
 			return
 		}
 	}
-	// Vibe vote: ≥ moodSkipThreshold distinct members voted "skip" (kind 20104).
+	// Vibe reaction: the third accepted skip ends the track and costs its DJ one point.
 	if c.moodSkip(club, pb) {
 		if now-c.moodSkipAt[club] >= condHeartbeatMS {
 			c.moodSkipAt[club] = now
 			log.Printf("conductor [%.8s] advance reason=mood-skip pos=%d", club, pb.pos)
-			c.advance(ctx, club, djPks, queues, pb, now)
+			c.advance(ctx, club, djPks, queues, pb, now, true)
 			return
 		}
 	}
@@ -1288,7 +1327,7 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 	}
 	if (now-pb.startedAt)/1000 >= int64(dur) {
 		log.Printf("conductor [%.8s] advance reason=duration elapsed=%ds dur=%ds vid=%s", club, (now-pb.startedAt)/1000, dur, pb.videoID)
-		c.advance(ctx, club, djPks, queues, pb, now)
+		c.advance(ctx, club, djPks, queues, pb, now, false)
 		return
 	}
 	// Otherwise: heartbeat on cadence (republish the frozen track — pos is a stable token).
@@ -1303,7 +1342,8 @@ func (c *conductor) driveClub(ctx context.Context, club string, djs []condDJ, ex
 // effect immediately. The visible queue is the only truth — a played track is `off` (client-
 // marked) and drops out; truly nothing playable → lobby (stop). No hidden played-set. `pos` is
 // an opaque monotonic token per started track (skip-request matching + now_playing/play-log).
-func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64) {
+func (c *conductor) advance(ctx context.Context, club string, djPks []string, queues map[string][]condTrack, pb *condClub, now int64, moodSkipped bool) {
+	c.settleTrack(ctx, club, pb, moodSkipped)
 	if len(djPks) == 0 {
 		c.stop(ctx, club, pb, now)
 		delete(c.played, club)
@@ -1356,6 +1396,7 @@ func (c *conductor) advance(ctx context.Context, club string, djPks []string, qu
 	pb.duration = t.duration
 	pb.startedAt = now
 	pb.playing = true
+	pb.auto = false
 	// Always mark the track off in the DJ's queue via a relay-signed event and record it in the
 	// played-set. For offline/throttled DJs (browser tab inactive), this drains the queue to the
 	// lobby — the browser never fires reactivateMyQueue so the exhausted queue stays exhausted.
@@ -1509,6 +1550,7 @@ func (c *conductor) skipRequested(_ context.Context, club string, pb *condClub) 
 }
 
 func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int64) {
+	c.settleTrack(ctx, club, pb, false)
 	// Publish a paused now_playing so clients switch to the lobby immediately instead of waiting
 	// for the event to go stale (LIVE_STALE_MS = 150 s). Only send if a track was ever playing
 	// (videoID non-empty); on a cold start there is nothing to retract.
@@ -1523,6 +1565,56 @@ func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int
 		c.publishNowPlayingPaused(ctx, club, pb, now)
 	}
 	pb.playing = false
+	pb.auto = false
+}
+
+// settleTrack applies a real DJ track's result exactly once and mirrors the new aggregate as a
+// relay-signed NIP-78 event. Auto-DJ transitions intentionally do not call this method: passive
+// playlist playback should not build a person's DJ credibility.
+func (c *conductor) settleTrack(ctx context.Context, club string, pb *condClub, moodSkipped bool) {
+	if c.cred == nil || pb == nil || !pb.playing || pb.auto {
+		return
+	}
+	bangers, _ := c.moodCounts(club, pb.pos)
+	entry, changed := c.cred.record(club, pb.pos, pb.startedAt, pb.dj, bangers, moodSkipped)
+	if !changed {
+		return
+	}
+	log.Printf("conductor [%.8s] credibility dj=%.8s score=%d tracks=%d bangers=%d skipped=%d", club, entry.Pubkey, entry.Score, entry.Tracks, entry.Bangers, entry.Skipped)
+	dTag := "zapclub:credibility:" + entry.Pubkey
+	c.publish(ctx, &nostr.Event{
+		Kind:      kindCredibility,
+		CreatedAt: c.nextAddressableTimestamp(ctx, kindCredibility, dTag),
+		Tags: nostr.Tags{
+			{"h", credibilityNamespace},
+			{"d", dTag},
+			{"p", entry.Pubkey},
+			{"score", strconv.Itoa(entry.Score)},
+			{"tracks", strconv.Itoa(entry.Tracks)},
+			{"bangers", strconv.Itoa(entry.Bangers)},
+			{"skipped", strconv.Itoa(entry.Skipped)},
+		},
+		Content: "",
+	}, true)
+}
+
+// nextAddressableTimestamp guarantees that an aggregate replacement is newer
+// than the stored event even when two clubs settle the same DJ within one second.
+func (c *conductor) nextAddressableTimestamp(ctx context.Context, kind int, dTag string) nostr.Timestamp {
+	next := nostr.Now()
+	ch, err := c.db.QueryEvents(ctx, nostr.Filter{
+		Kinds: []int{kind},
+		Tags:  nostr.TagMap{"d": []string{dTag}},
+	})
+	if err != nil {
+		return next
+	}
+	for ev := range ch {
+		if ev.PubKey == c.pub && ev.CreatedAt >= next {
+			next = ev.CreatedAt + 1
+		}
+	}
+	return next
 }
 
 // ── publishing (relay-signed, straight to the store, bypassing RejectEvent) ───
@@ -1656,8 +1748,12 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 		}
 		// Restore mood counts from the last now_playing so skip-votes survive a restart.
 		if np := c.sqLoadNowPlaying(ctx, club); np != nil {
+			// Backfill the newly persisted Auto-DJ flag from the signed playback event
+			// when upgrading an existing SQLite database.
+			sq.auto = sq.playing && tagVal(np, "auto") == "1"
 			c.restoreMoodFromEvent(club, sq.pos, np)
 		}
+		c.sqSaveState(club, sq)
 		return sq
 	}
 
@@ -1682,6 +1778,7 @@ func (c *conductor) resume(ctx context.Context, club string) *condClub {
 	pb.title = latest.Content
 	pb.pos = atoiDefault(tagVal(latest, "pos"), 0)
 	pb.duration = atoiDefault(tagVal(latest, "duration"), 0)
+	pb.auto = tagVal(latest, "auto") == "1"
 	if v, err := strconv.ParseInt(tagVal(latest, "started_at"), 10, 64); err == nil {
 		pb.startedAt = v
 	}
@@ -1939,6 +2036,7 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		pb.duration = t.duration
 		pb.startedAt = now
 		pb.playing = true
+		pb.auto = true
 		c.publishNowPlayingAuto(ctx, club, pb, st.owner, tracks, now)
 		c.publishPlay(ctx, club, pb, now)
 	}
@@ -1957,6 +2055,13 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 		c.brokenSkipAt[club] = now
 		log.Printf("conductor [%.8s] advance reason=broken-auto vid=%s", club, pb.videoID)
 		c.recordBrokenVid(club, pb.videoID, now)
+		nextTrack()
+		startTrack()
+		return
+	}
+	if c.moodSkip(club, pb) && now-c.moodSkipAt[club] >= condHeartbeatMS {
+		c.moodSkipAt[club] = now
+		log.Printf("conductor [%.8s] advance reason=mood-skip-auto pos=%d", club, pb.pos)
 		nextTrack()
 		startTrack()
 		return
@@ -1981,6 +2086,7 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 // used when Auto DJ drives the club with no real DJ on stage. Repeated "next" tags expose the
 // conductor's authoritative shuffled preview; clients must not guess this server-only order.
 func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *condClub, owner string, tracks []condTrack, now int64) {
+	bangers, skips := c.moodCounts(club, pb.pos)
 	tags := nostr.Tags{
 		{"h", club},
 		{"d", club},
@@ -1993,6 +2099,8 @@ func (c *conductor) publishNowPlayingAuto(ctx context.Context, club string, pb *
 		{"status", "playing"},
 		{"p", owner},
 		{"auto", "1"},
+		{"mood_bangers", strconv.Itoa(bangers)},
+		{"mood_skips", strconv.Itoa(skips)},
 	}
 	for _, track := range autoUpcomingTracks(pb, tracks, 6) {
 		tags = append(tags, nostr.Tag{"next", "yt:" + track.videoID, track.title})
@@ -2033,15 +2141,16 @@ func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
 // ── stageGate: enforce per-club DJ slot cap on kind-30102 events ─────────────
 
 type stageGate struct {
-	db         *badger.BadgerBackend
-	superadmin string
+	db      *badger.BadgerBackend
+	mu      sync.Mutex
+	pending map[string]map[string]time.Time
 	// Set after the conductor is initialized (main.go) so reject() reads
 	// the conductor's in-memory indexes instead of querying BadgerDB.
 	countFn func(club, sender string) (active int, alreadyOnStage bool)
 }
 
 // reject blocks a stage-join (kind 30102, content != "off") if the club is
-// already at its DJ cap of 5.
+// already at its DJ cap of 3.
 // Heartbeats from DJs already on stage are always allowed through.
 func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string) {
 	if evt.Kind != kindStage {
@@ -2054,10 +2163,25 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	if club == "" {
 		return false, ""
 	}
-	if g.superadmin != "" && evt.PubKey == g.superadmin {
-		return false, ""
+	// Serialize admission and reserve accepted joins until OnEventSaved updates
+	// the conductor index. Without this reservation, simultaneous connections
+	// could all observe the same free final slot.
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending == nil {
+		g.pending = map[string]map[string]time.Time{}
 	}
-
+	now := time.Now()
+	for group, byPubkey := range g.pending {
+		for pubkey, deadline := range byPubkey {
+			if !deadline.After(now) {
+				delete(byPubkey, pubkey)
+			}
+		}
+		if len(byPubkey) == 0 {
+			delete(g.pending, group)
+		}
+	}
 	// Count active DJs via the conductor's in-memory index (zero DB access).
 	// Falls back to a full BadgerDB scan if the conductor isn't wired in yet (startup race).
 	active := 0
@@ -2101,11 +2225,8 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 			}
 		}
 		staleThreshold := time.Now().UnixMilli() - condStageStaleMS
+		list := make([]condDJ, 0, len(newestByPk))
 		for pk, ev := range newestByPk {
-			if pk == evt.PubKey {
-				alreadyOnStage = true
-				continue
-			}
 			if ev.Content == "off" {
 				continue
 			}
@@ -2116,17 +2237,56 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 			if km := kickMs[pk]; km > 0 && evMs <= km {
 				continue
 			}
-			active++
+			since := int64(ev.CreatedAt)
+			if s := tagVal(ev, "since"); s != "" {
+				if v, parseErr := strconv.ParseInt(s, 10, 64); parseErr == nil {
+					since = v
+				}
+			}
+			list = append(list, condDJ{pubkey: pk, since: since})
+		}
+		for _, dj := range orderAndCapDJs(list) {
+			if dj.pubkey == evt.PubKey {
+				alreadyOnStage = true
+			} else {
+				active++
+			}
 		}
 	}
 	if alreadyOnStage {
 		return false, "" // heartbeat from existing DJ
 	}
+	if _, reserved := g.pending[club][evt.PubKey]; reserved {
+		return false, "" // duplicate in-flight heartbeat/join from the same DJ
+	}
+	active += len(g.pending[club])
 
 	if active >= condMaxDJs {
 		return true, "restricted: stage is full"
 	}
+	if g.pending[club] == nil {
+		g.pending[club] = map[string]time.Time{}
+	}
+	g.pending[club][evt.PubKey] = now.Add(10 * time.Second)
 	return false, ""
+}
+
+// observe releases the short admission reservation after the stage event has
+// been stored and the normal event observers can make it visible in the index.
+func (g *stageGate) observe(_ context.Context, evt *nostr.Event) {
+	if evt == nil || evt.Kind != kindStage {
+		return
+	}
+	club := tagVal(evt, "h")
+	if club == "" {
+		return
+	}
+	g.mu.Lock()
+	delete(g.pending[club], evt.PubKey)
+	if len(g.pending[club]) == 0 {
+		delete(g.pending, club)
+	}
+	g.mu.Unlock()
 }
 
 func clubOwnerFromDB(ctx context.Context, db *badger.BadgerBackend, club string) string {

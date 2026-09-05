@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { router, goHome, goAdmin } from './lib/router.svelte'
   import { isSuperadmin } from './lib/nostr/admin'
   import { startConnectionWatch, connection } from './lib/nostr/connection.svelte'
@@ -13,12 +14,19 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte'
   import HowTo from './lib/components/HowTo.svelte'
   import About from './lib/components/About.svelte'
+  import Disclaimer from './lib/components/Disclaimer.svelte'
   import Leaderboard from './lib/components/Leaderboard.svelte'
   import PayModal from './lib/components/PayModal.svelte'
   import SiteFooter from './lib/components/SiteFooter.svelte'
+  import LedThemeSwitcher from './lib/components/LedThemeSwitcher.svelte'
 
   startConnectionWatch()
   startAccountWatch()
+
+  onMount(() => {
+    document.body.classList.add('site-led-page')
+    return () => document.body.classList.remove('site-led-page')
+  })
 
   // Extension switched to a different account than we're logged in as → re-login as it.
   function reloginExtension() {
@@ -28,6 +36,7 @@
 
 </script>
 
+<div class="app-frame">
 <header class="topbar">
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
   <div class="brand" role="button" tabindex="0" onclick={goHome}>
@@ -35,6 +44,7 @@
     <span><span class="word">zapclub</span><span class="tld">.io</span></span>
   </div>
   <div class="top-actions">
+    <LedThemeSwitcher />
     {#if isSuperadmin()}
       <button class="icon-btn" onclick={goAdmin} title="Admin" aria-label="Admin">⚙️</button>
     {/if}
@@ -71,21 +81,22 @@
   {:else if router.route.name === 'credits'}
     <About />
   {:else if router.route.name === 'disclaimer'}
-    <About />
+    <Disclaimer />
   {:else if router.route.name === 'leaderboard'}
     <Leaderboard />
   {:else if router.route.name === 'privacy'}
-    <About />
+    <Disclaimer />
   {:else if router.route.name === 'terms'}
-    <About />
+    <Disclaimer />
   {:else if router.route.name === 'legal'}
-    <About />
+    <Disclaimer />
   {:else}
     <ClubList />
   {/if}
 </main>
 
 <SiteFooter />
+</div>
 
 <LoginDialog />
 <PayModal />
@@ -96,7 +107,7 @@
     top: 8px;
     left: 50%;
     transform: translateX(-50%);
-    width: min(960px, calc(100vw - 2rem));
+    width: min(1120px, calc(100vw - 2rem));
     height: var(--topbar-h);
     z-index: 50;
     display: flex;
@@ -105,6 +116,26 @@
     padding: 0 1rem;
     background: transparent;
     white-space: nowrap;
+  }
+  :global(body.site-led-page) .app-frame {
+    width: 100%;
+    min-height: 100vh;
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  :global(body.site-led-page) .app-frame .topbar {
+    position: relative;
+    top: auto;
+    left: auto;
+    transform: none;
+    width: min(960px, 100%);
+    margin-inline: auto;
+    padding-inline: 1.35rem;
+    border-bottom: 1px solid rgba(207, 233, 255, 0.22);
   }
   .top-actions {
     display: flex;
@@ -178,6 +209,14 @@
   }
   /* Keep route content clear of mobile browser chrome. */
   @media (max-width: 560px) {
+    :global(body.site-led-page) .app-frame {
+      width: 100%;
+      margin-top: 0;
+      border-radius: 0;
+    }
+    :global(body.site-led-page) .app-frame .topbar {
+      padding-inline: 0.9rem;
+    }
     main {
       padding-bottom: 1rem;
     }

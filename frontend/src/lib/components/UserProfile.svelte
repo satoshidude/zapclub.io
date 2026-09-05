@@ -26,6 +26,7 @@
   import { fetchReceivedZaps, requestZapInvoice, type ReceivedZaps } from '../nostr/zaps.svelte'
   import { showPay } from '../nostr/payModal.svelte'
   import { fetchZapRank, type ZapRank } from '../nostr/leaderboard'
+  import { fetchCredibility, type Credibility } from '../nostr/credibility'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
@@ -54,6 +55,7 @@
   let rolesById = $state<Record<string, string[]>>({})
   let received = $state<ReceivedZaps | null>(null)
   let zapRank = $state<ZapRank | null>(null)
+  let credibility = $state<Credibility | null>(null)
   let likedTracks = $state<UserLike[]>([])
 
   // Clubs the user is currently on stage in (relay-derived djingIn; on the own profile also
@@ -88,23 +90,28 @@
     } else {
       loading = false
     }
-    // Clubs this user is a member of (current/last-DJ'd pinned on top), public for everyone.
+    // Club membership is private. Only fetch and render this section on the
+    // signed-in user's own profile.
     memberOf = []
     djingIn = []
     topClubId = null
     rolesById = {}
-    void fetchUserClubActivity(pk).then((a) => {
-      memberOf = a.memberOf
-      djingIn = a.djingIn
-      topClubId = a.topClubId
-      rolesById = a.rolesById
-    })
+    if (isMe) {
+      void fetchUserClubActivity(pk).then((a) => {
+        memberOf = a.memberOf
+        djingIn = a.djingIn
+        topClubId = a.topClubId
+        rolesById = a.rolesById
+      })
+    }
     // Public zap standing: sats received, how many people, and the global placement — all from the
     // 9735-based leaderboard (shown to everyone). The detailed "who zapped you" list (sender
     // identities) stays owner-only further down.
     received = null
     zapRank = null
+    credibility = null
     void fetchZapRank(pk).then((r) => (zapRank = r))
+    void fetchCredibility(pk).then((result) => (credibility = result))
     if (isMe) void fetchReceivedZaps(pk).then((r) => (received = r))
   })
 
@@ -324,7 +331,7 @@
 </script>
 
 <div class="wrap">
-  <details class="howto-block">
+  <details class="howto-block led-zone">
     <summary class="howto-summary">How-to &amp; Tips</summary>
     <div class="howto-body">
       <section class="howto-card">
@@ -367,7 +374,7 @@
       <button class="logout-btn" onclick={() => logout()} title="Log out of zapclub">Log out</button>
     </div>
   {/if}
-  <header class="phead">
+  <header class="phead led-zone">
     <img class="pavatar" src={avatarUrl(pubkey, profile)} alt="" width="64" height="64" />
     <div class="pinfo">
       <h1>
@@ -402,7 +409,7 @@
   </header>
 
   {#if editing}
-    <div class="card editor">
+    <div class="card editor led-zone">
       <h2>Edit profile</h2>
       <label class="fld">Display name
         <input class="in" bind:value={eName} maxlength="60" placeholder="Your name" />
@@ -428,12 +435,27 @@
     </div>
   {/if}
 
+  {#if credibility}
+    <section class="card credibility led-zone" aria-label="DJ credibility">
+      <span class="cred-score">{credibility.score > 0 ? '+' : ''}{credibility.score.toLocaleString()}</span>
+      <span class="cred-main">
+        <span class="cred-label">DJ Credibility</span>
+        <span class="cred-sub">
+          {credibility.tracks.toLocaleString()} {credibility.tracks === 1 ? 'track' : 'tracks'} played
+          · {credibility.bangers.toLocaleString()} banger {credibility.bangers === 1 ? 'vote' : 'votes'}
+          · {credibility.skipped.toLocaleString()} community {credibility.skipped === 1 ? 'skip' : 'skips'}
+        </span>
+      </span>
+      <span class="cred-proof" title="Relay-signed Nostr score">Nostr signed ✓</span>
+    </section>
+  {/if}
+
   <!-- Public zap standing: global placement + sats received + how many people (NOT who). The whole
        card links to the leaderboard. Shown to everyone, from the 9735-based ranking. -->
   {#if zapRank}
     {@const medal = zapRank.rank === 1 ? '🥇' : zapRank.rank === 2 ? '🥈' : zapRank.rank === 3 ? '🥉' : '🏆'}
     <a
-      class="card ziprank"
+      class="card ziprank led-zone"
       class:top3={zapRank.rank <= 3}
       href="/leaderboard"
       onclick={(e) => { e.preventDefault(); goLeaderboard() }}
@@ -453,7 +475,7 @@
 
   <!-- Who zapped you (verified 9735, incl. names) — OWNER-ONLY by request. -->
   {#if isMe && received && received.bySender.length > 0}
-    <section class="card zaps-recv">
+    <section class="card zaps-recv led-zone">
       <h2>⚡ Who zapped you <span class="count">private</span></h2>
       {#if !profile?.lud16}
         <p class="recv-note">
@@ -485,7 +507,7 @@
   {/if}
 
   {#if canSeePrivate && likedTracks.length > 0}
-    <section class="card liked">
+    <section class="card liked led-zone">
       <h2>🔥 {isMe ? 'Tracks you liked' : 'Liked tracks'} <span class="count">{likedTracks.length}</span></h2>
       <ol class="liked-list">
         {#each likedTracks as t (t.videoId)}
@@ -529,13 +551,16 @@
         {#if c.about}<div class="club-about">{c.about}</div>{/if}
         <div class="club-tags">
           {@render roleTag(c)}
-          <span class="ctag">👥 {c.memberCount ?? 0} member{(c.memberCount ?? 0) === 1 ? '' : 's'}</span>
+          {#if c.memberCount != null}
+            <span class="ctag">👥 {c.memberCount} member{c.memberCount === 1 ? '' : 's'}</span>
+          {/if}
         </div>
       </div>
     </div>
   {/snippet}
 
-  <section class="clubs">
+  {#if isMe}
+  <section class="clubs led-zone">
     <div class="clubs-head">
       <h2>Clubs {#if memberOf.length}<span class="count">{memberOf.length}</span>{/if}</h2>
       {#if isMe && auth.canSign}
@@ -576,10 +601,11 @@
       <p class="dim">{isMe ? 'Not a member of any club yet.' : 'Not a member of any club.'}</p>
     {/if}
   </section>
+  {/if}
 
   <!-- Playlists are PRIVATE: only the owner or the superadmin sees them. -->
   {#if canSeePrivate}
-  <section class="pls">
+  <section class="pls led-zone">
     <div class="pls-head">
       <h2>Playlists {#if list.length}<span class="count">{list.length}</span>{/if}</h2>
       {#if isMe}
@@ -987,6 +1013,56 @@
     font-size: 0.82rem;
     margin: 0;
   }
+  .credibility {
+    margin-top: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    background: #071b33;
+    border-color: #2a638d;
+    border-radius: 5px;
+    box-shadow: inset 0 0 22px rgba(0, 26, 61, 0.72);
+  }
+  .cred-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+  }
+  .cred-label {
+    color: #b7ddfa;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .cred-score {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 58px;
+    border-right: 1px solid #2a638d;
+    color: #d9f1ff;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 1.8rem;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-shadow: 0 0 8px rgba(98, 199, 255, 0.38);
+  }
+  .cred-sub {
+    color: #80a9c8;
+    font-size: 0.76rem;
+  }
+  .cred-proof {
+    flex: 0 0 auto;
+    color: #80a9c8;
+    font-size: 0.66rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
   /* Public zap standing — clickable card linking to the leaderboard. */
   .ziprank {
     margin-top: 1rem;
@@ -1074,6 +1150,9 @@
     color: var(--amber);
   }
   @media (max-width: 460px) {
+    .cred-proof {
+      display: none;
+    }
     .zr-cta {
       display: none;
     }
@@ -1584,6 +1663,121 @@
     flex: 0 0 auto;
     font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Profile as a set of open LCD modules, sharing the site-wide selectable tint. */
+  :global(body.site-led-page) .wrap {
+    width: min(960px, 100%);
+    max-width: 960px;
+    padding: 0.8rem 0.8rem 4rem;
+    color: var(--lcd-text);
+  }
+  :global(body.site-led-page) .howto-block,
+  :global(body.site-led-page) .phead,
+  :global(body.site-led-page) .card,
+  :global(body.site-led-page) .club-row {
+    border-radius: 0;
+    box-shadow: none;
+  }
+  :global(body.site-led-page) .howto-block,
+  :global(body.site-led-page) .phead,
+  :global(body.site-led-page) .card {
+    border: 0;
+  }
+  :global(body.site-led-page) .howto-block {
+    margin-bottom: 0.7rem;
+  }
+  :global(body.site-led-page) .howto-summary,
+  :global(body.site-led-page) h1,
+  :global(body.site-led-page) h2,
+  :global(body.site-led-page) .club-name,
+  :global(body.site-led-page) .pl-name,
+  :global(body.site-led-page) .cred-label {
+    color: var(--lcd-text);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-weight: 400;
+    text-shadow: var(--lcd-text-shadow);
+  }
+  :global(body.site-led-page) .phead {
+    min-height: 132px;
+    padding: 1rem;
+  }
+  :global(body.site-led-page) .pavatar {
+    border-color: rgba(241, 243, 244, 0.28);
+    filter: saturate(0.86) contrast(1.04);
+    box-shadow: none;
+  }
+  :global(body.site-led-page) .npub,
+  :global(body.site-led-page) .pabout,
+  :global(body.site-led-page) .dim,
+  :global(body.site-led-page) .count {
+    color: var(--lcd-text-soft);
+  }
+  :global(body.site-led-page) .profile-topbar {
+    margin: 0 0 0.55rem;
+  }
+  :global(body.site-led-page) .edit-btn,
+  :global(body.site-led-page) .logout-btn,
+  :global(body.site-led-page) .njump,
+  :global(body.site-led-page) .zap-amt,
+  :global(body.site-led-page) .in,
+  :global(body.site-led-page) .hit,
+  :global(body.site-led-page) .del,
+  :global(body.site-led-page) .lt-remove {
+    border-radius: 0;
+  }
+  :global(body.site-led-page) .credibility,
+  :global(body.site-led-page) .ziprank,
+  :global(body.site-led-page) .zaps-recv,
+  :global(body.site-led-page) .liked {
+    margin-top: 0.7rem;
+    padding: 1rem;
+  }
+  :global(body.site-led-page) .credibility {
+    border-color: transparent;
+  }
+  :global(body.site-led-page) .cred-score {
+    color: var(--lcd-text-bright);
+    border-right-color: rgba(241, 243, 244, 0.22);
+    text-shadow: var(--lcd-text-shadow);
+  }
+  :global(body.site-led-page) .clubs,
+  :global(body.site-led-page) .pls {
+    margin-top: 0.7rem;
+    padding: 1rem;
+  }
+  :global(body.site-led-page) .clubs-head,
+  :global(body.site-led-page) .pls-head,
+  :global(body.site-led-page) .zaps-recv h2,
+  :global(body.site-led-page) .liked h2 {
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid rgba(241, 243, 244, 0.22);
+  }
+  :global(body.site-led-page) .club-list,
+  :global(body.site-led-page) .pl-list {
+    gap: 1px;
+    background: rgba(241, 243, 244, 0.13);
+  }
+  :global(body.site-led-page) .club-row,
+  :global(body.site-led-page) .pl-list > li {
+    border: 0;
+    background: rgba(0, 0, 0, 0.32);
+  }
+  :global(body.site-led-page) .club-row.live {
+    border: 0;
+    animation: none;
+  }
+  @media (max-width: 560px) {
+    :global(body.site-led-page) .wrap { padding: 0.45rem 0.45rem 3rem; }
+    :global(body.site-led-page) .howto-block { margin-bottom: 0.55rem; }
+    :global(body.site-led-page) .phead { min-height: 112px; padding: 0.8rem; }
+    :global(body.site-led-page) .credibility,
+    :global(body.site-led-page) .ziprank,
+    :global(body.site-led-page) .zaps-recv,
+    :global(body.site-led-page) .liked,
+    :global(body.site-led-page) .clubs,
+    :global(body.site-led-page) .pls { margin-top: 0.55rem; padding: 0.8rem; }
   }
 
 </style>

@@ -25,6 +25,7 @@ cd "$ROOT"
 }
 
 commit=$(git rev-parse HEAD)
+version=$(node -p "require('./frontend/package.json').version")
 npm --prefix frontend ci
 npm --prefix frontend audit --audit-level=high
 npm --prefix frontend run check
@@ -36,5 +37,5 @@ git push origin main
 git bundle create "$BUNDLE" main
 scp "$BUNDLE" "$REMOTE:$REMOTE_BUNDLE"
 ssh "$REMOTE" "sudo /usr/local/sbin/vps-app-deploy zapclub '$commit'"
-ZAPCLUB_EXPECTED_COMMIT="$commit" node deploy/smoke.mjs
+ZAPCLUB_EXPECTED_COMMIT="$commit" ZAPCLUB_EXPECTED_VERSION="$version" node deploy/smoke.mjs
 printf 'Zapclub release activated: %s\n' "$commit"

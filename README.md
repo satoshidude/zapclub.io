@@ -28,7 +28,9 @@ Telegram ── bridge bot ── NIP-29 relay
 
 The relay is the authoritative shared-state component. It manages group
 membership and roles, enforces write permissions and limits, and acts as the
-always-on playback conductor. Profiles and zap receipts remain on public Nostr
+always-on playback conductor. The radio stream and club metadata remain public;
+chat, presence and the member roster require NIP-42 authentication plus current
+membership in that club. Profiles and zap receipts remain on public Nostr
 relays. Caddy terminates TLS and serves the frontend; the remaining services are
 small adapters without application state.
 
@@ -52,9 +54,11 @@ All club content carries an `h` tag. NIP-29 metadata is queried separately by
 | `30107` | Authorized skip request |
 | `30111` | Relay-authored Auto DJ disarm marker |
 | `1313` | Relay-authored playback log |
-| `9`, `20100` | Chat and ephemeral presence |
+| `9`, `20100` | Member-only chat and ephemeral presence |
 | `20101` | Zap broadcast used by the leaderboard |
-| `20102–20104` | Broken-track report, floor reaction and mood vote |
+| `20102–20104` | Broken-track report, floor reaction and Vibemeter reaction |
+| `20105`, `20106` | Anonymous club-page listener heartbeat and relay-authored aggregate count |
+| `30078` | Relay-signed NIP-78 DJ credibility snapshot |
 | `9734`, `9735` | NIP-57 zap request and receipt |
 
 Nostr `created_at` values use seconds. Playback timestamps (`started_at`,
@@ -69,7 +73,8 @@ never participate in leader election. For each club, the conductor:
 2. interleaves playable tracks round-robin;
 3. publishes a new `now_playing` event on track changes;
 4. republishes it roughly every 15 seconds with a fresh `sent_at`;
-5. advances on duration, authorized skip, broken-track quorum or mood threshold.
+5. advances on duration, authorized skip, broken-track quorum or three Vibemeter skips;
+6. settles each real DJ track at up to five banger points, or minus one when the room skips it.
 
 DJ order is determined by the persisted `since` value in the newest `30102`
 event. A stage slot remains sticky for at most five minutes after the last
@@ -117,16 +122,17 @@ state for constant-time hot-path lookups:
 The SQLite database can be rebuilt from events, but `SQLITE_PATH` should persist
 across deployments to avoid a cold-start scan.
 
-Ban state, listener analytics and the zap leaderboard are stored as small JSON
+Ban state, listener analytics, DJ credibility and the zap leaderboard are stored as small JSON
 sidecars in the same persistent directory. Releases contain no mutable state.
 
 ## Enforcement and security
 
-- Group content is writable only by current members.
-- `30100` and `1313` are accepted only from the relay key.
-- Club and stage limits are enforced by relay hooks.
+- Group content is writable only by current members, except for schema-limited anonymous listener heartbeats.
+- `30100`, `1313`, aggregate listener counts and credibility snapshots are accepted only from the relay key.
+- Vibemeter reactions require club membership and share a relay-enforced 10-second cooldown. Repeated reactions from the same member count; each banger scores one point up to five, while three skips settle the track at minus one.
+- Club limits and the three-DJ stage limit are enforced by relay hooks.
 - Private and entry-fee clubs are relay-gated.
-- NIP-42 authentication protects writes; public reads remain available.
+- NIP-42 authentication protects member/social writes; anonymous listener beats remain schema- and rate-limited.
 - Admin endpoints require fresh NIP-98 authorization.
 - Chat, search and HTTP endpoints are rate-limited.
 - The relay listens on `127.0.0.1` behind Caddy/TLS.
@@ -166,6 +172,7 @@ export SQLITE_PATH="$relay_state/conductor.db"
 export RELAY_BANLIST="$relay_state/banned.json"
 export RELAY_LISTENERS="$relay_state/listeners.json"
 export RELAY_LEADERBOARD="$relay_state/leaderboard.json"
+export RELAY_CREDIBILITY="$relay_state/credibility.json"
 go run .
 ```
 

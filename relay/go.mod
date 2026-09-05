@@ -4,9 +4,10 @@ go 1.26.3
 
 require (
 	github.com/fiatjaf/eventstore v0.16.4
-	github.com/fiatjaf/khatru v0.17.5
+	github.com/fiatjaf/khatru v0.19.2-0.20250922195536-9f99b9827a6e
 	github.com/fiatjaf/relay29 v0.5.2-0.20250621200750-3276594e9d85
-	github.com/nbd-wtf/go-nostr v0.51.7
+	github.com/nbd-wtf/go-nostr v0.51.8
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	modernc.org/sqlite v1.52.0
 )
 
@@ -16,7 +17,6 @@ require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
-	github.com/btcsuite/btcd/btcutil v1.1.6 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.14.2 // indirect
@@ -45,7 +45,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
@@ -58,11 +57,9 @@ require (
 	github.com/valyala/fasthttp v1.59.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
 	google.golang.org/protobuf v1.36.2 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

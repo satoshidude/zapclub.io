@@ -337,7 +337,7 @@ func parseDuration(s string) time.Duration {
 // shouldKeepLine drops chatty lines that add volume without analytical value.
 func shouldKeepLine(line string) bool {
 	noisy := []string{
-		"heartbeat", " hb ", "30102", "20100",
+		"heartbeat", " hb ", "30102", "20100", "20105",
 		"BrokenPipeError", "Exception ignored",
 		"flushing sys.stdout",
 	}

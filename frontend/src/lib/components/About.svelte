@@ -2,146 +2,247 @@
   import { goHome } from '../router.svelte'
 </script>
 
-<div class="wrap">
-  <header class="hh">
-    <h1>About ZapClub</h1>
-    <p class="sub">Decentralized social music clubs — built on Nostr and Lightning.</p>
+<!-- Product README: functions, signal path, vision and project credits. -->
+<div class="info-page">
+  <header class="page-hero led-zone">
+    <span class="console-line">about://zapclub</span>
+    <h1>One room. One clock. Everyone in sync.</h1>
+    <p>
+      Zapclub is a shared turntable for Nostr people. Join a club, listen to the same
+      moment together, take a slot on stage and bring your own queue.
+    </p>
   </header>
 
-  <section class="card">
-    <p>
-      ZapClub is a decentralized social music platform built on Nostr and the Lightning Network.
-      Create music clubs, listen to synchronized music together, discover new artists, build
-      communities and support DJs directly through Lightning payments.
-    </p>
-    <p>
-      Unlike traditional streaming platforms, ZapClub focuses on shared experiences rather than
-      algorithmic recommendations. No accounts, no central database, no tracking. Your Nostr key
-      is your identity.
-    </p>
-    <ul class="feat-list">
-      <li><strong>Synchronized playback</strong> — relay conductor drives the clock; everyone hears the same moment.</li>
-      <li><strong>DJ stage &amp; round-robin</strong> — up to 5 DJs; queues interleaved track-by-track.</li>
-      <li><strong>VibeMeter</strong> — zap the live DJ with a banger vote or nudge the room to skip; the meter resets per track.</li>
-      <li><strong>Zaps (NIP-57)</strong> — pay the live DJ directly with Lightning; sats go straight to their wallet.</li>
-      <li><strong>Avatars &amp; moderation</strong> — Nostr profiles with relay-enforced bans and roles.</li>
-    </ul>
+  <section class="info-module led-zone">
+    <h2>What it does</h2>
+    <div class="feature-grid">
+      <article>
+        <h3>Clubs, not feeds</h3>
+        <p>Every club is a room with its own members, stage, chat, playlist flow and vibe.</p>
+      </article>
+      <article>
+        <h3>A shared clock</h3>
+        <p>The conductor keeps every listener near the same playback position.</p>
+      </article>
+      <article>
+        <h3>Three DJ slots</h3>
+        <p>DJs take turns track by track. No single queue owns the whole night.</p>
+      </article>
+      <article>
+        <h3>Vibe Meter</h3>
+        <p>The room can call a banger or skip. The meter turns reactions into live feedback.</p>
+      </article>
+      <article>
+        <h3>Zaps, direct</h3>
+        <p>NIP-57 sends sats to the DJ’s Lightning address instead of platform points.</p>
+      </article>
+      <article>
+        <h3>Your key, your profile</h3>
+        <p>Nostr provides identity, profiles and signed actions. There is no password account.</p>
+      </article>
+    </div>
   </section>
 
-  <section class="card">
-    <h2>Vision</h2>
-    <p>
-      A global network of community-owned music clubs powered by Nostr and Lightning. No label
-      platform, no tracking, no central identity. A club that genuinely belongs to the people in it.
+  <section class="info-module led-zone">
+    <h2>How the signal moves</h2>
+    <ol class="signal-path">
+      <li><strong>Nostr key</strong><span>signs identity, membership, playlists and actions</span></li>
+      <li><strong>Club relay</strong><span>stores events and enforces club roles</span></li>
+      <li><strong>Conductor</strong><span>chooses the next track and publishes the shared clock</span></li>
+      <li><strong>YouTube player</strong><span>plays the referenced media in each listener’s browser</span></li>
+      <li><strong>Lightning</strong><span>routes real sats directly to the current DJ</span></li>
+    </ol>
+    <p class="tech-note">
+      The interface is built with Svelte. The relay side uses Go, khatru and relay29.
+      Nostr events are handled with nostr-tools; playback uses the YouTube IFrame API.
     </p>
   </section>
 
-  <section class="card">
+  <section class="vision led-zone">
+    <span class="console-line">vision://open-dancefloor</span>
+    <h2>Music rooms that belong to their communities.</h2>
+    <p>
+      The goal is a network of independent clubs that can move between relays, keep their
+      social identity and pay artists or DJs without a platform wallet in the middle.
+      Less recommendation machine, more people sharing a room and taking turns.
+    </p>
+  </section>
+
+  <section id="credits" class="info-module credits led-zone">
     <h2>Credits &amp; source</h2>
     <p>
-      Open protocols and open-source tools make ZapClub possible. It is built with Nostr,
-      Bitcoin Lightning, Svelte, nostr-tools, khatru and relay29. Synchronized playback uses
-      the YouTube IFrame API.
+      Zapclub stands on open protocols and open-source software: Nostr, Bitcoin Lightning,
+      Svelte, nostr-tools, khatru and relay29. Media playback is provided by YouTube.
     </p>
-    <p>
-      The source code and complete dependency record are available in the
-      <a href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">ZapClub repository</a>.
-    </p>
+    <div class="credit-links">
+      <a href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">Source &amp; dependencies ↗</a>
+      <a href="https://github.com/nostr-protocol/nips" target="_blank" rel="noopener noreferrer">Nostr protocol specs ↗</a>
+    </div>
   </section>
 
-  <section class="card">
-    <h2>Privacy</h2>
-    <p>
-      ZapClub is designed around decentralized identities and open protocols. Information may be
-      processed through Nostr relays, Lightning infrastructure and other decentralized services.
-      The project minimizes centralized data collection wherever technically feasible, but users
-      remain responsible for understanding the privacy implications of the services they use.
-    </p>
-  </section>
-
-  <section class="card">
-    <h2>Terms &amp; disclaimer</h2>
-    <p>
-      ZapClub is an experimental music, technology, education and digital-art project. It is not
-      a music streaming, banking or escrow service and is provided “as is” and “as available”,
-      without guarantees of availability, correctness or fitness for a particular purpose.
-    </p>
-    <p>
-      Users are responsible for the clubs they operate, the content they publish or reference,
-      the payments they initiate and their interactions with other users. External media, Nostr
-      relays and Lightning services are operated by third parties. ZapClub does not control their
-      content, availability or privacy practices. Lightning payments are irreversible; use only
-      small amounts.
-    </p>
-    <p>
-      To the fullest extent permitted by applicable law, the operators are not liable for damages
-      arising from use of the platform.
-    </p>
-  </section>
-
-  <button class="home" onclick={goHome}>← Back to the clubs</button>
+  <button class="back-link" onclick={goHome}>← Back to the clubs</button>
 </div>
 
 <style>
-  .wrap {
-    max-width: 640px;
+  .info-page {
+    width: min(960px, 100%);
     margin: 0 auto;
-    padding: 1.4rem 1rem 5rem;
+    padding: 0.8rem 0.8rem 4rem;
+    color: var(--lcd-text);
   }
-  .hh {
-    margin-bottom: 1.2rem;
+  .page-hero,
+  .info-module,
+  .vision {
+    margin-bottom: 0.7rem;
+    padding: clamp(1.15rem, 3vw, 2rem);
+    border: 0;
+    border-radius: 0;
   }
-  h1 {
-    margin: 0;
-    font-size: 1.6rem;
-  }
-  .sub {
-    color: var(--text-dim);
-    margin: 0.3rem 0 0;
-    line-height: 1.5;
-  }
-  .card {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.1rem 1.2rem;
-    margin-bottom: 1rem;
-  }
-  h2 {
-    margin: 0 0 0.6rem;
-    font-size: 1.05rem;
-  }
-  p {
-    margin: 0 0 0.6rem;
-    font-size: 0.92rem;
-    line-height: 1.55;
-    color: var(--text);
-  }
-  p:last-child { margin-bottom: 0; }
-  .feat-list {
-    margin: 0.5rem 0 0;
-    padding-left: 1.1rem;
+  .page-hero {
+    min-height: 240px;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    font-size: 0.9rem;
-    line-height: 1.5;
-    color: var(--text);
+    justify-content: flex-end;
   }
-  a {
+  .console-line {
     color: var(--accent);
-    font-weight: 600;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 0.82rem;
+    letter-spacing: 0.07em;
   }
-  a:hover { text-decoration: underline; }
-  .home {
-    margin-top: 0.8rem;
-    background: none;
-    border: none;
-    color: var(--accent);
-    font-weight: 600;
-    cursor: pointer;
+  h1,
+  h2,
+  h3 {
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-weight: 400;
+    text-shadow: var(--lcd-text-shadow);
+  }
+  h1 {
+    max-width: 720px;
+    margin: 0.35rem 0 0.75rem;
+    font-size: clamp(2.1rem, 6vw, var(--site-h1-max));
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+  }
+  .page-hero > p {
+    max-width: 64ch;
+    margin: 0;
+    color: var(--lcd-text-soft);
+    font-size: clamp(1rem, 2vw, 1.15rem);
+    line-height: 1.55;
+  }
+  h2 {
+    margin: 0 0 1rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid rgba(241, 243, 244, 0.22);
+    font-size: 1.25rem;
+    letter-spacing: 0.04em;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: rgba(241, 243, 244, 0.14);
+  }
+  .feature-grid article {
+    min-height: 142px;
+    padding: 1rem;
+    background: rgba(2, 5, 9, 0.76);
+  }
+  h3 {
+    margin: 0 0 0.45rem;
+    color: var(--lcd-text-bright);
+    font-size: 1rem;
+  }
+  p {
+    margin: 0;
+    color: var(--lcd-text-soft);
+    font-size: 0.94rem;
+    line-height: 1.6;
+  }
+  .signal-path {
+    margin: 0;
     padding: 0;
-    font-size: 0.92rem;
+    list-style: none;
+    counter-reset: signal;
   }
-  .home:hover { text-decoration: underline; }
+  .signal-path li {
+    counter-increment: signal;
+    display: grid;
+    grid-template-columns: 2.3rem minmax(130px, 0.7fr) minmax(0, 1.3fr);
+    gap: 0.8rem;
+    align-items: baseline;
+    padding: 0.68rem 0;
+    border-bottom: 1px solid rgba(241, 243, 244, 0.13);
+  }
+  .signal-path li::before {
+    content: counter(signal, decimal-leading-zero);
+    color: var(--accent);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+  }
+  .signal-path strong {
+    color: var(--lcd-text-bright);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-weight: 400;
+  }
+  .signal-path span {
+    color: var(--lcd-text-soft);
+    line-height: 1.45;
+  }
+  .tech-note {
+    margin-top: 1rem;
+    max-width: 74ch;
+  }
+  .vision {
+    padding-block: clamp(1.5rem, 4vw, 2.8rem);
+  }
+  .vision h2 {
+    max-width: 760px;
+    margin: 0.4rem 0 0.8rem;
+    padding: 0;
+    border: 0;
+    font-size: clamp(1.65rem, 4vw, 2.7rem);
+    line-height: 1.08;
+  }
+  .vision p { max-width: 70ch; }
+  .credit-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem 1.5rem;
+    margin-top: 1rem;
+  }
+  a,
+  .back-link {
+    color: var(--lcd-text-bright);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    text-decoration: none;
+    text-shadow: var(--lcd-text-shadow);
+  }
+  a:hover,
+  a:focus-visible,
+  .back-link:hover,
+  .back-link:focus-visible { color: var(--accent); }
+  .back-link {
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  @media (max-width: 720px) {
+    .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .info-page { padding: 0.45rem 0.45rem 3rem; }
+    .page-hero,
+    .info-module,
+    .vision { margin-bottom: 0.55rem; padding: 1rem; }
+    .page-hero { min-height: 210px; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .feature-grid article { min-height: 0; }
+    .signal-path li {
+      grid-template-columns: 2rem minmax(0, 1fr);
+      gap: 0.4rem;
+    }
+    .signal-path span { grid-column: 2; }
+  }
 </style>

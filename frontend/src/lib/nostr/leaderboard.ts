@@ -1,11 +1,5 @@
-import { fetchClubPeople } from './groups'
-import { aggregateReceived } from './zaps.svelte'
-
-// Global zap leaderboard, built CLIENT-SIDE from verified 9735 receipts — that's where the
-// historical zap data actually lives (the relay's 20101 board only accrues going forward and
-// would start empty). We take every DJ (club member/owner), aggregate the zaps they've received,
-// keep those with sats > 0, and rank by sats. Cached briefly so the leaderboard page, the home
-// hero teaser, and profile rank badges share one fetch.
+// Global public ranking from the relay's aggregate endpoint. Building the candidate
+// set from kind 39002 would expose the protected club membership roster.
 
 export interface LeaderboardEntry {
   pubkey: string
@@ -25,6 +19,7 @@ export interface ZapRank {
 
 let cache: { at: number; promise: Promise<{ total: number; top: LeaderboardEntry[] }> } | null = null
 const TTL_MS = 60_000
+const LEADERBOARD_URL = 'https://relay.zapclub.io/leaderboard'
 
 /** The public ranking of DJs by sats received (only DJs who HAVE been zapped). Cached ~60s. */
 export function fetchLeaderboard(): Promise<{ total: number; top: LeaderboardEntry[] }> {
@@ -36,14 +31,9 @@ export function fetchLeaderboard(): Promise<{ total: number; top: LeaderboardEnt
 
 async function build(): Promise<{ total: number; top: LeaderboardEntry[] }> {
   try {
-    const people = await fetchClubPeople()
-    const totals = await aggregateReceived(people)
-    const top = [...totals.entries()]
-      .map(([pubkey, t]) => ({ pubkey, sats: t.sats, zaps: t.zaps, zappers: t.zappers, rank: 0 }))
-      .filter((e) => e.sats > 0)
-      .sort((a, b) => b.sats - a.sats || a.pubkey.localeCompare(b.pubkey))
-    top.forEach((e, i) => (e.rank = i + 1))
-    return { total: top.length, top }
+    const response = await fetch(LEADERBOARD_URL)
+    if (!response.ok) throw new Error(`leaderboard: ${response.status}`)
+    return (await response.json()) as { total: number; top: LeaderboardEntry[] }
   } catch {
     return { total: 0, top: [] }
   }
@@ -51,8 +41,13 @@ async function build(): Promise<{ total: number; top: LeaderboardEntry[] }> {
 
 /** A DJ's global zap placement + totals, or null if they've not been zapped (not on the board). */
 export async function fetchZapRank(pubkey: string): Promise<ZapRank | null> {
-  const { total, top } = await fetchLeaderboard()
-  const e = top.find((x) => x.pubkey === pubkey)
-  if (!e) return null
-  return { rank: e.rank, total, sats: e.sats, zaps: e.zaps, zappers: e.zappers }
+  try {
+    const response = await fetch(`${LEADERBOARD_URL}?pubkey=${encodeURIComponent(pubkey)}`)
+    if (!response.ok) return null
+    const result = (await response.json()) as ZapRank & { ranked: boolean }
+    if (!result.ranked) return null
+    return { rank: result.rank, total: result.total, sats: result.sats, zaps: result.zaps, zappers: result.zappers }
+  } catch {
+    return null
+  }
 }

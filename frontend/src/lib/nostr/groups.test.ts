@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // (groups.ts → nostrLogin.ts → router reads location.pathname at import time)
 import { describe, it, expect } from 'vitest'
-import { parseOwner, parseAdmins } from './groups'
+import { parseOwner, parseAdmins, selectOnAirClubDjs, selectOnStageClubDjs } from './groups'
 import type { Event } from 'nostr-tools/pure'
 
 // Minimal 39001 admins event with given [pubkey, role] p-tags (in tag order).
@@ -47,5 +47,109 @@ describe('parseOwner (regression: owner by role, not tag position)', () => {
 
   it('returns empty string for an admins event with no p-tags', () => {
     expect(parseOwner(adminsEvent([]))).toBe('')
+  })
+})
+
+function nowPlayingEvent({
+  club,
+  dj,
+  sentAt,
+  status = 'playing',
+}: {
+  club: string
+  dj: string
+  sentAt: number
+  status?: 'playing' | 'paused'
+}): Event {
+  return {
+    kind: 30100,
+    tags: [['h', club], ['dj', dj], ['sent_at', String(sentAt)], ['status', status]],
+    content: 'Artist - Track',
+    created_at: Math.floor(sentAt / 1000),
+    pubkey: 'relay',
+    id: `${club}-${sentAt}`,
+    sig: 'x',
+  } as Event
+}
+
+describe('selectOnAirClubDjs', () => {
+  const nowMs = 2_000_000
+
+  it('returns the DJ of a fresh playing club', () => {
+    const events = [nowPlayingEvent({ club: 'club-a', dj: 'dj-a', sentAt: nowMs - 10_000 })]
+    expect(selectOnAirClubDjs(events, ['club-a'], nowMs)).toEqual(new Map([['club-a', 'dj-a']]))
+  })
+
+  it('ignores stale, paused and unrequested clubs', () => {
+    const events = [
+      nowPlayingEvent({ club: 'stale', dj: 'dj-a', sentAt: nowMs - 150_000 }),
+      nowPlayingEvent({ club: 'paused', dj: 'dj-b', sentAt: nowMs - 1_000, status: 'paused' }),
+      nowPlayingEvent({ club: 'other', dj: 'dj-c', sentAt: nowMs - 1_000 }),
+    ]
+    expect(selectOnAirClubDjs(events, ['stale', 'paused'], nowMs)).toEqual(new Map())
+  })
+
+  it('does not present the relay author as a DJ when the dj tag is missing', () => {
+    const event = nowPlayingEvent({ club: 'club-a', dj: 'dj-a', sentAt: nowMs - 1_000 })
+    event.tags = event.tags.filter((tag) => tag[0] !== 'dj')
+    expect(selectOnAirClubDjs([event], ['club-a'], nowMs)).toEqual(new Map())
+  })
+
+  it('uses the newest on-air event per club', () => {
+    const events = [
+      nowPlayingEvent({ club: 'club-a', dj: 'old-dj', sentAt: nowMs - 20_000 }),
+      nowPlayingEvent({ club: 'club-a', dj: 'current-dj', sentAt: nowMs - 5_000 }),
+    ]
+    expect(selectOnAirClubDjs(events, ['club-a'], nowMs).get('club-a')).toBe('current-dj')
+  })
+})
+
+function stageEvent({
+  club,
+  dj,
+  createdAt,
+  since = createdAt,
+  on = true,
+}: {
+  club: string
+  dj: string
+  createdAt: number
+  since?: number
+  on?: boolean
+}): Event {
+  return {
+    kind: 30102,
+    tags: [['h', club], ['since', String(since)]],
+    content: on ? 'on' : 'off',
+    created_at: createdAt,
+    pubkey: dj,
+    id: `${club}-${dj}-${createdAt}`,
+    sig: 'x',
+  } as Event
+}
+
+describe('selectOnStageClubDjs', () => {
+  const nowMs = 2_000_000
+
+  it('returns a fresh DJ who is waiting on stage', () => {
+    const events = [stageEvent({ club: 'club-a', dj: 'bot', createdAt: 1_950 })]
+    expect(selectOnStageClubDjs(events, ['club-a'], nowMs)).toEqual(new Map([['club-a', 'bot']]))
+  })
+
+  it('honours the newest off event and ignores stale DJs', () => {
+    const events = [
+      stageEvent({ club: 'club-a', dj: 'left', createdAt: 1_800 }),
+      stageEvent({ club: 'club-a', dj: 'left', createdAt: 1_990, on: false }),
+      stageEvent({ club: 'club-a', dj: 'stale', createdAt: 1_700 }),
+    ]
+    expect(selectOnStageClubDjs(events, ['club-a'], nowMs)).toEqual(new Map())
+  })
+
+  it('selects the DJ who joined the stage first', () => {
+    const events = [
+      stageEvent({ club: 'club-a', dj: 'second', createdAt: 1_990, since: 1_200 }),
+      stageEvent({ club: 'club-a', dj: 'first', createdAt: 1_980, since: 1_100 }),
+    ]
+    expect(selectOnStageClubDjs(events, ['club-a'], nowMs).get('club-a')).toBe('first')
   })
 })

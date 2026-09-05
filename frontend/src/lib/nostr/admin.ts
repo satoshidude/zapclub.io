@@ -1,7 +1,7 @@
 import { pool, CLUB_RELAY } from './pool'
 import { signEvent } from './nostrLogin'
 import { auth } from './auth.svelte'
-import { parseClubMetadata, parseMembers, parseAdmins, parseOwner } from './groups'
+import { parseClubMetadata, parseMembers, parseAdmins, parseOwner, queryClubAuthed } from './groups'
 import type { Club, ClubMember } from './types'
 
 // The superadmin (satoshidude). Only this pubkey may open the dashboard and the relay
@@ -57,7 +57,7 @@ export interface ListenerSample {
   n: number // distinct listeners during the bucket
 }
 export interface SeenListener {
-  pubkey: string
+  pubkey: string // anonymous, club-scoped browser-session key (not a user identity)
   first: number // first beat in the window (ms)
   last: number // last beat (ms)
 }
@@ -65,7 +65,7 @@ export interface ClubListeners {
   id: string
   live: string[] // pubkeys beating right now
   series: ListenerSample[] // 24h count buckets (incl. the open one)
-  seen: SeenListener[] // who listened in the window + their span
+  seen: SeenListener[] // anonymous sessions in the window + their span
 }
 export interface ListenersResp {
   generatedAt: number
@@ -74,7 +74,7 @@ export interface ListenersResp {
   clubs: ClubListeners[]
 }
 
-/** Live + 24h listener history per club, recorded by the relay from presence beats. */
+/** Live + 24h listener history per club, recorded from anonymous club-page heartbeats. */
 export function loadListeners(): Promise<ListenersResp> {
   return adminFetch('/admin/listeners', 'GET') as Promise<ListenersResp>
 }
@@ -93,7 +93,7 @@ const STAGE_STALE_MS = 300_000
 export async function loadAdminData(): Promise<AdminClub[]> {
   const [meta, members, admins, np, stage] = await Promise.all([
     pool.querySync([CLUB_RELAY], { kinds: [39000] }, { maxWait: 5000 }),
-    pool.querySync([CLUB_RELAY], { kinds: [39002] }, { maxWait: 5000 }),
+    queryClubAuthed({ kinds: [39002] }, 5000),
     pool.querySync([CLUB_RELAY], { kinds: [39001] }, { maxWait: 5000 }),
     pool.querySync([CLUB_RELAY], { kinds: [30100] }, { maxWait: 5000 }),
     pool.querySync([CLUB_RELAY], { kinds: [30102] }, { maxWait: 5000 }),

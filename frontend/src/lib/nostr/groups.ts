@@ -31,7 +31,9 @@ export const KIND_PRESENCE = 20100 // ephemeral per-user heartbeat ("I'm here ri
 export const KIND_BROKEN = 20102 // ephemeral "I can't play this track" report (content = videoId)
 export const KIND_ZAP_BROADCAST = 20101 // ephemeral, zapper-signed: "I zapped <p> N sats" (club-live zap signal when the DJ's LNURL doesn't publish a 9735 receipt)
 export const KIND_FLOOR_REACTION = 20103 // ephemeral floor emote (content = emoji), member-only, h-tagged
-export const KIND_MOOD           = 20104 // ephemeral vibe vote: h=club, pos=track-pos, v=banger|skip
+export const KIND_MOOD           = 20104 // ephemeral vibe reaction: h=club, pos=track-pos, v=banger|skip
+export const KIND_LISTENER_BEAT  = 20105 // anonymous, tab-scoped club-page heartbeat
+export const KIND_LISTENER_COUNT = 20106 // relay-signed aggregate of active listener sessions
 export const KIND_AUTODJ = 30105      // replaceable per club (d=club): owner-armed auto-dj playlist
 export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-signed disarm marker
 
@@ -40,6 +42,25 @@ const RELAYS = [CLUB_RELAY]
 /** NIP-42 AUTH handler: signs the relay challenge via the active signer. */
 const onauth = (evt: EventTemplate): Promise<VerifiedEvent> =>
   signEvent(evt) as Promise<VerifiedEvent>
+
+/** One-shot relay query that can complete the NIP-42 challenge and replay itself. */
+export function queryClubAuthed(filter: Filter, maxWait = 4000): Promise<Event[]> {
+  return new Promise((resolve) => {
+    const events: Event[] = []
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve(events)
+    }
+    pool.subscribeEose(RELAYS, filter, {
+      onauth,
+      maxWait,
+      onevent: (event) => events.push(event),
+      onclose: finish,
+    })
+  })
+}
 
 function tagValue(ev: Event, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
@@ -396,17 +417,11 @@ export function parseOwner(ev: Event): string {
  * so orphaned/test clubs don't clutter the home page.
  */
 export async function listClubs(): Promise<Club[]> {
-  const [metaEvents, memberEvents, adminEvents, configEvents] = await Promise.all([
+  const [metaEvents, adminEvents, configEvents] = await Promise.all([
     pool.querySync(RELAYS, { kinds: [KIND_METADATA] }, { maxWait: 4000 }),
-    pool.querySync(RELAYS, { kinds: [KIND_MEMBERS] }, { maxWait: 4000 }),
     pool.querySync(RELAYS, { kinds: [KIND_ADMINS] }, { maxWait: 4000 }),
     pool.querySync(RELAYS, { kinds: [KIND_CLUB_CONFIG] }, { maxWait: 4000 }),
   ])
-  const counts = new Map<string, number>()
-  for (const ev of memberEvents) {
-    const id = tagValue(ev, 'd')
-    if (id) counts.set(id, ev.tags.filter((t) => t[0] === 'p' && t[1]).length)
-  }
   // Owner = first admin (creator) per club (kind 39001).
   const owners = new Map<string, string>()
   for (const ev of adminEvents) {
@@ -428,18 +443,17 @@ export async function listClubs(): Promise<Club[]> {
     .filter((c) => c.id)
     .map((c) => ({
       ...c,
-      memberCount: counts.get(c.id) ?? 0,
       owner: owners.get(c.id) || undefined,
       access: configs.get(c.id)?.access ?? 'open',
       price: configs.get(c.id)?.price ?? 0,
       featured: !!configs.get(c.id)?.featured,
     }))
-    .filter((c) => (c.memberCount ?? 0) > 0)
 
-  // Featured clubs sort first, then by member count.
+  // The member roster is private, so the public directory does not derive or
+  // expose counts from kind 39002. Featured clubs still sort first.
   clubs.sort((a, b) => {
     if (a.featured !== b.featured) return a.featured ? -1 : 1
-    return (b.memberCount ?? 0) - (a.memberCount ?? 0)
+    return a.name.localeCompare(b.name)
   })
   return clubs
 }
@@ -467,6 +481,105 @@ export async function fetchLiveClubIds(clubIds: string[]): Promise<Set<string>> 
     if (h && now - ev.created_at * 1000 < 60_000) live.add(h)
   }
   return live
+}
+
+export interface OnAirClubDj {
+  dj: string
+  sentAt: number
+}
+
+/**
+ * Select the current DJ for every club with a fresh, actively playing
+ * now_playing event. Unlike `fetchLiveClubIds`, stage heartbeats alone do not
+ * count: the public directory only calls a club "on air" while it is actually
+ * broadcasting a track.
+ */
+export function selectOnAirClubDjs(
+  events: Event[],
+  clubIds: string[],
+  nowMs = Date.now(),
+): Map<string, string> {
+  const allowed = new Set(clubIds)
+  const latest = new Map<string, OnAirClubDj>()
+
+  for (const ev of events) {
+    const clubId = tagValue(ev, 'h')
+    const sentAt = Number(tagValue(ev, 'sent_at')) || 0
+    const dj = tagValue(ev, 'dj')
+    if (!clubId || !allowed.has(clubId) || !dj) continue
+    if (tagValue(ev, 'status') === 'paused' || sentAt <= 0 || nowMs - sentAt >= 150_000) continue
+    if (sentAt <= (latest.get(clubId)?.sentAt ?? 0)) continue
+    latest.set(clubId, { dj, sentAt })
+  }
+
+  return new Map([...latest].map(([clubId, live]) => [clubId, live.dj]))
+}
+
+/** Current on-air DJ by club id. */
+export async function fetchOnAirClubDjs(clubIds: string[]): Promise<Map<string, string>> {
+  if (clubIds.length === 0) return new Map()
+  const events = await pool.querySync(
+    RELAYS,
+    { kinds: [KIND_NOW_PLAYING], '#h': clubIds },
+    { maxWait: 4000 },
+  )
+  return selectOnAirClubDjs(events, clubIds)
+}
+
+const DIRECTORY_STAGE_STALE_MS = 300_000
+
+interface StageClubDj {
+  pubkey: string
+  since: number
+}
+
+/**
+ * Select the first active stage DJ per club from replaceable stage events.
+ * The newest event per author wins, so a later `off` event removes that DJ.
+ */
+export function selectOnStageClubDjs(
+  events: Event[],
+  clubIds: string[],
+  nowMs = Date.now(),
+): Map<string, string> {
+  const allowed = new Set(clubIds)
+  const newest = new Map<string, Event>()
+
+  for (const ev of events) {
+    const clubId = tagValue(ev, 'h')
+    if (!clubId || !allowed.has(clubId)) continue
+    const key = `${clubId}:${ev.pubkey}`
+    const previous = newest.get(key)
+    if (!previous || ev.created_at > previous.created_at) newest.set(key, ev)
+  }
+
+  const byClub = new Map<string, StageClubDj[]>()
+  for (const ev of newest.values()) {
+    const clubId = tagValue(ev, 'h')!
+    if (ev.content === 'off' || nowMs - ev.created_at * 1000 >= DIRECTORY_STAGE_STALE_MS) continue
+    const since = Number(tagValue(ev, 'since')) || ev.created_at
+    const djs = byClub.get(clubId) ?? []
+    djs.push({ pubkey: ev.pubkey, since })
+    byClub.set(clubId, djs)
+  }
+
+  return new Map(
+    [...byClub].map(([clubId, djs]) => {
+      djs.sort((a, b) => a.since - b.since || a.pubkey.localeCompare(b.pubkey))
+      return [clubId, djs[0].pubkey]
+    }),
+  )
+}
+
+/** First active stage DJ by club id, including DJs waiting between tracks. */
+export async function fetchOnStageClubDjs(clubIds: string[]): Promise<Map<string, string>> {
+  if (clubIds.length === 0) return new Map()
+  const events = await pool.querySync(
+    RELAYS,
+    { kinds: [KIND_STAGE], '#h': clubIds },
+    { maxWait: 4000 },
+  )
+  return selectOnStageClubDjs(events, clubIds)
 }
 
 /**
@@ -518,11 +631,7 @@ export interface MyClub {
  * ids, then the metadata (name/picture). The relay allows the `#p` query on 39002.
  */
 export async function fetchMyClubs(pubkey: string): Promise<MyClub[]> {
-  const memberEvents = await pool.querySync(
-    RELAYS,
-    { kinds: [KIND_MEMBERS], '#p': [pubkey] },
-    { maxWait: 4000 },
-  )
+  const memberEvents = await queryClubAuthed({ kinds: [KIND_MEMBERS], '#p': [pubkey] })
   const roleById = new Map<string, string[]>()
   for (const ev of memberEvents) {
     const id = tagValue(ev, 'd')
@@ -575,7 +684,7 @@ export interface UserClubActivity {
 export async function fetchUserClubActivity(pubkey: string): Promise<UserClubActivity> {
   const [clubs, memberEvents] = await Promise.all([
     listClubs(),
-    pool.querySync(RELAYS, { kinds: [KIND_MEMBERS], '#p': [pubkey] }, { maxWait: 4000 }),
+    queryClubAuthed({ kinds: [KIND_MEMBERS], '#p': [pubkey] }),
   ])
   const byId = new Map(clubs.map((c) => [c.id, c]))
 
@@ -670,6 +779,7 @@ export async function fetchClub(groupId: string): Promise<Club | null> {
 export interface ClubSubHandlers {
   onMeta?: (ev: Event) => void
   onMembers?: (ev: Event) => void
+  onMembershipChange?: (ev: Event) => void
   onAdmins?: (ev: Event) => void
   onNowPlaying?: (ev: Event) => void
   onStage?: (ev: Event) => void
@@ -684,6 +794,7 @@ export interface ClubSubHandlers {
   onAutoDJ?: (ev: Event) => void
   onAutoDJCtrl?: (ev: Event) => void
   onMood?: (ev: Event) => void
+  onListenerCount?: (ev: Event) => void
   /** Called once after all stored events have been delivered (EOSE). */
   onEose?: () => void
 }
@@ -694,7 +805,8 @@ export interface ClubSubHandlers {
  * Returns a cleanup function.
  */
 export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
-  const metaFilter: Filter = { kinds: [KIND_METADATA, KIND_MEMBERS, KIND_ADMINS], '#d': [groupId] }
+  const metaFilter: Filter = { kinds: [KIND_METADATA, KIND_ADMINS], '#d': [groupId] }
+  const membersFilter: Filter = { kinds: [KIND_MEMBERS], '#d': [groupId] }
   const contentFilter: Filter = {
     kinds: [
       KIND_NOW_PLAYING,
@@ -703,10 +815,10 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       KIND_QUEUE,
       KIND_SKIP,
       KIND_CLUB_CONFIG,
-      KIND_PRESENCE,
       KIND_ZAP_BROADCAST,
       KIND_FLOOR_REACTION,
       KIND_MOOD,
+      KIND_LISTENER_COUNT,
       KIND_AUTODJ,
       KIND_AUTODJ_CTRL,
     ],
@@ -727,10 +839,44 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
     onauth,
     onevent(ev) {
       if (ev.kind === KIND_METADATA) h.onMeta?.(ev)
-      else if (ev.kind === KIND_MEMBERS) h.onMembers?.(ev)
       else if (ev.kind === KIND_ADMINS) h.onAdmins?.(ev)
     },
   })
+
+  // Member roster + presence are a separate authenticated social layer. Keeping
+  // them out of the public filters prevents a rejected protected kind from also
+  // closing the public stream subscription for guests and non-members.
+  const membersSub = auth.canSign
+    ? pool.subscribe(RELAYS, membersFilter, {
+        onauth,
+        onevent(ev) {
+          if (ev.kind === KIND_MEMBERS) h.onMembers?.(ev)
+        },
+      })
+    : null
+
+  const presenceSub = auth.canSign
+    ? pool.subscribe(RELAYS, { kinds: [KIND_PRESENCE], '#h': [groupId] }, {
+        onauth,
+        onevent(ev) {
+          if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
+        },
+      })
+    : null
+
+  // A short live moderation tail lets the affected browser react immediately
+  // when this account joins, leaves or is kicked. Keeping it separate prevents
+  // old moderation history from crowding state events out of content EOSE.
+  const membershipChangeSub = auth.canSign
+    ? pool.subscribe(RELAYS, {
+        kinds: [KIND_PUT_USER, KIND_REMOVE_USER],
+        '#h': [groupId],
+        since: Math.floor(Date.now() / 1000) - 60,
+      }, {
+        onauth,
+        onevent: (ev) => h.onMembershipChange?.(ev),
+      })
+    : null
 
   const contentSub = pool.subscribe(RELAYS, contentFilter, {
     onauth,
@@ -742,12 +888,12 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
       else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
       else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
       else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
-      else if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
       else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
       else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
       else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
       else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
       else if (ev.kind === KIND_MOOD) h.onMood?.(ev)
+      else if (ev.kind === KIND_LISTENER_COUNT) h.onListenerCount?.(ev)
     },
   })
 
@@ -760,6 +906,9 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
 
   return () => {
     metaSub.close()
+    membersSub?.close()
+    presenceSub?.close()
+    membershipChangeSub?.close()
     contentSub.close()
     playSub.close()
   }

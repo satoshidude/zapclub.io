@@ -2,6 +2,7 @@
 
 const timeoutMs = Number(process.env.ZAPCLUB_SMOKE_TIMEOUT_MS || 10_000)
 const expectedCommit = process.env.ZAPCLUB_EXPECTED_COMMIT
+const expectedVersion = process.env.ZAPCLUB_EXPECTED_VERSION
 
 async function request(url, validate) {
   const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
@@ -20,6 +21,7 @@ await request('https://zapclub.io/release.json', (body) => {
     return release.project === 'zapclub.io'
       && release.footerContract === '1.2.0'
       && (!expectedCommit || release.commit === expectedCommit)
+      && (!expectedVersion || release.version === expectedVersion)
   } catch {
     return false
   }

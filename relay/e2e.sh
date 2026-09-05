@@ -24,7 +24,7 @@ go build -o /tmp/zc-e2e-relay .
 RELAY_SECRET_KEY="$RSK" RELAY_SUPERADMIN="$APK" RELAY_DB="$DB" RELAY_PORT="$PORT" \
   RELAY_SERVICE_URL="ws://127.0.0.1:$PORT" SQLITE_PATH="$DB/conductor.db" \
   RELAY_BANLIST="$DB/banned.json" RELAY_LISTENERS="$DB/listeners.json" \
-  RELAY_LEADERBOARD="$DB/leaderboard.json" \
+  RELAY_LEADERBOARD="$DB/leaderboard.json" RELAY_CREDIBILITY="$DB/credibility.json" \
   /tmp/zc-e2e-relay >/tmp/zc-e2e-relay.log 2>&1 &
 RPID=$!
 cleanup() {

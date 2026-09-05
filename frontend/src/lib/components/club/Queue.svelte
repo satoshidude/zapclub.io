@@ -10,7 +10,7 @@
   import TrackPreview from '../TrackPreview.svelte'
   import { marquee } from '../../actions/marquee'
 
-  let { groupId, clubName = '', canModerate = false, isOwner = false }: { groupId: string; clubName?: string; canModerate?: boolean; isOwner?: boolean } = $props()
+  let { groupId, canModerate = false, isOwner = false }: { groupId: string; canModerate?: boolean; isOwner?: boolean } = $props()
 
   const me = $derived(auth.pubkey)
   const onStage = $derived(stage.isOnStage(me))
@@ -35,6 +35,21 @@
   let saving = $state(false)
   let saveName = $state('')
   let showLib = $state(false)
+  let libraryOpenedFor = $state('')
+
+  // Open the saved-playlist list once it is available for the signed-in user. This reveals
+  // their existing choice without silently loading or publishing a playlist as the live queue.
+  $effect(() => {
+    if (!me) {
+      showLib = false
+      libraryOpenedFor = ''
+      return
+    }
+    if (playlists.loaded && playlists.mine.length > 0 && libraryOpenedFor !== me) {
+      showLib = true
+      libraryOpenedFor = me
+    }
+  })
 
   async function doSave() {
     if (!saveName.trim() || tracks.length === 0) return
@@ -199,9 +214,10 @@
   }
 </script>
 
-<div class="queue card">
-  <div class="head">
-    <h3>My live Playlist <span class="count">{tracks.length}</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
+<div class="queue card led-zone">
+  <div class="led-scanlines" aria-hidden="true"></div>
+  <div class="head lcd-card-heading">
+    <h3><span class="lcd-card-title">My live Playlist</span>{#if selectedPlaylist}<span class="from">📚 {selectedPlaylist.name}</span>{/if}</h3>
     <div class="head-actions">
       {#if canSkip(canModerate)}
         <button class="btn btn-ghost btn-sm" onclick={() => requestSkip(groupId)} title="Skip current track">⏭ Skip</button>
@@ -253,7 +269,7 @@
         <button class="mini wide" onclick={() => (saving = true)}>💾 Save as playlist</button>
       {/if}
       {#if playlists.mine.length > 0}
-        <button class="mini wide" onclick={() => (showLib = !showLib)}>📚 My playlists ({playlists.mine.length})</button>
+        <button class="mini wide" onclick={() => (showLib = !showLib)}>📚 My playlists</button>
       {/if}
     {/if}
   </div>
@@ -307,9 +323,15 @@
       placeholder="Search YouTube or paste a playlist link…"
       maxlength="200"
       autocomplete="off"
+      aria-label="Search YouTube or paste a playlist link"
     />
-    <button class="btn btn-primary btn-sm" type="submit" disabled={searching || !query.trim()}>
-      {searching ? '…' : 'Search'}
+    <button class="search-submit" type="submit" disabled={searching || !query.trim()} aria-label="Search">
+      {#if searching}
+        <span class="searching" aria-hidden="true"><i></i><i></i><i></i></span>
+      {:else}
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
+      {/if}
+      <span>{searching ? 'Searching' : 'Search'}</span>
     </button>
   </form>
   {#if searchError}<p class="err">{searchError}</p>{/if}
@@ -351,31 +373,49 @@
 
 <style>
   .queue {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.9rem 1rem;
+    --text: var(--lcd-text);
+    --text-dim: var(--lcd-text-dim);
+    --accent: var(--lcd-text);
+    --accent-2: #b8dcfa;
+    --accent-ink: #102d57;
+    --bg: #0d1f42;
+    --bg-elev-2: rgba(9, 28, 60, 0.78);
+    --border: rgba(207, 233, 255, 0.24);
+    position: relative;
+    overflow: hidden;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 0.85rem 1rem 1.1rem;
+    color: var(--lcd-text);
+    box-shadow: none;
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    text-shadow: none;
+  }
+  .queue > :not(.led-scanlines) {
+    position: relative;
+    z-index: 1;
+  }
+  .led-scanlines {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: none;
+    pointer-events: none;
   }
   .head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0.7rem;
   }
   h3 {
     margin: 0;
-    font-size: 1rem;
-  }
-  .count {
-    color: var(--text-dim);
-    font-weight: 600;
-    font-size: 0.85rem;
   }
   .from {
     margin-left: 0.5rem;
     font-size: 0.78rem;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--lcd-text);
     vertical-align: middle;
   }
   .head-actions {
@@ -390,7 +430,7 @@
   }
   .search {
     display: flex;
-    gap: 0.5rem;
+    gap: 0;
     margin: 0.9rem 0 0.6rem;
     padding-top: 0.9rem;
     border-top: 1px solid var(--border);
@@ -398,17 +438,72 @@
   .search input {
     flex: 1;
     min-width: 0;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.7rem;
+    min-height: 42px;
+    background:
+      repeating-linear-gradient(180deg, rgba(241, 243, 244, 0.012) 0 1px, transparent 1px 3px),
+      rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(207, 233, 255, 0.3);
+    border-right: 0;
+    border-radius: 5px 0 0 5px;
+    padding: 0.55rem 0.75rem;
     color: var(--text);
+    box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.36);
+    font-family: inherit;
     font-size: 0.88rem;
+    letter-spacing: 0.025em;
   }
+  .search input::placeholder { color: rgba(241, 243, 244, 0.72); }
   .search input:focus {
     outline: none;
-    border-color: var(--accent-2);
+    border-color: rgba(210, 236, 255, 0.74);
+    background:
+      repeating-linear-gradient(180deg, rgba(241, 243, 244, 0.018) 0 1px, transparent 1px 3px),
+      rgba(0, 0, 0, 0.78);
   }
+  .search-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    min-width: 112px;
+    min-height: 42px;
+    padding: 0 0.85rem;
+    border: 1px solid rgba(207, 233, 255, 0.48);
+    border-radius: 0 5px 5px 0;
+    color: #fff;
+    background: transparent;
+    box-shadow: none;
+    font-family: inherit;
+    font-size: 0.8rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .search-submit:hover:not(:disabled),
+  .search-submit:focus-visible {
+    color: #fff;
+    border-color: rgba(226, 244, 255, 0.82);
+    background: transparent;
+  }
+  .search-submit:focus-visible { outline: 1px solid #d2ecff; outline-offset: 3px; }
+  .search-submit:disabled {
+    color: #fff;
+    border-color: rgba(207, 233, 255, 0.3);
+    background: transparent;
+    cursor: default;
+  }
+  .search-submit svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.1;
+    stroke-linecap: round;
+  }
+  .searching { display: inline-flex; align-items: center; gap: 3px; height: 19px; }
+  .searching i { width: 3px; height: 10px; background: currentColor; }
+  .searching i:nth-child(2) { height: 15px; }
+  .searching i:nth-child(3) { height: 7px; }
   .pl-bar {
     display: flex;
     align-items: center;
@@ -672,5 +767,28 @@
     flex: 1 1 100%;
     color: var(--danger);
     font-size: 0.78rem;
+  }
+  @media (max-width: 560px) {
+    .queue {
+      padding: 0.75rem 0.75rem 0.9rem;
+    }
+    .head {
+      align-items: flex-start;
+      gap: 0.6rem;
+    }
+    .head-actions {
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .tracks li,
+    .results li {
+      gap: 0.4rem;
+    }
+    .t-idx {
+      display: none;
+    }
+    .search input { min-height: 40px; padding-inline: 0.65rem; font-size: 0.8rem; }
+    .search-submit { min-width: 46px; min-height: 40px; padding-inline: 0.7rem; }
+    .search-submit > span:last-child { display: none; }
   }
 </style>

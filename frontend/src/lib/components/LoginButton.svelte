@@ -6,10 +6,18 @@
 </script>
 
 {#if auth.isLoggedIn}
-  <!-- Click the badge → your profile page (logout lives there). -->
-  <button class="trigger" onclick={() => goUser(auth.npub!)} title="Your profile">
+  <!-- The profile is navigation, so it is an open link rather than button chrome. -->
+  <a
+    class="profile-link"
+    href={`/user/${auth.npub!}`}
+    onclick={(event) => {
+      event.preventDefault()
+      goUser(auth.npub!)
+    }}
+    title="Your profile"
+  >
     <ProfileBadge pubkey={auth.pubkey!} npub={auth.npub!} profile={auth.profile} size={34} />
-  </button>
+  </a>
 {:else}
   <div class="login-actions">
     <button class="btn btn-ghost btn-sm signup" onclick={launchSignup}>Create account</button>
@@ -18,15 +26,16 @@
 {/if}
 
 <style>
-  .trigger {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.25rem 0.6rem 0.25rem 0.25rem;
-    cursor: pointer;
+  .profile-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0;
+    color: inherit;
+    text-decoration: none;
   }
-  .trigger:hover {
-    border-color: var(--accent-2);
+  .profile-link:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 4px;
   }
   .login-actions {
     display: flex;

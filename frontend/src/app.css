@@ -14,6 +14,9 @@
   --radius-sm: 9px;
   --topbar-h: 3.5rem; /* fixed topbar height — body is padded by this so nothing hides behind it */
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --page-led-a: #17191b;
+  --page-led-b: #0c0e0f;
+  --page-led-c: #050607;
 
   color-scheme: dark;
   font-family: var(--font);
@@ -44,6 +47,175 @@ body {
     var(--bg);
 }
 
+/* App-wide LED console: the body follows the selected LED family at a much darker level than
+   the modules. Black is both the initial fallback and the default selected theme. */
+body.site-led-page {
+  --site-h1-max: 47px;
+  --lcd-text: #f1f3f4;
+  --lcd-text-bright: #ffffff;
+  --lcd-text-soft: #c9ced1;
+  --lcd-text-dim: #a5adb3;
+  --lcd-text-shadow: 0 0 3px rgba(235, 241, 244, 0.68), 0 0 9px rgba(116, 166, 207, 0.18);
+  padding-top: 0;
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.46) 0 1px, transparent 1px 3px),
+    linear-gradient(155deg, var(--page-led-a) 0%, var(--page-led-b) 52%, var(--page-led-c) 100%);
+  background-attachment: fixed;
+}
+
+html[data-zap-led-theme='red'] {
+  --card-led-a: rgba(76, 16, 26, 0.78);
+  --card-led-b: rgba(34, 7, 13, 0.72);
+  --card-led-c: rgba(8, 2, 4, 0.82);
+  --page-led-a: #21080e;
+  --page-led-b: #0d0306;
+  --page-led-c: #040102;
+}
+
+html[data-zap-led-theme='green'] {
+  --card-led-a: rgba(12, 58, 29, 0.76);
+  --card-led-b: rgba(6, 27, 14, 0.72);
+  --card-led-c: rgba(2, 8, 4, 0.82);
+  --page-led-a: #071d0e;
+  --page-led-b: #030c06;
+  --page-led-c: #010402;
+}
+
+html[data-zap-led-theme='blue'] {
+  --card-led-a: rgba(13, 31, 66, 0.86);
+  --card-led-b: rgba(9, 28, 60, 0.76);
+  --card-led-c: rgba(3, 10, 24, 0.84);
+  --page-led-a: #08162e;
+  --page-led-b: #040b19;
+  --page-led-c: #01040a;
+}
+
+html[data-zap-led-theme='black'] {
+  --card-led-a: transparent;
+  --card-led-b: transparent;
+  --card-led-c: transparent;
+  --page-led-a: #17191b;
+  --page-led-b: #0c0e0f;
+  --page-led-c: #050607;
+}
+
+body.site-led-page .site-footer {
+  width: min(960px, 100%);
+  margin-inline: auto;
+  border-top-color: rgba(96, 139, 196, 0.22);
+  color: var(--lcd-text-dim);
+  font-family: 'DotGothic16', ui-monospace, monospace;
+  padding-inline: 1.8rem;
+}
+
+body.site-led-page .topbar .profile-link {
+  padding: 0.25rem 0;
+  color: var(--lcd-text);
+}
+
+body.site-led-page .topbar .profile-link:focus-visible {
+  outline: 1px solid #d2ecff;
+  outline-offset: 4px;
+}
+
+body.site-led-page .topbar .badge {
+  gap: 0.65rem;
+}
+
+body.site-led-page .topbar .avatar-led {
+  overflow: hidden;
+  border-radius: 50%;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+body.site-led-page .topbar .avatar-led::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(244, 246, 247, 0.12) 0 0.55px, transparent 0.72px);
+  background-size: 4px 4px;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+body.site-led-page .topbar .avatar {
+  border: 0;
+  opacity: 0.96;
+  filter: grayscale(0.22) saturate(0.85) brightness(1.02) contrast(1.08);
+  box-shadow: none;
+}
+
+body.site-led-page .topbar .name {
+  color: var(--lcd-text);
+  font-family: 'DotGothic16', ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  text-shadow: var(--lcd-text-shadow);
+  text-transform: uppercase;
+}
+
+/* Open LCD modules: tonal separation and two short registration corners reveal the grid
+   without turning the shared console back into a stack of bordered cards. */
+body.site-led-page .led-zone {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(
+      145deg,
+      var(--card-led-a, rgba(241, 243, 244, 0.032)) 0%,
+      var(--card-led-b, rgba(120, 158, 191, 0.014)) 46%,
+      var(--card-led-c, rgba(0, 0, 0, 0.055)) 100%
+    ) !important;
+}
+
+body.site-led-page .led-zone::before,
+body.site-led-page .led-zone::after {
+  content: '';
+  position: absolute;
+  z-index: 6;
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+  opacity: 0.52;
+}
+
+body.site-led-page .led-zone::before {
+  top: 0;
+  left: 0;
+  border-top: 1px solid rgba(222, 232, 237, 0.58);
+  border-left: 1px solid rgba(222, 232, 237, 0.58);
+}
+
+body.site-led-page .led-zone::after {
+  right: 0;
+  bottom: 0;
+  border-right: 1px solid rgba(154, 172, 184, 0.42);
+  border-bottom: 1px solid rgba(154, 172, 184, 0.42);
+}
+
+@media (max-width: 560px) {
+  body.site-led-page .led-zone::before,
+  body.site-led-page .led-zone::after {
+    width: 9px;
+    height: 9px;
+  }
+}
+
+@media (max-width: 420px) {
+  body.site-led-page .topbar .name-clip {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  body.site-led-page .site-footer {
+    padding-inline: 1.35rem;
+  }
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
@@ -51,6 +223,24 @@ button {
 
 a {
   color: var(--accent);
+}
+
+/* Shared title treatment for every blue LCD card and the compact DJ label. */
+.lcd-card-title {
+  color: var(--lcd-text, #cfe9ff);
+  font-family: 'DotGothic16', ui-monospace, monospace;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  text-shadow: var(--lcd-text-shadow, 0 0 3px rgba(179, 222, 255, 0.8));
+  text-transform: uppercase;
+}
+
+.lcd-card-heading {
+  margin-bottom: 9px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(207, 233, 255, 0.25);
 }
 
 input,
