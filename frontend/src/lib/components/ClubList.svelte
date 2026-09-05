@@ -1129,7 +1129,6 @@
     padding: clamp(1.2rem, 4vw, 2.4rem);
   }
   :global(body.site-led-page) .eyebrow,
-  :global(body.site-led-page) .hero-title,
   :global(body.site-led-page) .lb-pod-name {
     font-family: 'DotGothic16', ui-monospace, monospace;
     font-weight: 400;
@@ -1141,7 +1140,9 @@
   }
   :global(body.site-led-page) .hero-title {
     max-width: 760px;
+    font-family: var(--font);
     font-size: clamp(27px, calc(4.4vw - 5px), var(--site-h1-max));
+    font-weight: 800;
     line-height: 1;
     letter-spacing: 0.01em;
     word-spacing: -0.12em;

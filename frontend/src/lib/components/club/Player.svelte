@@ -51,9 +51,8 @@
   let destroyed = false
   let ready = $state(false)
 
-  // The iframe always starts muted so autoplay remains reliable. Browsers such as
-  // Safari only allow audio to start inside a user gesture, so the UI must keep
-  // reporting the real muted state until enableSound() is called from a control.
+  // The iframe starts muted so autoplay can begin. Once a freshly loaded video is
+  // actually playing, Zapclub always asks YouTube to unmute it — Safari included.
   let muted = $state(true)
   let lastCanHear = untrack(() => canHear)
   let volume = $state(70)
@@ -61,6 +60,7 @@
   let playing = $state(false)
   let playerEl: HTMLDivElement
   let loadedVideoId: string | null = null
+  let unmuteAfterNextLoad = false
   let idleMode = false
   // True when a DJ is on stage but has no tracks yet — plays the lobby video as background audio.
   const lobbyPlaying = $derived(!sync.live && stage.djs.length > 0 && !!LOBBY_VIDEO_ID)
@@ -73,7 +73,12 @@
       if (s === 1) playing = true
       else if (s === -1 || s === 0 || s === 2 || s === 5) playing = false
       if (s === 1) {
-        if (canHear && !muted && player) {
+        if (unmuteAfterNextLoad) {
+          unmuteAfterNextLoad = false
+          if (canHear) unmuteLoadedVideo()
+        } else if (canHear && !muted && player) {
+          // Re-assert the chosen audible state after buffering without overriding
+          // a deliberate mute made after the video loaded.
           player.setVolume(volume)
           player.unMute()
         }
@@ -88,7 +93,7 @@
       if (s !== 0) return // 0 = ended
       if (idleMode) {
         // Only loop when lobby video should play (DJ on stage, no tracks).
-        if (lobbyPlaying && player) player.load(LOBBY_VIDEO_ID, 0)
+        if (lobbyPlaying) loadVideo(LOBBY_VIDEO_ID, 0)
         return
       }
       onended?.()
@@ -111,6 +116,20 @@
   })
 
   /** Applies the current now_playing state to the player. */
+  function loadVideo(videoId: string, startSeconds: number) {
+    if (!player) return
+    unmuteAfterNextLoad = true
+    player.load(videoId, startSeconds)
+  }
+
+  function unmuteLoadedVideo() {
+    if (!player) return
+    if (volume === 0) volume = 70
+    player.setVolume(volume)
+    player.unMute()
+    muted = false
+  }
+
   function apply(force: boolean) {
     if (!player || !ready) return
     const np = sync.live
@@ -122,7 +141,7 @@
       idleMode = true
       loadedVideoId = null
       if (lobbyPlaying) {
-        player.load(LOBBY_VIDEO_ID, 0)
+        loadVideo(LOBBY_VIDEO_ID, 0)
       } else {
         if (player.getState() === 1) player.pause()
       }
@@ -135,7 +154,7 @@
     // between it runs smoothly.
     if (np.videoId !== loadedVideoId || force) {
       loadedVideoId = np.videoId
-      player.load(np.videoId, targetPosition())
+      loadVideo(np.videoId, targetPosition())
       return
     }
     if (np.status === 'paused') {
@@ -179,14 +198,10 @@
     }
   }
 
-  /** Sound-tap: unmute INSIDE the user gesture (the only way iOS lets audio start) and re-sync
-   *  to the live position (the muted autoplay kept the clock running). */
+  /** Manual fallback: unmute inside a user gesture and re-sync to the live position. */
   function enableSound() {
     if (!player) return
-    if (volume === 0) volume = 70
-    player.unMute()
-    player.setVolume(volume)
-    muted = false
+    unmuteLoadedVideo()
     if (sync.live) {
       player.seekTo(targetPosition())
       player.play()
@@ -216,8 +231,8 @@
     }
   }
 
-  // Revoking access mutes immediately. Gaining access stays muted until the user
-  // explicitly enables sound, preserving strict autoplay-policy compatibility.
+  // Revoking access mutes immediately. Gaining access makes the already loaded
+  // stream audible as well; join/sign-in supplies the user interaction Safari expects.
   $effect(() => {
     void ready
     const allowed = canHear
@@ -226,6 +241,8 @@
     if (!allowed) {
       player.mute()
       muted = true
+    } else {
+      unmuteLoadedVideo()
     }
   })
 
@@ -414,7 +431,7 @@
   .shield.clickable {
     cursor: pointer;
   }
-  /* Lobby overlay covers the (muted) idle stream with a calm placeholder. */
+  /* Lobby overlay covers the idle stream with a calm placeholder. */
   .lobby {
     position: absolute;
     inset: 0;

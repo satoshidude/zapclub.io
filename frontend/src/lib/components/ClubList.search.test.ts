@@ -24,6 +24,10 @@ describe('club search suggestions', () => {
     expect(source).toContain('{#if memberCounts[club.id]}')
     expect(source).toContain('class="tag listener-tag"')
     expect(source).toContain('subscribeListenerCounts(ids')
+    expect(source).toContain('{#if (listenerCounts[club.id] ?? 0) > 0}')
+    expect(source).toContain('{listenerCounts[club.id]}')
+    expect(source).toContain('{#if (listenerCounts[TELEGRAM_BOT_CLUB_ID] ?? 0) > 0}')
+    expect(source).toContain('{listenerCounts[TELEGRAM_BOT_CLUB_ID]}')
     expect(source).not.toContain('subscribeClubPresence')
     expect(source).toContain('class="club-player-byline"')
     expect(source).toContain('class="club-player-title" use:marquee')
@@ -39,6 +43,9 @@ describe('club search suggestions', () => {
     expect(source).toMatch(/\.club-player-tags\s*\{[\s\S]*?font-size: 14px;/)
     expect(source).toContain('.club-player-tags { font-size: 12px; }')
     expect(source).toContain('height: 104px;')
+    expect(source).toMatch(
+      /:global\(body\.site-led-page\) \.hero-title \{[\s\S]*?font-family: var\(--font\);[\s\S]*?font-weight: 800;/,
+    )
     expect(source).toContain('.club-player-row:hover .club-player-title:global([data-mq]) .mq-inner')
     expect(source).toMatch(
       /\.club-player-artist\s*\{[\s\S]*?color: var\(--text-dim\);[\s\S]*?font-size: 0\.82rem;/,
