@@ -367,6 +367,131 @@ textarea {
   font-size: 0.82rem;
 }
 
+/* Shared LED console treatment for every application dialog. */
+body.site-led-page .led-modal-backdrop {
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 4px),
+    rgba(0, 0, 0, 0.84);
+  backdrop-filter: blur(8px) saturate(0.72);
+}
+
+body.site-led-page .led-modal-sheet {
+  border: 0;
+  border-radius: 0;
+  color: var(--lcd-text);
+  background:
+    linear-gradient(var(--accent), var(--accent)) left top / 20px 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) left top / 1px 20px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right bottom / 20px 1px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right bottom / 1px 20px no-repeat,
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 4px),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--card-led-a) 68%, #111719),
+      color-mix(in srgb, var(--card-led-b) 70%, #070a0c) 56%,
+      color-mix(in srgb, var(--card-led-c) 62%, #030405)
+    );
+  box-shadow: 0 26px 88px rgba(0, 0, 0, 0.72), inset 0 1px rgba(241, 243, 244, 0.08);
+}
+
+body.site-led-page .led-modal-sheet .led-modal-title {
+  margin: 0 0 0.35rem;
+  padding: 0 0 0.65rem;
+  border-bottom: 1px solid rgba(241, 243, 244, 0.2);
+  color: var(--lcd-text-bright);
+  font-family: 'DotGothic16', ui-monospace, monospace;
+  font-size: 1.22rem;
+  font-weight: 400;
+  line-height: 1.15;
+  text-align: left;
+  text-shadow: var(--lcd-text-shadow);
+}
+
+body.site-led-page .led-modal-sheet .btn {
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--lcd-text-bright);
+  box-shadow: inset 1px 0 rgba(241, 243, 244, 0.34);
+  text-shadow: var(--lcd-text-shadow);
+  transform: none;
+}
+
+body.site-led-page .led-modal-sheet .btn-primary {
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.36);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+body.site-led-page .led-modal-sheet .btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(241, 243, 244, 0.08);
+  color: var(--accent);
+  filter: none;
+}
+
+body.site-led-page .led-modal-sheet :is(input, textarea, select) {
+  border: 0;
+  border-bottom: 1px solid rgba(241, 243, 244, 0.32);
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--lcd-text-bright);
+}
+
+body.site-led-page .led-modal-sheet :is(input, textarea, select):focus {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 1px 0 var(--accent);
+}
+
+body.site-led-page .led-modal-sheet :is(.amt, .copy, .copy-uri, .pl, .file) {
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.27);
+  color: var(--lcd-text);
+  box-shadow: inset 0 -1px rgba(241, 243, 244, 0.24);
+  text-shadow: var(--lcd-text-shadow);
+}
+
+body.site-led-page .led-modal-sheet :is(.amt, .copy, .copy-uri, .pl, .file):hover {
+  border-color: transparent;
+  color: var(--accent);
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+body.site-led-page .led-modal-sheet :is(.back, .cancel, .alt-wallet, .x) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--lcd-text-dim);
+  text-shadow: var(--lcd-text-shadow);
+}
+
+body.site-led-page .led-modal-sheet :is(.back, .cancel, .alt-wallet, .x):hover {
+  color: var(--lcd-text-bright);
+}
+
+body.site-led-page .led-modal-sheet :is(.qr, .scan-video, .video, .cover) {
+  border-radius: 0;
+}
+
+@media (max-width: 560px) {
+  body.site-led-page .led-modal-backdrop {
+    place-items: end center;
+    padding: 0;
+  }
+
+  body.site-led-page .led-modal-sheet {
+    width: 100%;
+    max-width: none;
+    max-height: min(88dvh, 760px);
+    padding: 1.15rem max(1rem, env(safe-area-inset-right)) calc(1rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    overflow-y: auto;
+    border-top: 1px solid rgba(241, 243, 244, 0.22);
+  }
+}
+
 .field {
   display: flex;
   flex-direction: column;

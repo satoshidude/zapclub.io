@@ -123,8 +123,8 @@
 <svelte:window onkeydown={onKey} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="backdrop" role="presentation" onclick={onClose}>
-  <div class="sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+<div class="backdrop led-modal-backdrop" role="presentation" onclick={onClose}>
+  <div class="sheet led-modal-sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
     <button class="x" onclick={onClose} aria-label="Close">✕</button>
 
     <div class="video">
@@ -151,7 +151,7 @@
         </div>
       </label>
     {:else}
-      <p class="ttl">{track.title}</p>
+      <p class="ttl lcd-card-title">{track.title}</p>
     {/if}
     {#if fmt(track.duration)}<p class="meta">{fmt(track.duration)}</p>{/if}
 

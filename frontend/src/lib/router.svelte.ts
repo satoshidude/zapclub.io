@@ -8,7 +8,6 @@ export type Route =
   | { name: 'admin' }
   | { name: 'howto' }
   | { name: 'about' }
-  | { name: 'credits' }
   | { name: 'disclaimer' }
   | { name: 'leaderboard' }
   | { name: 'privacy' }
@@ -23,7 +22,7 @@ export function parseRoute(path: string): Route {
   if (/^\/admin\/?$/.test(path)) return { name: 'admin' }
   if (/^\/howto\/?$/.test(path)) return { name: 'howto' }
   if (/^\/about\/?$/.test(path)) return { name: 'about' }
-  if (/^\/credits\/?$/.test(path)) return { name: 'credits' }
+  if (/^\/credits\/?$/.test(path)) return { name: 'about' }
   if (/^\/disclaimer\/?$/.test(path)) return { name: 'disclaimer' }
   if (/^\/leaderboard\/?$/.test(path)) return { name: 'leaderboard' }
   if (/^\/privacy\/?$/.test(path)) return { name: 'privacy' }
@@ -49,6 +48,9 @@ export const router = {
 export function navigate(path: string): void {
   if (path !== location.pathname) history.pushState({}, '', path)
   state.route = parseRoute(path)
+  if (typeof window !== 'undefined') {
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' }))
+  }
 }
 
 export function goHome(): void {

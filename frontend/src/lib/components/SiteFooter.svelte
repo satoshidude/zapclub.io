@@ -6,14 +6,10 @@
   const displayVersion = build.version.endsWith('.0') ? build.version.slice(0, -2) : build.version
   const revision = build.commit === 'development' ? build.commit : build.commit.slice(0, 7)
 
-  function follow(event: MouseEvent, path: string, anchor = ''): void {
+  function follow(event: MouseEvent, path: string): void {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     navigate(path)
-    if (anchor) {
-      history.replaceState({}, '', `${path}#${anchor}`)
-      requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }))
-    }
   }
 </script>
 
@@ -26,7 +22,7 @@
   <nav class="footer-nav" aria-label="Project information">
     <a href="/about" onclick={(event) => follow(event, '/about')}>About</a>
     <a href="/disclaimer" onclick={(event) => follow(event, '/disclaimer')}>Disclaimer</a>
-    <a href="/about#credits" onclick={(event) => follow(event, '/about', 'credits')}>Credits</a>
+    <a href={repository} target="_blank" rel="noopener noreferrer">GitHub</a>
   </nav>
   <small>
     v.{displayVersion} <span aria-hidden="true">/</span>

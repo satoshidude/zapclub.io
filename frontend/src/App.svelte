@@ -78,8 +78,6 @@
     <HowTo />
   {:else if router.route.name === 'about'}
     <About />
-  {:else if router.route.name === 'credits'}
-    <About />
   {:else if router.route.name === 'disclaimer'}
     <Disclaimer />
   {:else if router.route.name === 'leaderboard'}

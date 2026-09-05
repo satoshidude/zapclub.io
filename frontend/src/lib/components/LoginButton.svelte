@@ -1,6 +1,6 @@
 <script lang="ts">
   import { auth } from '../nostr/auth.svelte'
-  import { launchLogin, launchSignup } from '../nostr/nostrLogin'
+  import { launchLogin } from '../nostr/nostrLogin'
   import { goUser } from '../router.svelte'
   import ProfileBadge from './ProfileBadge.svelte'
 </script>
@@ -20,8 +20,7 @@
   </a>
 {:else}
   <div class="login-actions">
-    <button class="btn btn-ghost btn-sm signup" onclick={launchSignup}>Create account</button>
-    <button class="btn btn-primary btn-sm" onclick={launchLogin}>Sign in</button>
+    <button class="btn btn-sm sign-in" onclick={launchLogin}>Sign in</button>
   </div>
 {/if}
 
@@ -42,9 +41,28 @@
     gap: 0.5rem;
     align-items: center;
   }
-  @media (max-width: 560px) {
-    .login-actions .signup {
-      display: none;
-    }
+  .sign-in {
+    min-height: 44px;
+    padding: 0 0.35rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent);
+    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.035em;
+    text-shadow: 0 0 3px rgba(74, 222, 94, 0.65), 0 0 9px rgba(74, 222, 94, 0.22);
+  }
+  .sign-in:hover {
+    border-color: transparent;
+    background: transparent;
+    color: #8cf29a;
+    filter: none;
+    text-shadow: 0 0 4px rgba(74, 222, 94, 0.8), 0 0 11px rgba(74, 222, 94, 0.3);
+  }
+  .sign-in:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 3px;
   }
 </style>

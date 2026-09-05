@@ -2,7 +2,7 @@
   import { goHome } from '../router.svelte'
 </script>
 
-<!-- Product README: functions, signal path, vision and project credits. -->
+<!-- Product README: functions, signal path and vision. -->
 <div class="info-page">
   <header class="page-hero led-zone">
     <span class="console-line">about://zapclub</span>
@@ -66,18 +66,6 @@
       social identity and pay artists or DJs without a platform wallet in the middle.
       Less recommendation machine, more people sharing a room and taking turns.
     </p>
-  </section>
-
-  <section id="credits" class="info-module credits led-zone">
-    <h2>Credits &amp; source</h2>
-    <p>
-      Zapclub stands on open protocols and open-source software: Nostr, Bitcoin Lightning,
-      Svelte, nostr-tools, khatru and relay29. Media playback is provided by YouTube.
-    </p>
-    <div class="credit-links">
-      <a href="https://github.com/satoshidude/zapclub.io" target="_blank" rel="noopener noreferrer">Source &amp; dependencies ↗</a>
-      <a href="https://github.com/nostr-protocol/nips" target="_blank" rel="noopener noreferrer">Nostr protocol specs ↗</a>
-    </div>
   </section>
 
   <button class="back-link" onclick={goHome}>← Back to the clubs</button>
@@ -205,21 +193,12 @@
     line-height: 1.08;
   }
   .vision p { max-width: 70ch; }
-  .credit-links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.7rem 1.5rem;
-    margin-top: 1rem;
-  }
-  a,
   .back-link {
     color: var(--lcd-text-bright);
     font-family: 'DotGothic16', ui-monospace, monospace;
     text-decoration: none;
     text-shadow: var(--lcd-text-shadow);
   }
-  a:hover,
-  a:focus-visible,
   .back-link:hover,
   .back-link:focus-visible { color: var(--accent); }
   .back-link {

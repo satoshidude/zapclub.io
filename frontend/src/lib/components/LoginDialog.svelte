@@ -185,10 +185,10 @@
 
 {#if loginDialog.open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="backdrop" role="presentation" onclick={close}>
-    <div class="sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+  <div class="backdrop led-modal-backdrop" role="presentation" onclick={close}>
+    <div class="sheet led-modal-sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
       {#if view === 'main'}
-        <h3>Sign in to zapclub</h3>
+        <h3 class="led-modal-title lcd-card-title">Sign in to zapclub</h3>
         <button class="btn btn-primary big" onclick={createAccount} disabled={busy}>
           ✨ Create a new account
         </button>
@@ -209,7 +209,7 @@
         <p class="hint">No email, no password. Your Nostr key is your identity.</p>
       {:else if view === 'bunker'}
         <button class="back" onclick={() => { stopScan(); view = 'main' }}>← Back</button>
-        <h3>Connect a remote signer</h3>
+        <h3 class="led-modal-title lcd-card-title">Connect a remote signer</h3>
         {#if scanning}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class="scan-video" bind:this={videoEl} muted autoplay></video>
@@ -245,7 +245,7 @@
         {/if}
       {:else}
         <button class="back" onclick={() => (view = 'main')}>← Back</button>
-        <h3>Use a private key</h3>
+        <h3 class="led-modal-title lcd-card-title">Use a private key</h3>
         <p class="hint">Your nsec stays in this browser. Never paste it on sites you don't trust.</p>
         <input
           class="bunker-in"

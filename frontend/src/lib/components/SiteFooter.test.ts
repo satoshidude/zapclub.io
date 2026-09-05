@@ -10,12 +10,13 @@ describe('project footer contract', () => {
     expect(source).not.toMatch(/sunnyhill\.io|site-footer__attribution|made by/i)
   })
 
-  it('links About, Disclaimer and Credits from one footer menu', () => {
+  it('links About, Disclaimer and GitHub from one footer menu', () => {
     expect(source).toContain('<nav class="footer-nav"')
     expect(source.match(/<a\b/g)).toHaveLength(4)
     expect(source).toContain('>About</a>')
     expect(source).toContain('>Disclaimer</a>')
-    expect(source).toContain('>Credits</a>')
+    expect(source).toContain('href={repository} target="_blank" rel="noopener noreferrer">GitHub</a>')
+    expect(source).not.toContain('>Credits</a>')
   })
 
   it('gives each information link a minimum 44px touch target', () => {

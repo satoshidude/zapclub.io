@@ -17,7 +17,7 @@ describe('global project footer', () => {
   })
 
   it('separates product information from the combined legal page', () => {
-    expect(app.match(/router\.route\.name === '(?:about|credits)'[\s\S]*?<About \/>/g)).toHaveLength(2)
+    expect(app.match(/router\.route\.name === 'about'[\s\S]*?<About \/>/g)).toHaveLength(1)
     expect(app.match(/router\.route\.name === '(?:disclaimer|privacy|terms|legal)'[\s\S]*?<Disclaimer \/>/g)).toHaveLength(4)
   })
 
@@ -32,7 +32,6 @@ describe('global project footer', () => {
       'admin',
       'howto',
       'about',
-      'credits',
       'disclaimer',
       'leaderboard',
       'privacy',

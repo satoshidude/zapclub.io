@@ -88,13 +88,13 @@
 
 {#if payModal.open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="backdrop" role="presentation" onclick={hidePay}>
-    <div class="sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+  <div class="backdrop led-modal-backdrop" role="presentation" onclick={hidePay}>
+    <div class="sheet led-modal-sheet" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
       {#if payModal.paid}
         <div class="paid">⚡ Paid! Thank you.</div>
         <button class="cancel" onclick={hidePay}>Close</button>
       {:else}
-        <h3>{payModal.label} · {payModal.sats} sats</h3>
+        <h3 class="led-modal-title lcd-card-title">{payModal.label} · {payModal.sats} sats</h3>
         {#if qrSrc}
           <button class="qr-link" onclick={openAlbyGo} title="Open in Alby Go">
             <img class="qr" src={qrSrc} alt="invoice QR" width="220" height="220" />

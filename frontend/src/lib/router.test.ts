@@ -5,7 +5,7 @@ import { parseRoute } from './router.svelte'
 describe('footer content routes', () => {
   it.each([
     ['/about', 'about'],
-    ['/credits', 'credits'],
+    ['/credits', 'about'],
     ['/disclaimer', 'disclaimer'],
   ] as const)('maps %s to %s', (path, name) => {
     expect(parseRoute(path)).toEqual({ name })
