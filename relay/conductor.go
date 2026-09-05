@@ -1600,15 +1600,22 @@ func (c *conductor) stop(ctx context.Context, club string, pb *condClub, now int
 	pb.auto = false
 }
 
-// settleTrack applies a real DJ track's result exactly once and mirrors the new aggregate as a
-// relay-signed NIP-78 event. Auto-DJ transitions are ignored: passive playlist playback should
-// not build a person's DJ credibility.
+// settleTrack records an attributable public performance exactly once. Real-DJ
+// results also update and publish personal credibility; Auto-DJ results are kept
+// only for the track chart and never build the owner's DJ score.
 func (c *conductor) settleTrack(ctx context.Context, club string, pb *condClub, settlement trackSettlement) {
-	if c.cred == nil || pb == nil || !pb.playing || pb.auto {
+	if c.cred == nil || pb == nil || !pb.playing {
 		return
 	}
 	bangers, _ := c.moodCounts(club, pb.pos)
-	entry, changed := c.cred.record(club, pb.pos, pb.startedAt, pb.videoID, pb.title, pb.dj, bangers, settlement, c.clubIsPublic(ctx, club))
+	publicTrack := c.clubIsPublic(ctx, club)
+	if pb.auto {
+		if c.cred.recordAutoTrack(club, pb.pos, pb.startedAt, pb.videoID, pb.title, pb.dj, bangers, settlement, publicTrack) && publicTrack && bangers > 0 {
+			log.Printf("conductor [%.8s] top-track auto-dj=%.8s bangers=%d", club, pb.dj, bangers)
+		}
+		return
+	}
+	entry, changed := c.cred.record(club, pb.pos, pb.startedAt, pb.videoID, pb.title, pb.dj, bangers, settlement, publicTrack)
 	if !changed {
 		return
 	}
@@ -2090,9 +2097,8 @@ func (c *conductor) driveAutoClub(ctx context.Context, club string, st *autoStat
 	}
 
 	startTrack := func(settlement trackSettlement) {
-		// A real DJ may have left the stage while their last track was still running.
-		// Settle that result before Auto DJ replaces it; Auto-DJ-to-Auto-DJ changes
-		// remain excluded by settleTrack's pb.auto guard.
+		// Settle the outgoing result before Auto DJ replaces it. Auto-DJ plays are
+		// eligible for the public track chart but never for personal credibility.
 		c.settleTrack(ctx, club, pb, settlement)
 		t := tracks[pb.autoOrder[pb.autoIdx]]
 		pb.pos++

@@ -68,7 +68,7 @@
               <span class="track-source">
                 <a href={`/club/${track.club}`} onclick={(event) => { event.preventDefault(); goClub(track.club) }}>{clubName(track.club)}</a>
                 <span aria-hidden="true">·</span>
-                <span>DJ</span>
+                <span>{track.autoDJ ? 'AUTO DJ' : 'DJ'}</span>
                 <a class="track-dj" href={`/user/${npub}`} onclick={(event) => { event.preventDefault(); goUser(npub) }}>{displayName(track.dj, profile)}</a>
                 {#if track.skipped}<span class="skip-mark">COMMUNITY SKIP</span>{/if}
               </span>

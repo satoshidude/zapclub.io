@@ -23,11 +23,11 @@ type credibilityEntry struct {
 	Skipped int    `json:"skipped"`
 }
 
-// credibilityTrack is one settled human-DJ performance. It deliberately stores
+// credibilityTrack is one settled public performance. It deliberately stores
 // only the aggregate Vibemeter result, never the voters behind it. Keeping the
-// club and DJ on the performance (instead of aggregating by video) makes every
-// public leaderboard row attributable without inventing a single owner for a
-// track that may have been played by several DJs.
+// club and controlling DJ on the performance (instead of aggregating by video)
+// makes every public leaderboard row attributable without inventing a single
+// owner for a track that may have been played in several clubs.
 type credibilityTrack struct {
 	Club      string `json:"club"`
 	VideoID   string `json:"video_id"`
@@ -35,6 +35,7 @@ type credibilityTrack struct {
 	DJ        string `json:"dj"`
 	Bangers   int    `json:"bangers"`
 	Skipped   bool   `json:"skipped,omitempty"`
+	AutoDJ    bool   `json:"auto_dj,omitempty"`
 	StartedAt int64  `json:"started_at"`
 }
 
@@ -78,6 +79,18 @@ func newCredibilityBoard(path string) *credibilityBoard {
 // as handled so they cannot farm play volume. LastTrack makes a repeated conductor transition or
 // restart idempotent; the separate performance history remains explicitly bounded.
 func (b *credibilityBoard) record(club string, pos int, startedAt int64, videoID, title, dj string, bangers int, settlement trackSettlement, publishTrack bool) (credibilityEntry, bool) {
+	return b.recordSettlement(club, pos, startedAt, videoID, title, dj, bangers, settlement, publishTrack, false, true)
+}
+
+// recordAutoTrack stores the attributable public track result while leaving the
+// owner's personal DJ credibility untouched. The owner remains the controller
+// attached to the performance, and AutoDJ lets clients label that distinction.
+func (b *credibilityBoard) recordAutoTrack(club string, pos int, startedAt int64, videoID, title, owner string, bangers int, settlement trackSettlement, publishTrack bool) bool {
+	_, changed := b.recordSettlement(club, pos, startedAt, videoID, title, owner, bangers, settlement, publishTrack, true, false)
+	return changed
+}
+
+func (b *credibilityBoard) recordSettlement(club string, pos int, startedAt int64, videoID, title, dj string, bangers int, settlement trackSettlement, publishTrack, autoDJ, affectCredibility bool) (credibilityEntry, bool) {
 	if club == "" || dj == "" || pos < 0 || startedAt <= 0 {
 		return credibilityEntry{}, false
 	}
@@ -96,29 +109,33 @@ func (b *credibilityBoard) record(club string, pos int, startedAt int64, videoID
 		return credibilityEntry{}, false
 	}
 
-	entry := b.By[dj]
-	if entry == nil {
-		entry = &credibilityEntry{Pubkey: dj}
-		b.By[dj] = entry
-	}
 	if bangers < 0 {
 		bangers = 0
 	}
 	if bangers > moodBangerMax {
 		bangers = moodBangerMax
 	}
-	entry.Tracks++
-	entry.Bangers += bangers
-	if settlement == trackCommunitySkipped {
-		entry.Score--
-		entry.Skipped++
-	} else {
-		entry.Score += bangers
+	var settled credibilityEntry
+	if affectCredibility {
+		entry := b.By[dj]
+		if entry == nil {
+			entry = &credibilityEntry{Pubkey: dj}
+			b.By[dj] = entry
+		}
+		entry.Tracks++
+		entry.Bangers += bangers
+		if settlement == trackCommunitySkipped {
+			entry.Score--
+			entry.Skipped++
+		} else {
+			entry.Score += bangers
+		}
+		settled = *entry
 	}
 	if publishTrack {
 		b.TrackPerformances = append(b.TrackPerformances, credibilityTrack{
 			Club: club, VideoID: videoID, Title: title, DJ: dj, Bangers: bangers,
-			Skipped: settlement == trackCommunitySkipped, StartedAt: startedAt,
+			Skipped: settlement == trackCommunitySkipped, AutoDJ: autoDJ, StartedAt: startedAt,
 		})
 		b.trimTrackPerformancesLocked()
 	}
@@ -126,7 +143,7 @@ func (b *credibilityBoard) record(club string, pos int, startedAt int64, videoID
 	// A track finishes at most every few seconds; persisting here keeps an unclean relay restart
 	// from losing settled credibility. The rename is atomic on the production filesystem.
 	b.saveLocked()
-	return *entry, true
+	return settled, true
 }
 
 // Keep persistence bounded while retaining the performances that can still

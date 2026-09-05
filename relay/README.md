@@ -70,11 +70,12 @@ Ranks compare the unrounded formula, then the larger settled sample, then the
 pubkey for a deterministic order. An outgoing real-DJ track is settled before
 an Auto-DJ takeover.
 
-The same response includes `topTracks`, the ten settled human-DJ performances
-with the most accepted Banger votes. Every row carries `title`, `videoId`,
-`club`, `dj`, `bangers`, `skipped` and `startedAt`, so one play is attributable
-to its club and DJ without publishing voter identities. Equal Banger totals are
-ordered by the newer play. The durable performance history is capped at 100;
+The same response includes `topTracks`, the ten settled public performances
+with the most accepted Banger votes. This includes Auto-DJ plays without adding
+them to the owner's personal DJ credibility. Every row carries `title`,
+`videoId`, `club`, controlling `dj`, `autoDJ`, `bangers`, `skipped` and
+`startedAt`, so one play is attributable without publishing voter identities.
+Equal Banger totals are ordered by the newer play. The durable performance history is capped at 100;
 tracks with no Banger vote are omitted from the public Top 10. Existing
 credibility files remain compatible, but track-level history begins only after
 a relay version that records these performances is active. Plays in unlisted

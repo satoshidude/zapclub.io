@@ -26,6 +26,7 @@ export interface TrackLeaderboardEntry {
   dj: string
   bangers: number
   skipped: boolean
+  autoDJ: boolean
   startedAt: number
 }
 
@@ -64,7 +65,8 @@ function parseTrackEntry(value: unknown): TrackLeaderboardEntry | null {
   if (typeof videoId !== 'string' || videoId.length > 64 || typeof title !== 'string' || title.length > 500) return null
   if (typeof dj !== 'string' || !PUBKEY_PATTERN.test(dj)) return null
   if (!isSafeInteger(bangers, 1, 5) || typeof skipped !== 'boolean' || !isSafeInteger(startedAt, 1)) return null
-  return { rank, club, videoId, title, dj, bangers, skipped, startedAt }
+  if (value.autoDJ !== undefined && typeof value.autoDJ !== 'boolean') return null
+  return { rank, club, videoId, title, dj, bangers, skipped, autoDJ: value.autoDJ === true, startedAt }
 }
 
 function parseLeaderboard(value: unknown): LeaderboardPayload {

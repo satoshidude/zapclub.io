@@ -25,6 +25,7 @@ type trackLeaderboardEntry struct {
 	DJ        string `json:"dj"`
 	Bangers   int    `json:"bangers"`
 	Skipped   bool   `json:"skipped"`
+	AutoDJ    bool   `json:"autoDJ"`
 	StartedAt int64  `json:"startedAt"`
 }
 
@@ -191,7 +192,7 @@ func (b *credibilityBoard) trackTop(n int) []trackLeaderboardEntry {
 		top = append(top, trackLeaderboardEntry{
 			Rank: len(top) + 1, Club: track.Club, VideoID: track.VideoID,
 			Title: track.Title, DJ: track.DJ, Bangers: bangers,
-			Skipped: track.Skipped, StartedAt: track.StartedAt,
+			Skipped: track.Skipped, AutoDJ: track.AutoDJ, StartedAt: track.StartedAt,
 		})
 	}
 	return top

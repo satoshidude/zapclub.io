@@ -7,7 +7,9 @@ import (
 
 	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru"
+	"github.com/fiatjaf/relay29"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 func TestAutoDJTrackDoesNotAffectCredibility(t *testing.T) {
@@ -18,6 +20,34 @@ func TestAutoDJTrackDoesNotAffectCredibility(t *testing.T) {
 	}, trackCommunitySkipped)
 	if len(b.By) != 0 {
 		t.Fatalf("auto DJ changed credibility: %+v", b.By)
+	}
+}
+
+func TestPublicAutoDJTrackAppearsOnlyInTrackHistory(t *testing.T) {
+	b := newCredibilityBoard(filepath.Join(t.TempDir(), "credibility.json"))
+	state := &relay29.State{Groups: xsync.NewMapOf[string, *relay29.Group]()}
+	state.Groups.Store("club", state.NewGroup("club", "owner"))
+	c := &conductor{
+		cred:  b,
+		state: state,
+		moods: map[string]map[int]map[string]int{
+			"club": {4: {"listener": 1}},
+		},
+	}
+	c.settleTrack(context.Background(), "club", &condClub{
+		pos: 4, startedAt: 4000, videoID: "auto-video", title: "Auto track",
+		dj: "owner", playing: true, auto: true,
+	}, trackPlayed)
+
+	if len(b.By) != 0 {
+		t.Fatalf("auto DJ changed owner credibility: %+v", b.By)
+	}
+	if len(b.TrackPerformances) != 1 {
+		t.Fatalf("public Auto DJ performances = %+v; want one", b.TrackPerformances)
+	}
+	track := b.TrackPerformances[0]
+	if !track.AutoDJ || track.Club != "club" || track.DJ != "owner" || track.Bangers != 1 {
+		t.Fatalf("public Auto DJ performance = %+v", track)
 	}
 }
 
@@ -108,7 +138,7 @@ func TestCredibilityBoardPersists(t *testing.T) {
 	}
 	track := reloaded.TrackPerformances[0]
 	if track.Club != "club" || track.VideoID != "video-7" || track.Title != "Track seven" ||
-		track.DJ != "alice" || track.Bangers != 2 || track.Skipped || track.StartedAt != 7000 {
+		track.DJ != "alice" || track.Bangers != 2 || track.Skipped || track.AutoDJ || track.StartedAt != 7000 {
 		t.Fatalf("reloaded track performance = %+v", track)
 	}
 }

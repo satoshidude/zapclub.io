@@ -88,7 +88,7 @@ func TestDJLeaderboardHTTPUsesCredibilityNotZaps(t *testing.T) {
 		"bob":   {Pubkey: "bob", Tracks: 1, Score: -1, Bangers: 2, Skipped: 1},
 	}
 	b.TrackPerformances = []credibilityTrack{
-		{Club: "club-b", VideoID: "video-2", Title: "Newest tie", DJ: "bob", Bangers: 5, StartedAt: 3000},
+		{Club: "club-b", VideoID: "video-2", Title: "Newest tie", DJ: "bob", Bangers: 5, AutoDJ: true, StartedAt: 3000},
 		{Club: "club-a", VideoID: "video-1", Title: "Older tie", DJ: "alice", Bangers: 5, StartedAt: 2000},
 		{Club: "club-a", VideoID: "video-3", Title: "Skipped but liked", DJ: "alice", Bangers: 3, Skipped: true, StartedAt: 4000},
 		{Club: "club-c", VideoID: "video-4", Title: "No likes", DJ: "carol", Bangers: 0, StartedAt: 5000},
@@ -112,7 +112,7 @@ func TestDJLeaderboardHTTPUsesCredibilityNotZaps(t *testing.T) {
 		t.Fatalf("leaderboard response = %+v", top)
 	}
 	if len(top.TopTracks) != 3 || top.TopTracks[0].Title != "Newest tie" ||
-		top.TopTracks[0].Rank != 1 || top.TopTracks[1].Title != "Older tie" ||
+		top.TopTracks[0].Rank != 1 || !top.TopTracks[0].AutoDJ || top.TopTracks[1].Title != "Older tie" ||
 		!top.TopTracks[2].Skipped || top.TopTracks[2].Bangers != 3 {
 		t.Fatalf("track leaderboard response = %+v", top.TopTracks)
 	}

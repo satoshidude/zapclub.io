@@ -22,7 +22,7 @@ describe('DJ leaderboard API', () => {
         { pubkey: carol, rank: 3, score: 14.5, tracks: 1, bangers: 0, skipped: 0, vibeScore: 0 },
       ],
       topTracks: [
-        { rank: 1, club: 'club-one', videoId: 'abcdefghijk', title: 'The track', dj: bob, bangers: 5, skipped: false, startedAt: 1_757_000_000_000 },
+        { rank: 1, club: 'club-one', videoId: 'abcdefghijk', title: 'The track', dj: bob, bangers: 5, skipped: false, autoDJ: true, startedAt: 1_757_000_000_000 },
         { rank: 2, club: '', videoId: 'bad', title: 'Malformed', dj: carol, bangers: 8, skipped: false, startedAt: 1 },
       ],
     })))
@@ -33,7 +33,7 @@ describe('DJ leaderboard API', () => {
         { pubkey: alice, rank: 1, score: 333, tracks: 20, bangers: 40, skipped: 0, vibeScore: 40 },
       ],
       topTracks: [
-        { rank: 1, club: 'club-one', videoId: 'abcdefghijk', title: 'The track', dj: bob, bangers: 5, skipped: false, startedAt: 1_757_000_000_000 },
+        { rank: 1, club: 'club-one', videoId: 'abcdefghijk', title: 'The track', dj: bob, bangers: 5, skipped: false, autoDJ: true, startedAt: 1_757_000_000_000 },
       ],
     })
   })
