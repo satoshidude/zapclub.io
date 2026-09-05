@@ -268,17 +268,24 @@ if (process.env.RELAY_PK) {
   np = await npNow()
   assert(trackOf(np) === 'yt:VIDfirst001', 'conductor: a non-mod member’s skip-request is IGNORED (role validation)')
 
-  // Vibemeter: three reactions can skip the current track, but one account cannot react twice
-  // inside the shared 10-second cooldown. The resulting -1 credibility snapshot is relay-signed
-  // NIP-78 app data and publicly queryable by its p tag.
-  await stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' })
+  // Vibemeter: the playing DJ cannot influence their own track. Three reactions from other
+  // members can skip it, but one account cannot react twice inside the shared 10-second
+  // cooldown. The resulting -1 credibility snapshot is relay-signed NIP-78 app data and
+  // publicly queryable by its p tag.
+  const voter = await conn(generateSecretKey())
+  await Promise.all([
+    stranger.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }),
+    voter.ev({ kind: 9021, created_at: now(), tags: [['h', C]], content: '' }),
+  ])
   await sleep(800)
   const moodTags = [['h', C], ['pos', posOf(np)]]
-  await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
-  const tooSoon = await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'banger']], content: '' })
-  assert(tooSoon[0] === false && /10 seconds/i.test(tooSoon[1] || ''), 'vibemeter: Banger and Skip share the 10-second cooldown')
+  const ownVote = await host.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
+  assert(ownVote[0] === false && /own track/i.test(ownVote[1] || ''), 'vibemeter: the playing DJ cannot vote on their own track')
   await mem.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
+  const tooSoon = await mem.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'banger']], content: '' })
+  assert(tooSoon[0] === false && /10 seconds/i.test(tooSoon[1] || ''), 'vibemeter: Banger and Skip share the 10-second cooldown')
   await stranger.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
+  await voter.ev({ kind: 20104, created_at: now(), tags: [...moodTags, ['v', 'skip']], content: '' })
   await sleep(4000)
   np = await npNow()
   assert(trackOf(np) === 'yt:VIDfourth004', 'vibemeter: three skips advance to the next active track')

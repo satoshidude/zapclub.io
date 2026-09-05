@@ -14,10 +14,12 @@
   const level   = $derived(Math.max(-2, Math.min(2, bangers - skips)))
   const activeIdx    = $derived(level + 2)
   const ownVote      = $derived(pos >= 0 ? vibeMeter.ownVote(clubId, pos) : null)
+  const ownTrack     = $derived(!!auth.pubkey && sync.live?.dj === auth.pubkey)
+  const voteStateId  = $derived(`vibe-vote-state-${clubId}`)
   let sending = $state(false)
 
   const cooldownSeconds = $derived(pos >= 0 ? vibeMeter.cooldownSeconds() : 0)
-  const canVote   = $derived(auth.canSign && isMember && pos >= 0 && !!sync.live && cooldownSeconds === 0 && !sending)
+  const canVote   = $derived(auth.canSign && isMember && pos >= 0 && !!sync.live && !ownTrack && cooldownSeconds === 0 && !sending)
   const canSkip   = $derived(canVote && skips < SKIP_THRESHOLD)
   const canBanger = $derived(canVote && bangers < BANGER_MAX)
 
@@ -82,8 +84,10 @@
   const skipTxt   = $derived(skips > 0 ? `SKIP ${skips}/${SKIP_THRESHOLD}` : 'SKIP')
   const bangerTxt = $derived(bangers > 0 ? `BANGER ${bangers}/${BANGER_MAX}` : 'BANGER')
   const readyTxt = $derived(
-    !auth.canSign ? 'SIGN IN TO VOTE'
-        : !isMember ? 'JOIN TO VOTE'
+    !sync.live || pos < 0 ? 'WAITING FOR A TRACK'
+      : ownTrack ? 'YOUR TRACK — NO VOTE'
+        : !auth.canSign ? 'SIGN IN TO VOTE'
+          : !isMember ? 'JOIN TO VOTE'
           : sending ? 'SENDING…'
           : cooldownSeconds > 0 ? `NEXT VOTE IN ${cooldownSeconds}s` : 'RATE THE DJ',
   )
@@ -118,11 +122,14 @@
     if (!canVote || !auth.pubkey) return
     if (v === 'skip' && !canSkip) return
     if (v === 'banger' && !canBanger) return
+    const voteClub = clubId
+    const votePos = pos
+    const voter = auth.pubkey
     sending = true
     try {
-      await sendMood(clubId, pos, v)
-      optimisticVote(clubId, pos, auth.pubkey, v)
-      if (v === 'banger') {
+      await sendMood(voteClub, votePos, v)
+      optimisticVote(voteClub, votePos, voter, v)
+      if (v === 'banger' && clubId === voteClub && sync.live?.pos === votePos) {
         showFireworks(1000)
         void triggerShake()
       }
@@ -179,7 +186,7 @@
     </svg>
 
     <div class="meter-actions">
-      <button class="meter-action skip" class:active={ownVote === 'skip'} onclick={() => vote('skip')} disabled={!canSkip} aria-label="Vote skip">
+      <button class="meter-action skip" class:active={ownVote === 'skip'} onclick={() => vote('skip')} disabled={!canSkip} aria-label="Vote skip" aria-describedby={voteStateId}>
         <svg class="action-icon" viewBox="0 0 32 32" aria-hidden="true">
           <path d="M3 7l9 9-9 9V7zm11 0 9 9-9 9V7z" fill="currentColor"></path>
           <path d="M27 7v18" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
@@ -189,7 +196,7 @@
 
       <span class="action-divider" aria-hidden="true"></span>
 
-      <button class="meter-action banger" class:active={ownVote === 'banger'} onclick={() => vote('banger')} disabled={!canBanger} aria-label="Vote banger">
+      <button class="meter-action banger" class:active={ownVote === 'banger'} onclick={() => vote('banger')} disabled={!canBanger} aria-label="Vote banger" aria-describedby={voteStateId}>
         <svg class="action-icon" viewBox="0 0 32 32" aria-hidden="true">
           <path d="M16 2.5l3 6.3 6.7-2.5-2.5 6.6 6.3 3.1-6.3 3.1 2.5 6.6-6.7-2.5-3 6.3-3-6.3-6.7 2.5 2.5-6.6L2.5 16l6.3-3.1-2.5-6.6L13 8.8 16 2.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
           <path d="m17.5 9.5-5 7h4L14.5 23l5-7h-4l2-6.5z" fill="currentColor"></path>
@@ -197,7 +204,14 @@
         <span>{bangerTxt}</span>
       </button>
     </div>
-    <div class="vote-state" class:rate-ready={readyTxt === 'RATE THE DJ'} class:cooling={cooldownSeconds > 0}>{readyTxt}</div>
+    <div
+      id={voteStateId}
+      class="vote-state"
+      class:rate-ready={readyTxt === 'RATE THE DJ'}
+      class:cooling={cooldownSeconds > 0}
+      aria-live={ownTrack ? 'polite' : 'off'}
+      aria-atomic="true"
+    >{readyTxt}</div>
   </div>
 </div>
 

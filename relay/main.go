@@ -279,6 +279,9 @@ func main() {
 
 	// Club creation cap: at most 3 per account. Existing clubs are grandfathered.
 	cap := newClubCap(db, superadmin)
+	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
+	cond := newConductor(db, relay, state, sk)
+	cond.cred = credibility
 
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
@@ -302,7 +305,8 @@ func main() {
 		envFloat("RELAY_IP_LISTENER_BURST", 30),
 		envFloat("RELAY_IP_LISTENER_REFILL", 2),
 	)
-	// Vibemeter: Banger and Skip share one exact 10-second budget per account.
+	// Vibemeter: the current DJ cannot vote on their own track. All other Banger and Skip
+	// reactions share one exact 10-second budget per account.
 	moodLimiter := newKindLimiter(1, 1.0/10.0, "rate-limited: wait 10 seconds before reacting again", kindMood)
 
 	relay.RejectEvent = append(relay.RejectEvent,
@@ -320,6 +324,7 @@ func main() {
 			}
 			return false, ""
 		},
+		cond.rejectMood,
 		moodLimiter.reject,
 		// Allgemeiner Spam-/Flood-Schutz pro pubkey: Bucket 50 (Burst), 30/min.
 		// Deckt strukturelle Events (now_playing-Heartbeat ~8/min, stage, queue, presence).
@@ -366,9 +371,6 @@ func main() {
 	stageG := &stageGate{db: db}
 	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
 
-	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
-	cond := newConductor(db, relay, state, sk)
-	cond.cred = credibility
 	var memberCountPublishMu sync.Mutex
 	publishMemberCount := func(groupID string, count int) {
 		memberCountPublishMu.Lock()
@@ -412,6 +414,10 @@ func main() {
 	stageG.countFn = cond.countActiveOtherDJs
 	stageG.autoActiveFn = cond.hasActiveAutoDJ
 	autoDJG.ownerFn = cond.clubOwner
+	// Hydrate or advance active playback before accepting connections. Without this first
+	// synchronous pass, the signed now_playing event is already readable after a restart while
+	// the Vibemeter gate still has no authoritative in-memory track for up to one ticker cycle.
+	cond.tick()
 	go cond.run()
 
 	// Global all-time zap leaderboard, built from the kind-20101 zap broadcasts (leaderboard.go).

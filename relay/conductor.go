@@ -784,7 +784,41 @@ func (c *conductor) observeBroken(_ context.Context, ev *nostr.Event) {
 	c.brokenMu.Unlock()
 }
 
-// observeMood records an already rate-limited vibe reaction (kind 20104).
+// moodTrackState checks a reaction against the conductor's authoritative in-memory playback.
+// `current` means the event targets the running track; `own` means its author owns that track.
+func (c *conductor) moodTrackState(club string, pos int, voter string) (current, own bool) {
+	c.mu.Lock()
+	pb := c.clubs[club]
+	current = pb != nil && pb.playing && pb.pos == pos
+	own = current && pb.dj == voter
+	c.mu.Unlock()
+	return
+}
+
+// rejectMood admits reactions only for the conductor's exact current track and prevents the
+// playing DJ from influencing either side of their own Vibemeter. It runs before the mood
+// limiter so a rejected event does not consume the account's next legitimate reaction.
+func (c *conductor) rejectMood(_ context.Context, ev *nostr.Event) (bool, string) {
+	if ev.Kind != kindMood {
+		return false, ""
+	}
+	club := tagVal(ev, "h")
+	pos, err := strconv.Atoi(tagVal(ev, "pos"))
+	vote := tagVal(ev, "v")
+	if club == "" || err != nil || pos < 0 || (vote != "banger" && vote != "skip") {
+		return true, "invalid: malformed Vibemeter reaction"
+	}
+	current, own := c.moodTrackState(club, pos, ev.PubKey)
+	if !current {
+		return true, "blocked: Vibemeter reaction does not target the current track"
+	}
+	if own {
+		return true, "blocked: DJs cannot vote on their own track"
+	}
+	return false, ""
+}
+
+// observeMood records an already validated and rate-limited vibe reaction (kind 20104).
 // Tags: h=club, pos=track-pos (int), v=banger|skip. Bangers stop at five; the third skip
 // advances the track. The relay's kind limiter enforces one reaction per pubkey per 10 seconds.
 func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
@@ -802,12 +836,10 @@ func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
 		return
 	}
 	// Only the currently running position may collect reactions. This prevents stale tabs and
-	// hand-crafted far-future positions from growing maps or preloading a later score.
-	c.mu.Lock()
-	current := c.clubs[club]
-	validPosition := current != nil && current.playing && current.pos == pos
-	c.mu.Unlock()
-	if !validPosition {
+	// hand-crafted far-future positions from growing maps or preloading a later score. Keep the
+	// own-track check here too as defense in depth if an event ever bypasses RejectEvent.
+	validPosition, ownTrack := c.moodTrackState(club, pos, ev.PubKey)
+	if !validPosition || ownTrack {
 		return
 	}
 	c.moodMu.Lock()

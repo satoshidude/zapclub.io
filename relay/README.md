@@ -37,11 +37,12 @@ authenticated current members. The check applies to history, direct event-ID
 queries and every live push, so leave/kick also revokes an already-open
 subscription.
 
-Vibemeter kind `20104` is ephemeral and membership-gated. Banger and Skip share
-one relay-enforced reaction every 10 seconds, including repeated reactions from
-the same member. The conductor caps each track at five banger clicks, awards
-one point per click, advances after three skips with a score of minus one, and
-stores the settled DJ score in
+Vibemeter kind `20104` is ephemeral and membership-gated. The relay rejects
+Banger and Skip reactions from the DJ whose track is currently playing. Other
+members share one relay-enforced reaction every 10 seconds, including repeated
+reactions from the same member. The conductor caps each track at five banger
+clicks, awards one point per click, advances after three skips with a score of
+minus one, and stores the settled DJ score in
 `credibility.json`; its current aggregate is mirrored as a relay-signed kind
 `30078` event with `h=zapclub-credibility` and
 `d=zapclub:credibility:<pubkey>`.

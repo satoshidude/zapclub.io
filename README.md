@@ -24,8 +24,8 @@ account is required.
   playlist when no real DJ is active.
 - Provides member-only chat, presence and roster data alongside public,
   privacy-preserving member and listener counts.
-- Adds floor reactions and a Vibemeter: bangers build DJ credibility, three
-  skips advance the track.
+- Adds floor reactions and a Vibemeter: reactions from other members build or
+  lower DJ credibility, while the playing DJ cannot vote on their own track.
 - Sends NIP-57 Lightning zaps directly to DJs and aggregates a public
   leaderboard.
 - Supports open, closed, private and Lightning entry-fee clubs.
@@ -80,10 +80,11 @@ roughly every 15 seconds. Clients correct playback when their drift exceeds
 three seconds.
 
 Tracks advance on duration, an authorized skip, a broken-track quorum or three
-Vibemeter skips. A real-DJ slot remains sticky for up to five minutes after its
-last heartbeat. An armed Auto DJ owns one of the same three stage slots and is
-always shown there. Its shuffled playlist drives playback only while no real DJ
-is active and does not affect a person's DJ credibility.
+Vibemeter skips. The relay rejects both positive and negative Vibemeter votes
+from the DJ whose track is playing. A real-DJ slot remains sticky for up to five
+minutes after its last heartbeat. An armed Auto DJ owns one of the same three
+stage slots and is always shown there. Its shuffled playlist drives playback
+only while no real DJ is active and does not affect a person's DJ credibility.
 
 ## Nostr event model
 
