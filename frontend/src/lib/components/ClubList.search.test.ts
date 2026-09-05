@@ -59,4 +59,11 @@ describe('club search suggestions', () => {
       /\{#if auth\.canSign && !myIds\.has\(TELEGRAM_BOT_CLUB_ID\)\}[\s\S]*?Enter club/,
     )
   })
+
+  it('uses separate decorative hero artwork for desktop and mobile', () => {
+    expect(source).toContain('<div class="hero-art" aria-hidden="true"></div>')
+    expect(source).toContain("url('/images/home-hero-turntable-desktop.webp')")
+    expect(source).toContain("url('/images/home-hero-turntable-mobile.webp')")
+    expect(source).toMatch(/\.hero-art\s*\{[\s\S]*?pointer-events: none;/)
+  })
 })

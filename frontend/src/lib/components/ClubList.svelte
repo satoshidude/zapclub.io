@@ -186,12 +186,12 @@
 
 <div class="wrap home-page">
   <header class="hero led-zone">
+    <div class="hero-art" aria-hidden="true"></div>
     <p class="eyebrow">Collaborative · Decentralized · Rewarding</p>
     <h1 class="hero-title site-h1">Drop in.<br />Take the stage.<br />Own the night.</h1>
     <p class="hero-sub">
-      zapclub is one turntable, shared. Fill your playlists, take the deck, pass it on. The room
-      rides every transition with you. Drop in with a key, not an email. Tip the DJ in sats,
-      not likes. Just you, playlists and the crowd.
+      zapclub is one turntable, shared. Fill your playlists, enter the stage, pass it on. Tip the DJ
+      in sats and rate his tracks. Just you, playlists and the crowd.
     </p>
     <div class="chips">
       <span class="chip">🎛️ Pass the deck</span>
@@ -503,6 +503,20 @@
       radial-gradient(130% 150% at 0% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 55%),
       radial-gradient(130% 150% at 100% 8%, color-mix(in srgb, var(--accent-2) 20%, transparent), transparent 55%),
       var(--bg-elev);
+  }
+  .hero-art {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: url('/images/home-hero-turntable-desktop.webp') right center / cover no-repeat;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0 43%, rgba(0, 0, 0, 0.12) 50%, #000 61%);
+    mask-image: linear-gradient(90deg, transparent 0 43%, rgba(0, 0, 0, 0.12) 50%, #000 61%);
+    opacity: 0.82;
+  }
+  .hero > :not(.hero-art) {
+    position: relative;
+    z-index: 1;
   }
   .eyebrow {
     margin: 0 0 0.55rem;
@@ -1140,13 +1154,14 @@
     letter-spacing: 0.08em;
   }
   :global(body.site-led-page) .hero-title {
-    max-width: 760px;
+    max-width: 540px;
   }
   :global(body.site-led-page) .hero-sub {
-    max-width: 66ch;
+    max-width: 50ch;
     color: var(--lcd-text-soft);
   }
   :global(body.site-led-page) .chips {
+    max-width: 33rem;
     gap: 0.45rem 1.1rem;
     margin-bottom: 0;
   }
@@ -1231,9 +1246,17 @@
     .club-player-actions .enter-club { font-size: 0.72rem; }
     :global(body.site-led-page) .wrap { padding: 0.45rem 0.45rem 3rem; }
     :global(body.site-led-page) .hero {
-      min-height: 260px;
+      min-height: 500px;
       margin-bottom: 0.55rem;
-      padding: 1rem;
+      padding: clamp(205px, 56vw, 232px) 1rem 1rem;
+    }
+    .hero-art {
+      background-image: url('/images/home-hero-turntable-mobile.webp');
+      background-position: right top;
+      background-size: 100% auto;
+      -webkit-mask-image: none;
+      mask-image: none;
+      opacity: 0.86;
     }
     :global(body.site-led-page) .chips { gap: 0.4rem 0.8rem; }
     :global(body.site-led-page) .club-search { margin-bottom: 0.6rem; }
