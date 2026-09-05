@@ -6,7 +6,7 @@
   <article class="legal-card led-zone">
     <header class="legal-hero">
       <span class="console-line">legal://read-before-use</span>
-      <h1>Privacy, terms &amp; disclaimer</h1>
+      <h1 class="site-h1">Privacy, terms &amp; disclaimer</h1>
       <p>The short version: this is experimental software. Keep your keys safe and your zaps small.</p>
     </header>
 
@@ -107,7 +107,6 @@
     font-size: 0.82rem;
     letter-spacing: 0.07em;
   }
-  h1,
   h2 {
     font-family: 'DotGothic16', ui-monospace, monospace;
     font-weight: 400;
@@ -115,9 +114,6 @@
   }
   h1 {
     margin: 0.35rem 0 0.7rem;
-    font-size: clamp(2rem, 5vw, var(--site-h1-max));
-    line-height: 1;
-    letter-spacing: -0.03em;
   }
   .legal-hero p {
     max-width: 66ch;

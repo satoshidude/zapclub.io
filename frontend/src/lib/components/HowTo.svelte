@@ -4,7 +4,7 @@
 
 <div class="wrap">
   <header class="hh">
-    <h1>How-to & tips</h1>
+    <h1 class="site-h1">How-to & tips</h1>
     <p class="sub">Get the most out of zapclub — bring your playlists, set up zaps, and earn sats.</p>
   </header>
 

@@ -1,19 +1,21 @@
 :root {
-  --bg: #07070a;
+  --bg: #07080a;
   --bg-elev: #14121c;
   --bg-elev-2: #1d1830;
   --border: #2a2440;
-  --text: #ece9f5;
-  --text-dim: #9a93b3;
-  --accent: #4ade5e; /* neon green (bolt) */
-  --accent-2: #b14dff; /* neon purple (bolt) */
+  --text: #e8e6e3;
+  --text-dim: #8b9099;
+  --accent: #f4e04d;
+  --accent-2: #5ce1e6;
   --accent-ink: #07120a;
-  --amber: #ff9a1f;
+  --amber: #f4e04d;
   --danger: #f0506e;
   --radius: 14px;
   --radius-sm: 9px;
   --topbar-h: 3.5rem; /* fixed topbar height — body is padded by this so nothing hides behind it */
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'DotGothic16', ui-monospace, monospace;
+  --font-headline: 'Jersey 25', 'DotGothic16', ui-monospace, monospace;
+  --font: 'IBM Plex Mono', ui-monospace, monospace;
   --page-led-a: #17191b;
   --page-led-b: #0c0e0f;
   --page-led-c: #050607;
@@ -50,12 +52,14 @@ body {
 /* App-wide LED console: the body follows the selected LED family at a much darker level than
    the modules. Black is both the initial fallback and the default selected theme. */
 body.site-led-page {
-  --site-h1-max: 47px;
-  --lcd-text: #f1f3f4;
-  --lcd-text-bright: #ffffff;
-  --lcd-text-soft: #c9ced1;
-  --lcd-text-dim: #a5adb3;
-  --lcd-text-shadow: 0 0 3px rgba(235, 241, 244, 0.68), 0 0 9px rgba(116, 166, 207, 0.18);
+  --site-h1-font: var(--font-headline);
+  /* Jersey 25 keeps the reference's fine block glyphs at a calmer site-wide scale. */
+  --site-h1-size: clamp(37px, 8.75vw, 58px);
+  --lcd-text: #e8e6e3;
+  --lcd-text-bright: #e8e6e3;
+  --lcd-text-soft: #b7bcc4;
+  --lcd-text-dim: #8b9099;
+  --lcd-text-shadow: 0 0 3px rgba(232, 230, 227, 0.44), 0 0 8px rgba(92, 225, 230, 0.12);
   padding-top: 0;
   background:
     repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.46) 0 1px, transparent 1px 3px),
@@ -107,9 +111,9 @@ html[data-zap-led-theme='black'] {
   --card-led-a: transparent;
   --card-led-b: transparent;
   --card-led-c: transparent;
-  --page-led-a: #17191b;
-  --page-led-b: #0c0e0f;
-  --page-led-c: #050607;
+  --page-led-a: #0b0c0f;
+  --page-led-b: #07080a;
+  --page-led-c: #040507;
 }
 
 body.site-led-page .site-footer {
@@ -117,7 +121,7 @@ body.site-led-page .site-footer {
   margin-inline: auto;
   border-top-color: rgba(96, 139, 196, 0.22);
   color: var(--lcd-text-dim);
-  font-family: 'DotGothic16', ui-monospace, monospace;
+  font-family: var(--font);
   padding-inline: 1.8rem;
 }
 
@@ -161,10 +165,10 @@ body.site-led-page .topbar .avatar {
 
 body.site-led-page .topbar .name {
   color: var(--lcd-text);
-  font-family: 'DotGothic16', ui-monospace, monospace;
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0.06em;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
   line-height: 1.1;
   text-shadow: var(--lcd-text-shadow);
   text-transform: uppercase;
@@ -192,7 +196,7 @@ html[data-zap-led-theme='portal'] body.site-led-page {
   --lcd-text-soft: #c2ddcf;
   --lcd-text-dim: #8fb6a9;
   --lcd-text-shadow: 1px 1px 0 rgba(27, 132, 139, 0.42);
-  font-family: 'Chalkboard SE', 'Comic Sans MS', var(--font);
+  font-family: var(--font);
   background:
     radial-gradient(ellipse at 88% 11%, transparent 0 43px, rgba(184, 255, 61, 0.16) 44px 47px, transparent 48px 58px, rgba(53, 229, 198, 0.09) 59px 62px, transparent 63px),
     radial-gradient(ellipse at 4% 83%, transparent 0 70px, rgba(53, 229, 198, 0.1) 71px 75px, transparent 76px 89px, rgba(184, 255, 61, 0.07) 90px 93px, transparent 94px),
@@ -209,20 +213,15 @@ html[data-zap-led-theme='portal'] body.site-led-page .led-zone {
     linear-gradient(145deg, var(--card-led-a) 0%, var(--card-led-b) 48%, var(--card-led-c) 100%) !important;
 }
 
-html[data-zap-led-theme='portal'] body.site-led-page h1,
 html[data-zap-led-theme='portal'] body.site-led-page h2,
 html[data-zap-led-theme='portal'] body.site-led-page h3,
 html[data-zap-led-theme='portal'] body.site-led-page .lcd-card-title,
-html[data-zap-led-theme='portal'] body.site-led-page .hero-title,
 html[data-zap-led-theme='portal'] body.site-led-page .lcd-track,
 html[data-zap-led-theme='portal'] body.site-led-page .name,
 html[data-zap-led-theme='portal'] body.site-led-page .club-name,
 html[data-zap-led-theme='portal'] body.site-led-page .pod-name,
 html[data-zap-led-theme='portal'] body.site-led-page .lb-pod-name {
   color: #b8ff3d;
-  font-family: 'Bangers', 'Chalkboard SE', cursive;
-  font-weight: 400;
-  letter-spacing: 0.055em;
   text-shadow: 2px 2px 0 #167f8d, -1px -1px 0 #24331d;
 }
 
@@ -231,7 +230,7 @@ html[data-zap-led-theme='portal'] body.site-led-page input,
 html[data-zap-led-theme='portal'] body.site-led-page textarea,
 html[data-zap-led-theme='portal'] body.site-led-page select,
 html[data-zap-led-theme='portal'] body.site-led-page a {
-  font-family: 'Chalkboard SE', 'Comic Sans MS', var(--font);
+  font-family: inherit;
 }
 
 html[data-zap-led-theme='portal'] body.site-led-page .led-zone::before {
@@ -302,11 +301,25 @@ a {
   color: var(--accent);
 }
 
+/* One site-wide display contract for every page title. */
+body.site-led-page h1.site-h1 {
+  color: var(--lcd-text-bright);
+  font-family: var(--site-h1-font);
+  font-size: var(--site-h1-size);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 0.8;
+  overflow-wrap: anywhere;
+  text-shadow: 1px 1px 0 rgba(130, 132, 130, 0.58);
+  text-transform: uppercase;
+  word-spacing: 0;
+}
+
 /* Shared title treatment for every blue LCD card and the compact DJ label. */
 .lcd-card-title {
   color: var(--lcd-text, #cfe9ff);
-  font-family: 'DotGothic16', ui-monospace, monospace;
-  font-size: 16px;
+  font-family: var(--font-display);
+  font-size: 18px;
   font-weight: 400;
   letter-spacing: 0.06em;
   line-height: 1.1;
@@ -524,4 +537,276 @@ body.site-led-page .led-modal-sheet :is(.qr, .scan-video, .video, .cover) {
 .field textarea:focus {
   outline: none;
   border-color: var(--accent-2);
+}
+
+/* Site typography overlay. Geometry stays component-owned; these rules only standardize type,
+   the requested palette and spacing between existing modules. */
+body.site-led-page {
+  color: #e8e6e3;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+body.site-led-page :is(button, input, textarea, select) {
+  font-family: var(--font);
+}
+
+body.site-led-page :is(h1, h2, h3, p) {
+  font-style: normal;
+}
+
+body.site-led-page h1.site-h1 {
+  color: #e8e6e3;
+  font-family: var(--font-headline) !important;
+  font-size: var(--site-h1-size) !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.04em !important;
+  line-height: 0.8 !important;
+}
+
+/* Club names share the same face and treatment as the home headline, but the
+   narrower hero column needs a smaller responsive step so long names stay legible. */
+body.site-led-page .club-page .hero-main h1.site-h1 {
+  font-size: clamp(29px, 3.6vw, 37px) !important;
+}
+
+body.site-led-page :is(h2, h3).lcd-card-title,
+body.site-led-page :is(.vm-title, .cn-label),
+body.site-led-page .queue > .head h3 > .lcd-card-title {
+  color: #e8e6e3;
+  font-family: var(--font-headline) !important;
+  font-size: 18px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.15 !important;
+  -webkit-text-stroke: 0.25px currentColor;
+  text-transform: uppercase;
+}
+
+body.site-led-page h2:not(.site-h1) {
+  color: #e8e6e3;
+  font-family: var(--font-headline) !important;
+  font-size: 18px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em !important;
+  line-height: 1.15 !important;
+  -webkit-text-stroke: 0.25px currentColor;
+  text-transform: uppercase;
+}
+
+body.site-led-page h3:not(.lcd-card-title):not(.led-modal-title) {
+  color: #e8e6e3;
+  font-family: var(--font) !important;
+  font-size: 16px !important;
+  font-style: normal;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none;
+}
+
+body.site-led-page :is(.hero-sub, .chip, .page-hero > p, .legal-hero > p, .desc) {
+  color: #8b9099 !important;
+  font-family: var(--font) !important;
+  font-size: 14px !important;
+  font-style: normal !important;
+  font-weight: 400 !important;
+}
+
+body.site-led-page .hero-main .tags .tag.lcd-card-title {
+  color: #8b9099;
+  font-family: var(--font) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+  text-shadow: none;
+  text-transform: none;
+}
+
+body.site-led-page :is(.live-label, .live-badge, .stage-label, .suggestion-state) {
+  font-family: var(--font-display) !important;
+  font-size: 11px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  letter-spacing: 0.04em !important;
+}
+
+body.site-led-page :is(.enter-club, .enter-stage, .design-btn, .all-clubs-link, .lb-all) {
+  font-family: var(--font-display) !important;
+  font-size: 13px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+}
+
+body.site-led-page :is(.club-player-name, .suggestion-copy strong) {
+  color: #e8e6e3;
+  font-family: var(--font) !important;
+  font-size: 16px !important;
+  font-style: normal;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-shadow: none;
+}
+
+body.site-led-page :is(.club-player-status, .club-player-tags, .club-player-artist, .club-player-byline, .club-meta) {
+  color: #8b9099;
+  font-family: var(--font) !important;
+  font-size: 12px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+  text-shadow: none;
+}
+
+body.site-led-page :is(.club-player-title, .lt-title, .t-title, .r-title, .hit-title) {
+  color: #e8e6e3;
+  font-family: var(--font) !important;
+  font-size: 14px !important;
+  font-style: normal;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-shadow: none;
+}
+
+body.site-led-page :is(.lb-name, .lb-pod-name, .pod-name, .board .name) {
+  color: #e8e6e3;
+  font-family: var(--font) !important;
+  font-size: 14px !important;
+  font-style: normal;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-shadow: none;
+}
+
+body.site-led-page :is(.lb-sats, .lb-pod-sats, .pod-sats, .sats, .zap-sats, .s-sats) {
+  color: #f4e04d !important;
+  font-family: var(--font-display) !important;
+  font-size: 13px !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+}
+
+body.site-led-page .lcd-shell {
+  font-family: var(--font) !important;
+  text-shadow: none;
+}
+
+body.site-led-page .lcd-shell .lcd-status {
+  font-family: var(--font-display) !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+}
+
+body.site-led-page .lcd-shell .lcd-status .live-label.lcd-card-title {
+  color: var(--accent);
+  font-family: var(--font-display) !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.04em !important;
+}
+
+body.site-led-page .lcd-shell .lcd-track {
+  color: #e8e6e3;
+  font-family: var(--font) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2 !important;
+  text-shadow: none;
+}
+
+body.site-led-page .lcd-shell .lcd-byline {
+  color: #8b9099;
+  font-family: var(--font) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  text-shadow: none;
+}
+
+body.site-led-page .lcd-shell .zap-stage-action .icon-dj-name {
+  font-family: var(--font-display) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.04em !important;
+}
+
+body.site-led-page .lcd-shell .zap-stage-action .icon-recipient-name {
+  font-family: var(--font) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+body.site-led-page .site-footer .footer-nav a {
+  color: #b7bcc4;
+  font-family: var(--font) !important;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 30px;
+}
+
+body.site-led-page .site-footer small {
+  color: #8b9099;
+  font-family: var(--font-display) !important;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+body.site-led-page .home-page > :is(.hero, .clubs-panel, .tg-block, .lb-preview),
+body.site-led-page .info-page > :is(.page-hero, .info-module, .vision),
+body.site-led-page .leaderboard-page > :is(.lb-head, .ranking-panel) {
+  margin-bottom: 0 !important;
+}
+
+body.site-led-page .home-page > :is(.clubs-panel, .tg-block, .lb-preview),
+body.site-led-page .info-page > :is(.info-module, .vision),
+body.site-led-page .leaderboard-page > .ranking-panel,
+body.site-led-page .club-page > .club-body,
+body.site-led-page .profile-page > :is(.phead, .card, .clubs, .pls) {
+  margin-top: 64px !important;
+}
+
+body.site-led-page .club-page .club-body,
+body.site-led-page .profile-page {
+  gap: 64px !important;
+}
+
+body.site-led-page .legal-card > .legal-section {
+  margin-top: 56px;
+}
+
+@media (max-width: 560px) {
+  body.site-led-page .lcd-shell :is(.lcd-audio, .lcd-icon) {
+    position: relative;
+  }
+
+  body.site-led-page .lcd-shell :is(.lcd-audio, .lcd-icon)::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  body.site-led-page .home-page > :is(.clubs-panel, .tg-block, .lb-preview),
+  body.site-led-page .info-page > :is(.info-module, .vision),
+  body.site-led-page .leaderboard-page > .ranking-panel,
+  body.site-led-page .club-page > .club-body,
+  body.site-led-page .profile-page > :is(.phead, .card, .clubs, .pls) {
+    margin-top: 40px !important;
+  }
+
+  body.site-led-page .club-page .club-body,
+  body.site-led-page .profile-page {
+    gap: 40px !important;
+  }
+
+  body.site-led-page .legal-card > .legal-section {
+    margin-top: 40px;
+  }
 }

@@ -16,13 +16,18 @@ account is required.
 
 ## What Zapclub does
 
-- Lists currently active clubs and makes all eligible clubs discoverable through search.
-- Lets up to three DJs share a stage and interleaves their active playlists round-robin.
+- Lists currently active clubs and makes all eligible clubs discoverable
+  through search.
+- Provides three shared stage slots for real DJs and an armed Auto DJ.
 - Keeps YouTube playback synchronized from relay-authored timing events.
-- Falls back to an owner-configured, shuffled Auto DJ playlist when no real DJ is active.
-- Provides member-only chat, presence and roster data with live listener counts.
-- Adds floor reactions and a Vibemeter: bangers build DJ credibility, three skips advance the track.
-- Sends NIP-57 Lightning zaps directly to DJs and aggregates a public leaderboard.
+- Keeps an armed Auto DJ visibly on stage and falls back to its shuffled
+  playlist when no real DJ is active.
+- Provides member-only chat, presence and roster data alongside public,
+  privacy-preserving member and listener counts.
+- Adds floor reactions and a Vibemeter: bangers build DJ credibility, three
+  skips advance the track.
+- Sends NIP-57 Lightning zaps directly to DJs and aggregates a public
+  leaderboard.
 - Supports open, closed, private and Lightning entry-fee clubs.
 - Connects Telegram groups through a dedicated bridge bot.
 
@@ -56,14 +61,15 @@ boundary also applies to history, direct event queries and live subscriptions.
 
 Logged-out visitors use an ephemeral local key for schema- and rate-limited
 listener heartbeats. Individual heartbeats remain server-side; the relay
-publishes only an aggregate count. Profiles are read from public Nostr relays.
-Zap receipts are used only to confirm the currently open invoice; profile and
-leaderboard history contains exclusively Zapclub-marked zaps recorded by the
-Zapclub relay.
+publishes only an aggregate count. Member identities remain protected in the
+roster; the relay exposes a separate signed total containing only club ID and
+count. Profiles are read from public Nostr relays. Zap receipts are used only to
+confirm the currently open invoice; profile and leaderboard history contains
+exclusively Zapclub-marked zaps recorded by the Zapclub relay.
 
-Playback state, listener aggregates and DJ credibility are relay-authored.
-Private and paid clubs are gated by the relay, and administrative HTTP routes
-require fresh NIP-98 authorization.
+Playback state, public aggregates and DJ credibility are relay-authored.
+Closed/private membership and paid entry are enforced by the relay;
+administrative HTTP routes require fresh NIP-98 authorization.
 
 ## Playback model
 
@@ -74,9 +80,10 @@ roughly every 15 seconds. Clients correct playback when their drift exceeds
 three seconds.
 
 Tracks advance on duration, an authorized skip, a broken-track quorum or three
-Vibemeter skips. A stage slot remains sticky for up to five minutes after its
-last heartbeat. Auto DJ is a fallback only and does not affect a person's DJ
-credibility.
+Vibemeter skips. A real-DJ slot remains sticky for up to five minutes after its
+last heartbeat. An armed Auto DJ owns one of the same three stage slots and is
+always shown there. Its shuffled playlist drives playback only while no real DJ
+is active and does not affect a person's DJ credibility.
 
 ## Nostr event model
 
@@ -88,7 +95,7 @@ All club content carries an `h` tag. NIP-29 metadata is queried separately by
 | `9000–9022`, `39000–39002` | NIP-29 administration, metadata, roles and members |
 | `30100`, `1313` | Relay-authored playback state and log |
 | `30101–30105` | Club configuration, stage, DJ queue, saved playlist and Auto DJ |
-| `30106`, `30107`, `30111` | Stage kick, authorized skip and Auto DJ handover |
+| `30106`, `30107`, `30111`, `30112` | Stage kick, authorized skip, Auto DJ control and public member count |
 | `9`, `20100` | Member-only chat and ephemeral presence |
 | `20101–20104` | Zap broadcast, broken-track report, floor reaction and Vibemeter |
 | `20105`, `20106` | Anonymous listener heartbeat and relay-authored aggregate |

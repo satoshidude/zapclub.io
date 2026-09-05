@@ -139,12 +139,12 @@
 <div class="wrap">
   {#if !isSuperadmin()}
     <div class="card denied">
-      <h1>🔒 Admin</h1>
+      <h1 class="site-h1">🔒 Admin</h1>
       <p>This area is restricted to the zapclub superadmin.</p>
     </div>
   {:else}
     <header class="ahead">
-      <h1>⚙️ Superadmin</h1>
+      <h1 class="site-h1">⚙️ Superadmin</h1>
       <button class="btn btn-ghost btn-sm" onclick={load} disabled={loading}>↻ Refresh</button>
     </header>
 

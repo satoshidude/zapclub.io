@@ -564,14 +564,14 @@
 
 </script>
 
-<div class="wrap">
+<div class="wrap club-page">
   <header class="hero">
     <div class="hero-main led-zone">
       <div class="pic">
         <img class="pic-img" src={club?.picture || clubAvatar(owner || groupId)} alt="" />
       </div>
       <div class="info">
-        <h1>{club?.name ?? 'Loading…'}</h1>
+        <h1 class="site-h1">{club?.name ?? 'Loading…'}</h1>
         <div class="tags">
           {#if memberTotal !== null}
             <span class="tag members-tag lcd-card-title" title={`${memberTotal} member${memberTotal === 1 ? '' : 's'}`}>
@@ -1212,14 +1212,6 @@
   .info {
     align-self: center;
   }
-  h1 {
-    font-size: clamp(20px, 2.4vw, 27px);
-    line-height: 1.1;
-    color: var(--lcd-text);
-    letter-spacing: 0.01em;
-    font-weight: 400;
-    text-shadow: var(--lcd-text-shadow);
-  }
   .tags {
     flex-wrap: wrap;
     overflow: visible;
@@ -1336,7 +1328,7 @@
   }
   .player-section {
     margin-top: 0.7rem;
-    margin-bottom: 0.7rem;
+    margin-bottom: 1rem;
     padding-top: 0;
     border-top: 0;
   }
@@ -1406,7 +1398,7 @@
     }
     .player-section {
       margin-top: 0.55rem;
-      margin-bottom: 0.55rem;
+      margin-bottom: 0.75rem;
     }
     .club-body,
     .stage-grid {
@@ -1416,9 +1408,6 @@
       width: 76px;
       height: 76px;
       border-radius: 7px;
-    }
-    h1 {
-      font-size: 17px;
     }
     .tags {
       gap: 0.45rem 0.8rem;

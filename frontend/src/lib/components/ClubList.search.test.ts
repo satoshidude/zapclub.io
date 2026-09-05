@@ -43,9 +43,9 @@ describe('club search suggestions', () => {
     expect(source).toMatch(/\.club-player-tags\s*\{[\s\S]*?font-size: 14px;/)
     expect(source).toContain('.club-player-tags { font-size: 12px; }')
     expect(source).toContain('height: 104px;')
-    expect(source).toMatch(
-      /:global\(body\.site-led-page\) \.hero-title \{[\s\S]*?font-family: var\(--font\);[\s\S]*?font-weight: 800;/,
-    )
+    expect(source).toMatch(/\.club-player-row\s*\{[\s\S]*?grid-template-columns: 104px minmax\(0, 1fr\);/)
+    expect(source).toMatch(/\.pic\s*\{[\s\S]*?width: 104px;[\s\S]*?aspect-ratio: 240 \/ 124;[\s\S]*?border-radius: 0;/)
+    expect(source).toContain('<h1 class="hero-title site-h1">')
     expect(source).toContain('.club-player-row:hover .club-player-title:global([data-mq]) .mq-inner')
     expect(source).toMatch(
       /\.club-player-artist\s*\{[\s\S]*?color: var\(--text-dim\);[\s\S]*?font-size: 0\.82rem;/,

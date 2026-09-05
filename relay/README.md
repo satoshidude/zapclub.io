@@ -1,6 +1,7 @@
-# zapclub relay
+# Zapclub relay
 
-NIP-29 relay-based groups relay for zapclub.io — `wss://relay.zapclub.io`.
+Private NIP-29 group relay and playback conductor for Zapclub —
+`wss://relay.zapclub.io`.
 
 Built on **khatru + relay29** (Go, badger eventstore). Listens only on
 `127.0.0.1`; exposed via Caddy reverse proxy (TLS, WebSocket).
@@ -25,14 +26,16 @@ Built on **khatru + relay29** (Go, badger eventstore). Listens only on
 ## Write protection
 
 Only group members may write club content; the relay checks membership against
-the `h`-tag group. The sole exception is the empty, anonymous `20105` listener heartbeat;
-its relay-signed `20106` aggregate exposes only the count. The public relay-signed
-`30112` member aggregate likewise exposes only a club id and count, never roster
-identities. `30100`, `1313`, `20106`, `30112` and NIP-78 credibility snapshots are relay-authored only. NIP-42 AUTH runs
-on connect. Public club metadata, playback and stage remain readable without
-AUTH, while kind `9`, presence and `39002` are served only to authenticated
-current members. The check applies to history, direct event-id queries and every
-live push, so leave/kick also revokes an already-open subscription.
+the `h`-tag group. The sole exception is the empty, anonymous `20105` listener
+heartbeat; its relay-signed `20106` aggregate exposes only the count. The public
+relay-signed `30112` member aggregate likewise exposes only a club ID and count,
+never roster identities. `30100`, `1313`, `20106`, `30112` and NIP-78
+credibility snapshots are relay-authored only. NIP-42 AUTH runs on connect.
+Public club metadata, playback, stage and aggregate counts remain readable
+without AUTH, while kind `9`, presence and `39002` are served only to
+authenticated current members. The check applies to history, direct event-ID
+queries and every live push, so leave/kick also revokes an already-open
+subscription.
 
 Vibemeter kind `20104` is ephemeral and membership-gated. Banger and Skip share
 one relay-enforced reaction every 10 seconds, including repeated reactions from
@@ -96,11 +99,13 @@ selects the `d`-address client-side.
 
 ## Status
 
-Live at `wss://relay.zapclub.io` on the `sunnyhill` release deployment.
+Live at `wss://relay.zapclub.io`.
 
 Roles: `owner` (creator) + `moderator`. DJ/stage is a content event (30102),
 not a relay role.
 
 Relay-enforced gates cover paid entry (`entryfee.go`), club count
-(`clubcap.go`), owner-only Auto DJ (`autodjgate.go`) and the three-DJ slot cap in
-`conductor.go`. Closed-club membership is enforced by relay29.
+(`clubcap.go`), owner-only Auto DJ (`autodjgate.go`) and the three shared stage
+slots in `conductor.go`. An armed Auto DJ permanently occupies one of those
+slots, even while real DJs have playback priority. Closed-club membership is
+enforced by relay29.

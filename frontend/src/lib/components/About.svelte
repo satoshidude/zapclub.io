@@ -6,7 +6,7 @@
 <div class="info-page">
   <header class="page-hero led-zone">
     <span class="console-line">about://zapclub</span>
-    <h1>One room. One clock. Everyone in sync.</h1>
+    <h1 class="site-h1">One room. One clock. Everyone in sync.</h1>
     <p>
       Zapclub is a shared turntable for Nostr people. Join a club, listen to the same
       moment together, take a slot on stage and bring your own queue.
@@ -98,7 +98,6 @@
     font-size: 0.82rem;
     letter-spacing: 0.07em;
   }
-  h1,
   h2,
   h3 {
     font-family: 'DotGothic16', ui-monospace, monospace;
@@ -108,9 +107,6 @@
   h1 {
     max-width: 720px;
     margin: 0.35rem 0 0.75rem;
-    font-size: clamp(2.1rem, 6vw, var(--site-h1-max));
-    line-height: 0.98;
-    letter-spacing: -0.035em;
   }
   .page-hero > p {
     max-width: 64ch;

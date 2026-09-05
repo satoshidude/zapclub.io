@@ -328,7 +328,7 @@
   }
 </script>
 
-<div class="wrap">
+<div class="wrap profile-page">
   <details class="howto-block led-zone">
     <summary class="howto-summary">How-to &amp; Tips</summary>
     <div class="howto-body">
@@ -375,7 +375,7 @@
   <header class="phead led-zone">
     <img class="pavatar" src={avatarUrl(pubkey, profile)} alt="" width="64" height="64" />
     <div class="pinfo">
-      <h1>
+      <h1 class="site-h1">
         {displayName(pubkey, profile)}
       </h1>
       <div class="pid">
@@ -1688,7 +1688,6 @@
     margin-bottom: 0.7rem;
   }
   :global(body.site-led-page) .howto-summary,
-  :global(body.site-led-page) h1,
   :global(body.site-led-page) h2,
   :global(body.site-led-page) .club-name,
   :global(body.site-led-page) .pl-name,

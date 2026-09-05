@@ -41,11 +41,11 @@
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.5rem 1.5rem;
-    padding: 1.1rem max(1rem, calc((100vw - 960px) / 2));
+    padding: 2.5rem max(1rem, calc((100vw - 960px) / 2));
     border-top: 1px solid var(--border);
     color: var(--text-dim);
-    font-size: 0.72rem;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 400;
   }
 
   .footer-nav {
@@ -72,7 +72,7 @@
   a:hover,
   a:focus-visible {
     color: var(--accent);
-    font-weight: 800;
+    font-weight: 500;
   }
 
   a:focus-visible {
@@ -102,7 +102,7 @@
       min-height: 0;
       grid-template-columns: 1fr;
       gap: 0;
-      padding-block: 0.85rem calc(0.95rem + env(safe-area-inset-bottom));
+      padding-block: 2rem calc(2rem + env(safe-area-inset-bottom));
     }
 
     .footer-nav {

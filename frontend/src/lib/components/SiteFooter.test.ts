@@ -36,7 +36,7 @@ describe('project footer contract', () => {
     expect(source).toContain("const displayVersion = build.version.endsWith('.0') ? build.version.slice(0, -2) : build.version")
     expect(source).toMatch(/v\.\{displayVersion\}[\s\S]*\{revision\}[\s\S]*<\/small>/)
     expect(source).not.toMatch(/attribution/i)
-    expect(source).toMatch(/a:hover,[\s\S]*?font-weight:\s*800;/)
+    expect(source).toMatch(/a:hover,[\s\S]*?font-weight:\s*500;/)
     expect(source).not.toMatch(/text-decoration-color/)
   })
 })

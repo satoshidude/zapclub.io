@@ -184,10 +184,10 @@
 
 </script>
 
-<div class="wrap">
+<div class="wrap home-page">
   <header class="hero led-zone">
     <p class="eyebrow">Collaborative · Decentralized · Rewarding</p>
-    <h1 class="hero-title">Drop in. Take the stage.<br />Own the night.</h1>
+    <h1 class="hero-title site-h1">Drop in.<br />Take the stage.<br />Own the night.</h1>
     <p class="hero-sub">
       zapclub is one turntable, shared. Fill your playlists, take the deck, pass it on. The room
       rides every transition with you. Drop in with a key, not an email. Tip the DJ in sats,
@@ -708,7 +708,7 @@
       radial-gradient(circle, rgba(241, 243, 244, 0.045) 0 0.55px, transparent 0.75px) 0 0 / 4px 4px;
     position: relative;
     display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-columns: 104px minmax(0, 1fr);
     align-items: center;
     column-gap: 0.9rem;
     height: 104px;
@@ -730,7 +730,7 @@
     outline-offset: -1px;
   }
   .club-player-row:active { transform: translateY(1px); }
-  .club-player-pic { align-self: start; }
+  .club-player-pic { align-self: center; }
   .club-player-content {
     display: grid;
     grid-template-rows: auto auto auto 1fr;
@@ -898,10 +898,11 @@
     white-space: nowrap;
   }
   .pic {
-    width: 52px;
-    height: 52px;
-    flex: 0 0 52px;
-    border-radius: 11px;
+    width: 104px;
+    height: auto;
+    aspect-ratio: 240 / 124;
+    flex: 0 0 104px;
+    border-radius: 0;
     overflow: hidden;
     background: var(--bg-elev-2);
   }
@@ -1140,12 +1141,6 @@
   }
   :global(body.site-led-page) .hero-title {
     max-width: 760px;
-    font-family: var(--font);
-    font-size: clamp(27px, calc(4.4vw - 5px), var(--site-h1-max));
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: 0.01em;
-    word-spacing: -0.12em;
   }
   :global(body.site-led-page) .hero-sub {
     max-width: 66ch;
@@ -1215,9 +1210,14 @@
   }
   @media (max-width: 560px) {
     .club-player-row {
+      grid-template-columns: 88px minmax(0, 1fr);
       height: 96px;
       padding: 13px 9px 11px;
       column-gap: 0.7rem;
+    }
+    .pic {
+      width: 88px;
+      flex-basis: 88px;
     }
     .club-player-status { font-size: 9px; }
     .club-player-dj { max-width: 58%; margin-left: 8px; gap: 0.2rem; }
@@ -1235,7 +1235,6 @@
       margin-bottom: 0.55rem;
       padding: 1rem;
     }
-    :global(body.site-led-page) .hero-title { font-size: clamp(27px, calc(9vw - 5px), 33.4px); }
     :global(body.site-led-page) .chips { gap: 0.4rem 0.8rem; }
     :global(body.site-led-page) .club-search { margin-bottom: 0.6rem; }
     :global(body.site-led-page) .search-line { min-height: 40px; }

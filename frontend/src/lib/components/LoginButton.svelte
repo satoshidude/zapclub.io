@@ -48,10 +48,10 @@
     border-radius: 0;
     background: transparent;
     color: var(--accent);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.035em;
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
     text-shadow: 0 0 3px rgba(74, 222, 94, 0.65), 0 0 9px rgba(74, 222, 94, 0.22);
   }
   .sign-in:hover {

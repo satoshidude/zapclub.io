@@ -163,18 +163,21 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-weight: 800;
-    font-size: 1.25rem;
+    color: #f4e04d;
+    font-family: var(--font-headline);
+    font-weight: 400;
+    font-size: 22px;
     cursor: pointer;
-    letter-spacing: -0.02em;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    text-transform: uppercase;
   }
   .brand .word {
-    color: #fff;
+    color: inherit;
   }
   .brand .tld {
-    /* Nostr purple */
-    color: #8e30eb;
-    font-weight: 700;
+    color: inherit;
+    font-weight: 400;
   }
   .reconnect {
     background: var(--bg-elev-2);

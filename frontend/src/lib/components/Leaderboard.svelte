@@ -21,9 +21,9 @@
   const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '')
 </script>
 
-<div class="wrap">
+<div class="wrap leaderboard-page">
   <header class="lb-head led-zone">
-    <h1>TOP DJS Leaderboard</h1>
+    <h1 class="site-h1">TOP DJS Leaderboard</h1>
     <p class="sub">The most-zapped DJs on zapclub — ranked by sats received. Public, live, and earned on stage.</p>
   </header>
 
@@ -95,13 +95,6 @@
   }
   .lb-head h1 {
     margin: 0 0 0.65rem;
-    color: var(--lcd-text-bright);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: clamp(2rem, 4.4vw, var(--site-h1-max));
-    font-weight: 400;
-    letter-spacing: 0.01em;
-    line-height: 1;
-    text-shadow: var(--lcd-text-shadow);
   }
   .sub {
     max-width: 68ch;
@@ -282,7 +275,6 @@
     .lb-head,
     .ranking-panel { margin-bottom: 0.55rem; }
     .lb-head { min-height: 190px; padding: 1rem; }
-    .lb-head h1 { font-size: clamp(1.75rem, 9vw, 2.4rem); }
     .sub { font-size: 0.88rem; }
     .ranking-panel { padding: 0.8rem; }
     .pod-slot { min-height: 126px; padding-inline: 0.25rem; }
