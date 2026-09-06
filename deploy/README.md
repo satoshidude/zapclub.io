@@ -39,6 +39,26 @@ club and playback state; the proxy adapter and Telegram bot remain stateless.
 7. Service and public protocol checks gate successful activation.
 8. If activation fails, the pointer returns to the preceding verified release.
 
+## Faster frontend-only release
+
+For frontend-only changes (for example social banner assets or static UI updates),
+use `./release-fast.sh`.
+
+`release-fast.sh` keeps the same immutable, commit-addressed deployment flow,
+but skips relay/Telegram rebuilds and relay test suites to keep turnaround much
+shorter.
+
+It still runs:
+
+- `npm --prefix frontend ci`
+- `npm --prefix frontend audit`
+- `npm --prefix frontend run check`
+- `SOURCE_COMMIT=<commit> npm --prefix frontend run build`
+- `git push`, bundle creation, SSH transfer, and `vps-app-deploy`
+- production smoke checks
+
+Use it only when the change scope is intentionally frontend-only.
+
 The active and previous verified releases are sufficient for operation. Release
 directories never contain mutable runtime state.
 

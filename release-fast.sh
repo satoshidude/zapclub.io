@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REMOTE=${ZAPCLUB_DEPLOY_HOST:-sunnyhill.io}
+REMOTE_BUNDLE=/home/webmaster/.deploy/zapclub-release.bundle
+BUNDLE=$(mktemp "${TMPDIR:-/tmp}/zapclub-release.XXXXXX")
+BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/zapclub-build.XXXXXX")
+
+cleanup() {
+	rm -f "$BUNDLE"
+	rm -rf "$BUILD_DIR" "$ROOT/frontend/node_modules" "$ROOT/frontend/dist"
+}
+trap cleanup EXIT HUP INT TERM
+
+cd "$ROOT"
+
+[ "$(git branch --show-current)" = main ] || {
+	echo "Deploy aborted: current branch is not main." >&2
+	exit 1
+}
+[ -z "$(git status --porcelain)" ] || {
+	echo "Deploy aborted: worktree is not clean." >&2
+	exit 1
+}
+
+commit=$(git rev-parse HEAD)
+version=$(node -p "require('./frontend/package.json').version")
+
+npm --prefix frontend ci
+npm --prefix frontend audit --audit-level=high
+npm --prefix frontend run check
+SOURCE_COMMIT="$commit" npm --prefix frontend run build
+
+git push origin main
+
+git bundle create "$BUNDLE" main
+scp "$BUNDLE" "$REMOTE:$REMOTE_BUNDLE"
+ssh "$REMOTE" "sudo /usr/local/sbin/vps-app-deploy zapclub '$commit'"
+
+ZAPCLUB_EXPECTED_COMMIT="$commit" ZAPCLUB_EXPECTED_VERSION="$version" node deploy/smoke.mjs
+printf 'Zapclub fast release activated: %s\n' "$commit"
