@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { verifyEvent } from 'nostr-tools/pure'
 
 const mocked = vi.hoisted(() => ({
@@ -9,6 +9,8 @@ const mocked = vi.hoisted(() => ({
 vi.mock('./auth.svelte', () => ({ auth: mocked.auth }))
 
 describe('page-session signer', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   beforeEach(async () => {
     mocked.auth.pubkey = 'a'.repeat(64)
     const { resetSessionSigner } = await import('./sessionSigner')
@@ -39,6 +41,7 @@ describe('page-session signer', () => {
 
   it('never ratchets rapid session events beyond the relay future window', async () => {
     const { SESSION_EVENT_MAX_FUTURE_SECONDS, signSessionEvent } = await import('./sessionSigner')
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
     const wallNow = Math.floor(Date.now() / 1000)
     for (let offset = 0; offset <= SESSION_EVENT_MAX_FUTURE_SECONDS; offset++) {
       const event = signSessionEvent({ kind: 20100, created_at: wallNow, tags: [['h', 'club']], content: '' })
