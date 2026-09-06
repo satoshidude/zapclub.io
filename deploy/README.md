@@ -45,17 +45,24 @@ For frontend-only changes (for example social banner assets or static UI updates
 use `./release-fast.sh`.
 
 `release-fast.sh` keeps the same immutable, commit-addressed deployment flow,
-but skips relay/Telegram rebuilds and relay test suites to keep turnaround much
-shorter.
+is intended for frontend-only changes and speeds turnaround by skipping relay/Telegram
+builds and full relay test suites.
 
 It still runs:
 
 - `npm --prefix frontend ci`
-- `npm --prefix frontend audit`
-- `npm --prefix frontend run check`
+- `npm --prefix frontend audit` (can be skipped)
+- `npm --prefix frontend run check` (can be skipped)
 - `SOURCE_COMMIT=<commit> npm --prefix frontend run build`
 - `git push`, bundle creation, SSH transfer, and `vps-app-deploy`
 - production smoke checks
+
+For ultra-fast frontend iteration, set:
+
+- `ZAPCLUB_FAST_SKIP_CHECKS=1` to skip `npm run check`
+- `ZAPCLUB_FAST_SKIP_AUDIT=1` to skip security audit
+- `ZAPCLUB_FAST_SKIP_DEPS_INSTALL=1` to reuse existing `frontend/node_modules`
+  (only when dependencies are already current)
 
 Use it only when the change scope is intentionally frontend-only.
 
