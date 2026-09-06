@@ -11,7 +11,8 @@
 - `README.md` beschreibt Produkt und Architektur, `relay/README.md` die
   sicherheits- und protokollrelevanten Relay-Regeln und `deploy/README.md` das
   öffentliche Betriebsmodell.
-- `release.sh` ist der verbindliche ausführbare Releaseprozess. Konkrete
+- Für Frontend-Deployments ist `release-fast.sh` der Standard; `release.sh`
+  mit vollständiger Verifikation nur auf ausdrücklichen Wunsch. Konkrete
   Laufzeitdefinitionen stehen in `deploy/`; flüchtige Betriebswerte werden hier
   nicht dupliziert.
 - Bei Widersprüchen gilt das durch Tests belegte Verhalten des Codes. Betroffene
@@ -57,13 +58,21 @@
 - Änderungen klein halten, am ursächlichen Modell ansetzen und passende
   Regressionstests ergänzen. Datenschutz- und Relay-Grenzen nicht nur im
   Frontend abbilden.
-- Frontend-Änderungen mindestens mit Tests, Svelte-/TypeScript-Check und Build
-  prüfen. Relay-Änderungen mindestens mit Go Vet und Go-Tests prüfen; bei
-  Protokoll-, Zugriffs- oder Persistenzänderungen zusätzlich den Relay-E2E-Test
-  ausführen.
-- Einen Release nur aus einem sauberen lokalen `main` über `./release.sh`
-  starten. Keine direkten Änderungen im aktiven Release und kein `git pull` auf
-  dem Server.
+- Bei einem Deployment-Auftrag keine Audits, Tests, Typprüfungen, Vet- oder
+  E2E-Läufe starten, sofern Joachim sie nicht ausdrücklich verlangt. Diese
+  projektspezifische Vorgabe hat Vorrang vor allgemeinen Verifikationsregeln.
+  Erforderliche Builds und die Kontrolle der tatsächlich aktivierten Revision
+  bleiben Bestandteil des Deployments.
+- Frontend-Releases aus sauberem lokalem `main` standardmäßig mit
+  `ZAPCLUB_FAST_SKIP_CHECKS=1 ZAPCLUB_FAST_SKIP_AUDIT=1
+  ZAPCLUB_FAST_SKIP_DEPS_INSTALL=1 ./release-fast.sh` ausführen.
+  `./release.sh` nur verwenden, wenn die vollständigen Prüfungen ausdrücklich
+  gewünscht sind. Keine direkten Änderungen im aktiven Release und kein
+  `git pull` auf dem Server.
+- Achtung: Der derzeitige serverseitige Deployment-Helfer führt eigene Tests
+  und Checks aus; lokale Fast-Schalter deaktivieren diese nicht. Diesen
+  verbleibenden Unterschied offen benennen, nicht als prüfungsfreien Deploy
+  ausgeben. Hostweite Dispatcher-Anpassungen gehören ins Infrastruktur-Repository.
 - Dateien unter `deploy/` werden nicht automatisch installiert. Werden sie
   geändert, sind Installation und anschließende Prüfung der betroffenen
   Dienste, Timer, Backups, Alarme und öffentlichen Endpunkte ein eigener
