@@ -1,7 +1,7 @@
 # zapclub.io
 
 <a href="https://zapclub.io">
-  <img src="frontend/public/og.png" alt="zapclub.io — Drop in. Take the stage. Own the night." width="100%">
+  <img src="frontend/public/og-share-v2.png" alt="zapclub.io — Drop in. Take the stage. Own the night. Deck conductor, Zap the DJ, Nostr driven experience. Enter club." width="100%">
 </a>
 
 Zapclub is a collaborative live music club built on Nostr and Lightning. One
