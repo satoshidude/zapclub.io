@@ -94,7 +94,7 @@
     </div>
     <p class="post-text">{shareText}</p>
     <div class="og-card">
-      <img src="/og-share-v2.png" alt="zapclub.io — Drop in. Take the stage. Own the night. Deck conductor, Zap the DJ, Nostr driven experience. Enter club." class="og-thumb" />
+      <img src="/og-share-v3.png" alt="zapclub.io — Drop in. Take the stage. Own the night. Deck conductor, Zap the DJ, Nostr driven experience. Enter club." class="og-thumb" />
       <div class="og-meta">
         <span class="og-domain">zapclub.io</span>
         <span class="og-title">{clubName}</span>

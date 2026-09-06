@@ -692,7 +692,7 @@ body.site-led-page :is(.enter-club, .enter-stage, .design-btn, .all-clubs-link) 
   font-weight: 400 !important;
 }
 
-body.site-led-page :is(.club-player-name, .suggestion-copy strong) {
+body.site-led-page :is(.club-player-name, .hero-feature, .suggestion-copy strong) {
   color: #e8e6e3;
   font-family: var(--font) !important;
   font-size: 16px !important;
@@ -783,6 +783,7 @@ body.site-led-page .lcd-shell .lcd-byline {
   h1.site-h1,
   h3:not(.lcd-card-title):not(.led-modal-title),
   .club-player-name,
+  .hero-feature,
   .suggestion-copy strong,
   .club-player-title,
   .lt-title,

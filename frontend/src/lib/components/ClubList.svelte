@@ -201,7 +201,7 @@
         <span>Zap the DJ</span>
       </span>
       <span class="hero-feature hero-feature-nostr">
-        <img class="hero-feature-icon hero-feature-nostrich" src="/nostrich.png" alt="" aria-hidden="true" />
+        <span class="hero-feature-icon hero-feature-nostrich" aria-hidden="true"></span>
         <span>nostr driven experience</span>
       </span>
     </div>
@@ -532,7 +532,7 @@
     height: 29px;
     flex: 0 0 29px;
     overflow: visible;
-    color: #fff;
+    color: inherit;
     fill: none;
     stroke: currentColor;
     stroke-linecap: square;
@@ -559,9 +559,9 @@
     width: 51px;
     height: 41px;
     flex-basis: 51px;
-    object-fit: contain;
-    filter: grayscale(1) brightness(0) invert(1);
-    opacity: 0.92;
+    background-color: currentColor;
+    -webkit-mask: url('/nostrich.png') center / contain no-repeat;
+    mask: url('/nostrich.png') center / contain no-repeat;
     margin-left: -12px;
     margin-right: -10px;
   }

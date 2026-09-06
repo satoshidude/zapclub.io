@@ -16,7 +16,7 @@ describe('Open Graph sharing banner', () => {
 
   it('uses the same local font families as the website', () => {
     expect(generator).toContain("fontFile('jersey-25', 'jersey-25-latin-400-normal.woff')")
-    expect(generator).toContain("fontFile('ibm-plex-mono', 'ibm-plex-mono-latin-400-normal.woff')")
+    expect(generator).toContain("fontFile('ibm-plex-mono', 'ibm-plex-mono-latin-500-normal.woff')")
     expect(generator).toContain("fontFile('dotgothic16', 'dotgothic16-latin-400-normal.woff')")
   })
 
@@ -28,7 +28,7 @@ describe('Open Graph sharing banner', () => {
   })
 
   it('publishes the standard large-card dimensions and descriptive alt text', () => {
-    expect(index).toContain('https://zapclub.io/og-share-v2.png')
+    expect(index).toContain('https://zapclub.io/og-share-v3.png')
     expect(index).toContain('<meta property="og:image:width" content="1200" />')
     expect(index).toContain('<meta property="og:image:height" content="630" />')
     expect(index).toContain('Deck conductor, Zap the DJ, Nostr driven experience. Enter club.')

@@ -103,7 +103,7 @@ describe('club search suggestions', () => {
     expect(source).toContain('<span>Zap the DJ</span>')
     expect(source).toContain('class="hero-feature hero-feature-nostr"')
     expect(source).toContain('<span>nostr driven experience</span>')
-    expect(source).toContain('class="hero-feature-icon hero-feature-nostrich" src="/nostrich.png"')
+    expect(source).toContain('class="hero-feature-icon hero-feature-nostrich" aria-hidden="true"></span>')
     expect(source).toContain('class="hero-feature-icon hero-feature-sync"')
     expect(source).toContain('class="hero-feature-icon hero-feature-zap" aria-hidden="true">⚡︎</span>')
     expect(source).not.toContain('<span>no email</span>')

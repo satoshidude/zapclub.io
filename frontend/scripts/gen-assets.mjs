@@ -1,5 +1,5 @@
 // Generates all brand raster assets from the turntable artwork — none with the old white box.
-//   • og-share-v2.png (1200×630)   link/social preview card, generated hero + exact vector copy
+//   • og-share-v3.png (1200×630)   link/social preview card, generated hero + exact vector copy
 //   • favicon.svg / -32            browser-tab favicon, TRANSPARENT (adapts to any tab theme)
 //   • apple-touch-icon.png (180)   iOS home screen — SOLID dark (iOS composites alpha on black)
 //   • icon-192 / icon-512.png      Android / PWA install — SOLID dark (maskable needs a bg)
@@ -33,7 +33,7 @@ const turntable = (cx, cy, s) => `
 // without relying on host-installed fonts, and keeps generation identical on macOS and Linux.
 const fontFile = (family, file) => join(scripts, '..', 'node_modules', '@fontsource', family, 'files', file)
 const jersey = loadWoffFont(fontFile('jersey-25', 'jersey-25-latin-400-normal.woff'))
-const plexMono = loadWoffFont(fontFile('ibm-plex-mono', 'ibm-plex-mono-latin-400-normal.woff'))
+const plexMono = loadWoffFont(fontFile('ibm-plex-mono', 'ibm-plex-mono-latin-500-normal.woff'))
 const dotGothic = loadWoffFont(fontFile('dotgothic16', 'dotgothic16-latin-400-normal.woff'))
 const textPath = (font, text, x, baseline, size, fill, letterSpacing = 0, glow = false) =>
   `<path d="${font.path(text, x, baseline, size, letterSpacing)}" fill="${fill}"${glow ? ' filter="url(#soft-glow)"' : ''}/>`
@@ -43,7 +43,13 @@ const cta = { x: 836, y: 506, width: 344, height: 64 }
 const ctaTextX = cta.x + (cta.width - dotGothic.width(ctaText, 31, 0.5)) / 2
 const ctaBg = '#f4e04d'
 const ctaTextColor = '#0d1f42'
-const logoMark = { x: 34, y: 78, s: 1.1 }
+// Website-native metrics, uniformly scaled for the social card.
+const featureScale = 1.5
+const featureSecondX = 26 + 2 + 1.6 + plexMono.width('deck conductor', 16, 0) + 5.12
+const featureBaseline = 20.5
+const featureRow2 = 29 + 1.92
+const clubListSource = readFileSync(join(scripts, '..', 'src/lib/components/ClubList.svelte'), 'utf8')
+const syncIcon = clubListSource.match(/<svg class="hero-feature-icon hero-feature-sync"[^>]*>([\s\S]*?)<\/svg>/)[1]
 
 const nostrich = readFileSync(join(pub, 'nostrich.png')).toString('base64')
 const cardOverlay = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
@@ -57,31 +63,45 @@ const cardOverlay = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height
       <feGaussianBlur stdDeviation="2.2" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <filter id="copy-glow" x="-30%" y="-100%" width="160%" height="300%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" result="near"/>
+      <feFlood flood-color="#b3deff" flood-opacity="0.8"/>
+      <feComposite in2="near" operator="in" result="near-color"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="far"/>
+      <feFlood flood-color="#5aa0ff" flood-opacity="0.25"/>
+      <feComposite in2="far" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="near-color"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="logo-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#8e30eb" flood-opacity="0.55"/>
+    </filter>
     <mask id="nostr-led-mask" mask-type="alpha">
     <image href="data:image/png;base64,${nostrich}" x="0" y="0" width="51" height="41"/>
     </mask>
   </defs>
   <rect width="790" height="630" fill="url(#copy-shade)"/>
-  ${turntable(logoMark.x, logoMark.y, logoMark.s)}
-  ${textPath(jersey, 'ZAPCLUB.IO', 74, 78, 36, ledBlue, 0.5, true)}
+  <g transform="translate(58 40) scale(1.5)">
+    <g filter="url(#logo-glow)">${turntable(16 * 32 / 36, 20 * 32 / 36, 32 / 36)}</g>
+    <g stroke="#f4e04d" stroke-width="0.25" filter="url(#copy-glow)">
+      ${textPath(jersey, 'ZAPCLUB.IO', 40, 23, 20, '#f4e04d', 1.6)}
+    </g>
+  </g>
   ${textPath(jersey, 'DROP IN.', 58, 159, 82, ledBlue, 0, true)}
   ${textPath(jersey, 'TAKE THE STAGE.', 58, 225, 82, ledBlue, 0, true)}
   ${textPath(jersey, 'OWN THE NIGHT.', 58, 291, 82, ledBlue, 0, true)}
 
-  <g fill="none" stroke="#cfe9ff" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.65">
-    <path d="M62 351a13 13 0 0 1 22-9l4 4M88 338v8h-8"/>
-    <path d="M88 355a13 13 0 0 1-22 9l-4-4M62 368v-8h8"/>
+  <g transform="translate(58 340) scale(${featureScale})">
+    <svg width="26" height="26" y="1.5" viewBox="0 0 24 24" fill="none" stroke="${ledBlue}" stroke-width="1.65" stroke-linecap="square" stroke-linejoin="miter">${syncIcon}</svg>
+    <g filter="url(#copy-glow)">
+      ${textPath(plexMono, 'deck conductor', 29.6, featureBaseline, 16, ledBlue)}
+      <text x="${featureSecondX + 14.5}" y="20.5" fill="${ledBlue}" font-size="24" font-weight="700" font-family="ui-sans-serif, system-ui, sans-serif" text-anchor="middle">⚡︎</text>
+      ${textPath(plexMono, 'Zap the DJ', featureSecondX + 27.6, featureBaseline, 16, ledBlue)}
+      ${textPath(plexMono, 'nostr driven experience', 30.6, featureRow2 + 26.5, 16, ledBlue)}
+    </g>
+    <g transform="translate(-12 ${featureRow2})">
+      <rect width="51" height="41" fill="${ledBlue}" mask="url(#nostr-led-mask)"/>
+    </g>
   </g>
-  <circle cx="74" cy="360" r="1.6" fill="#cfe9ff"/>
-  ${textPath(plexMono, 'deck conductor', 104, 367, 25, ledBlue, 0.25)}
-
-  <text x="72" y="410" fill="${ledBlue}" font-size="24" font-weight="700" font-family="ui-sans-serif, system-ui, sans-serif" text-anchor="start" dominant-baseline="middle">⚡︎</text>
-  ${textPath(plexMono, 'Zap the DJ', 104, 416, 25, ledBlue, 0.25)}
-
-  <g mask="url(#nostr-led-mask)" transform="translate(57 432)">
-    <rect x="0" y="0" width="51" height="41" fill="#ffffff" opacity="0.92"/>
-  </g>
-  ${textPath(plexMono, 'nostr driven experience', 104, 459, 25, ledBlue, 0.25)}
 
   <rect x="${cta.x}" y="${cta.y}" width="${cta.width}" height="${cta.height}" rx="10" ry="10" fill="${ctaBg}" fill-opacity="1"/>
   ${textPath(dotGothic, ctaText, ctaTextX, 553, 31, ctaTextColor, 0.5, true)}
@@ -101,9 +121,9 @@ await sharp(join(scripts, 'assets', 'og-sharing-background.png'))
   .resize(1200, 630, { fit: 'cover', position: 'centre' })
   .composite([{ input: Buffer.from(cardOverlay) }])
   .png({ compressionLevel: 9 })
-  .toFile(join(pub, 'og-share-v2.png'))
+  .toFile(join(pub, 'og-share-v3.png'))
 await sharp(Buffer.from(faviconSvg)).resize(32).png().toFile(join(pub, 'favicon-32.png'))
 await sharp(Buffer.from(darkSquare(180))).png().toFile(join(pub, 'apple-touch-icon.png'))
 await sharp(Buffer.from(darkSquare(192))).png().toFile(join(pub, 'icon-192.png'))
 await sharp(Buffer.from(darkSquare(512))).png().toFile(join(pub, 'icon-512.png'))
-console.log('wrote og-share-v2.png, favicon.svg/-32, apple-touch-icon.png, icon-192/512.png')
+console.log('wrote og-share-v3.png, favicon.svg/-32, apple-touch-icon.png, icon-192/512.png')
