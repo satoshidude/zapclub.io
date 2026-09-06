@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	djLeaderboardTopN    = 100
+	djLeaderboardTopN    = 10
 	trackLeaderboardTopN = 10
 	djScorePrior         = 10 // ten settled tracks reach 50% confidence
 	djTrackPointMax      = 6  // one play point plus at most five accepted bangers
@@ -30,8 +30,8 @@ type trackLeaderboardEntry struct {
 }
 
 // djLeaderboardEntry is the public, relay-derived view of one DJ's settled
-// performance. Score is stored as integer tenths so the JSON contract avoids
-// floating-point ordering differences (333 renders as 33.3).
+// performance. Score remains in integer tenths for legacy API consumers
+// (333 renders as 33.3); only accepted votes determine ranking.
 type djLeaderboardEntry struct {
 	Pubkey    string `json:"pubkey"`
 	Rank      int    `json:"rank"`
@@ -40,9 +40,6 @@ type djLeaderboardEntry struct {
 	Bangers   int    `json:"bangers"`
 	Skipped   int    `json:"skipped"`
 	VibeScore int    `json:"vibeScore"`
-
-	earned      *big.Int
-	denominator *big.Int
 }
 
 // djEarnedPoints converts the canonical credibility aggregate into track
@@ -86,27 +83,24 @@ func djScoreTenths(tracks, vibeScore int) int {
 }
 
 func newDJLeaderboardEntry(entry *credibilityEntry) djLeaderboardEntry {
-	earned := djEarnedPoints(entry.Tracks, entry.Score)
 	return djLeaderboardEntry{
-		Pubkey:      entry.Pubkey,
-		Score:       djScoreTenths(entry.Tracks, entry.Score),
-		Tracks:      entry.Tracks,
-		Bangers:     entry.Bangers,
-		Skipped:     entry.Skipped,
-		VibeScore:   entry.Score,
-		earned:      earned,
-		denominator: new(big.Int).Add(big.NewInt(int64(entry.Tracks)), big.NewInt(djScorePrior)),
+		Pubkey:    entry.Pubkey,
+		Score:     djScoreTenths(entry.Tracks, entry.Score),
+		Tracks:    entry.Tracks,
+		Bangers:   entry.Bangers,
+		Skipped:   entry.Skipped,
+		VibeScore: entry.Score,
 	}
 }
 
 // ranked returns one deterministic ordering shared by the top-list and
-// per-profile rank endpoint. It compares the unrounded score fractions, then
-// prefers the larger settled sample and finally the lexical pubkey.
+// per-profile rank endpoint. Accepted votes rank first, followed by the larger
+// settled sample and finally the lexical pubkey. Unvoted DJs remain unranked.
 func (b *credibilityBoard) ranked() []djLeaderboardEntry {
 	b.mu.Lock()
 	all := make([]djLeaderboardEntry, 0, len(b.By))
 	for _, entry := range b.By {
-		if entry == nil || entry.Pubkey == "" || entry.Tracks <= 0 {
+		if entry == nil || entry.Pubkey == "" || entry.Tracks <= 0 || entry.Bangers <= 0 {
 			continue
 		}
 		all = append(all, newDJLeaderboardEntry(entry))
@@ -115,10 +109,8 @@ func (b *credibilityBoard) ranked() []djLeaderboardEntry {
 
 	sort.Slice(all, func(i, j int) bool {
 		a, z := all[i], all[j]
-		aWeighted := new(big.Int).Mul(a.earned, z.denominator)
-		zWeighted := new(big.Int).Mul(z.earned, a.denominator)
-		if comparison := aWeighted.Cmp(zWeighted); comparison != 0 {
-			return comparison > 0
+		if a.Bangers != z.Bangers {
+			return a.Bangers > z.Bangers
 		}
 		if a.Tracks != z.Tracks {
 			return a.Tracks > z.Tracks

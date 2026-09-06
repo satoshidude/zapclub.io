@@ -15,8 +15,8 @@
     loading = true
     void fetchLeaderboard()
       .then((r) => {
-        entries = r.top
-        tracks = r.topTracks
+        entries = r.top.slice(0, 10)
+        tracks = r.topTracks.slice(0, 10)
         total = r.total
       })
       .finally(() => (loading = false))
@@ -28,8 +28,6 @@
   })
 
   const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '')
-  const djScore = (tenths: number) => (tenths / 10).toFixed(1)
-  const signedVibe = (score: number) => `${score > 0 ? '+' : ''}${score.toLocaleString()}`
   const trackTitle = (track: TrackLeaderboardEntry) => track.title.trim() || 'Untitled track'
   const clubName = (club: string) => clubNames[club] || `Club ${club.slice(0, 8)}`
 </script>
@@ -37,14 +35,13 @@
 <div class="wrap leaderboard-page">
   <header class="lb-head led-zone">
     <h1 class="site-h1">TOP 10 LEADERBOARD</h1>
-    <p class="sub">Ranked by songs played and the room’s Vibemeter. DJ SCORE rewards strong sets without letting sheer volume decide the board.</p>
-    <p class="score-rule"><strong>DJ SCORE</strong> = vibe quality × experience factor. Ten songs reach 50% experience.</p>
+    <p class="sub">The tracks and DJs with the most votes from the room.</p>
   </header>
 
   <section class="track-panel led-zone" aria-labelledby="top-tracks-title" aria-live="polite">
     <div class="track-head">
       <h2 class="lcd-card-title" id="top-tracks-title">TOP 10 TRACKS</h2>
-      <p>Individual plays with the most Vibemeter Bangers.</p>
+      <p>Individual plays ranked by votes.</p>
     </div>
     {#if loading}
       <p class="dim">Loading…</p>
@@ -73,18 +70,22 @@
                 {#if track.skipped}<span class="skip-mark">COMMUNITY SKIP</span>{/if}
               </span>
             </span>
-            <span class="track-votes"><strong>{track.bangers}</strong> {track.bangers === 1 ? 'BANGER' : 'BANGERS'}</span>
+            <span class="vote-count"><strong>{track.bangers}</strong><span>votes</span></span>
           </li>
         {/each}
       </ol>
     {/if}
   </section>
 
-  <section class="ranking-panel led-zone" aria-live="polite">
+  <section class="ranking-panel led-zone" aria-labelledby="top-djs-title" aria-live="polite">
+    <div class="track-head">
+      <h2 class="lcd-card-title" id="top-djs-title">TOP 10 DJs</h2>
+      <p>Ranked by total track votes. Ties go to more tracks played.</p>
+    </div>
     {#if loading}
       <p class="dim">Loading…</p>
     {:else if entries.length === 0}
-      <p class="dim">No DJs ranked yet — the first settled song will start the board.</p>
+      <p class="dim">No DJs ranked yet — votes on played tracks will start the board.</p>
     {:else}
       {#if entries.length >= 3}
         <div class="podium" aria-label="Top three DJs">
@@ -96,18 +97,15 @@
               class="pod-slot"
               class:pod-first={isFirst}
               onclick={() => goUser(npub)}
-              aria-label={`#${e.rank} ${displayName(e.pubkey, p)}, DJ SCORE ${djScore(e.score)}`}
+              aria-label={`#${e.rank} ${displayName(e.pubkey, p)}, ${e.bangers.toLocaleString()} votes`}
             >
               <span class="pod-medal">{medal(e.rank)}</span>
               <img class="pod-av" src={avatarUrl(e.pubkey, p)} alt=""
                 width={isFirst ? 52 : 40} height={isFirst ? 52 : 40} />
               <span class="pod-name">{displayName(e.pubkey, p)}</span>
-              <span class="pod-score"><span>{djScore(e.score)}</span> DJ SCORE</span>
+              <span class="vote-count"><strong>{e.bangers.toLocaleString()}</strong><span>votes</span></span>
               <span class="pod-signals">
-                {e.tracks.toLocaleString()} {e.tracks === 1 ? 'song' : 'songs'} · VIBE {signedVibe(e.vibeScore)}
-              </span>
-              <span class="pod-feedback">
-                {e.bangers.toLocaleString()} {e.bangers === 1 ? 'banger' : 'bangers'} · {e.skipped.toLocaleString()} {e.skipped === 1 ? 'skip' : 'skips'}
+                {e.tracks.toLocaleString()} {e.tracks === 1 ? 'track played' : 'tracks played'}
               </span>
             </button>
           {/each}
@@ -123,12 +121,9 @@
               <img class="av" src={avatarUrl(e.pubkey, p)} alt="" width="40" height="40" />
               <span class="name">{displayName(e.pubkey, p)}</span>
               <span class="stats">
-                <span class="score"><span class="score-value">{djScore(e.score)}</span> DJ SCORE</span>
+                <span class="vote-count"><strong>{e.bangers.toLocaleString()}</strong><span>votes</span></span>
                 <span class="signals">
-                  {e.tracks.toLocaleString()} {e.tracks === 1 ? 'song' : 'songs'} · VIBE {signedVibe(e.vibeScore)}
-                </span>
-                <span class="feedback">
-                  {e.bangers.toLocaleString()} {e.bangers === 1 ? 'banger' : 'bangers'} · {e.skipped.toLocaleString()} {e.skipped === 1 ? 'skip' : 'skips'}
+                  {e.tracks.toLocaleString()} {e.tracks === 1 ? 'track played' : 'tracks played'}
                 </span>
               </span>
             </a>
@@ -173,19 +168,6 @@
     font-size: 0.96rem;
     line-height: 1.55;
   }
-  .score-rule {
-    max-width: 68ch;
-    margin: 0.45rem 0 0;
-    color: var(--lcd-text-dim);
-    font-size: 0.76rem;
-    line-height: 1.45;
-  }
-  .score-rule strong {
-    color: var(--amber);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-weight: 400;
-    letter-spacing: 0.04em;
-  }
   .ranking-panel {
     padding: 1rem;
   }
@@ -225,13 +207,6 @@
   }
   .track-row:last-child { border-bottom: 0; }
   .track-rank,
-  .track-votes {
-    color: var(--amber);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-weight: 400;
-    text-shadow: var(--lcd-text-shadow);
-    font-variant-numeric: tabular-nums;
-  }
   .track-rank { font-size: 0.95rem; }
   .track-main {
     display: flex;
@@ -265,25 +240,32 @@
     text-decoration: none;
   }
   .track-dj {
-    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-family: var(--font);
     letter-spacing: 0.03em;
   }
   .skip-mark {
     margin-left: 0.25rem;
     color: var(--danger, #ff5a67);
-    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-family: var(--font);
     font-size: 0.62rem;
     letter-spacing: 0.04em;
   }
-  .track-votes {
-    font-size: 0.72rem;
-    letter-spacing: 0.03em;
+  .vote-count {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    padding: 0.35rem 0.55rem;
+    border-left: 2px solid var(--lcd-text-dim);
+    background: rgba(0, 0, 0, 0.16);
+    color: var(--lcd-text-bright);
+    font-family: var(--font);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  .track-votes strong {
-    font-size: 1.05rem;
-    font-weight: 400;
-  }
+  .vote-count strong { font-size: 1rem; font-weight: 500; }
+  .vote-count > span { color: var(--lcd-text-soft); }
   .dim {
     margin: 0;
     color: var(--lcd-text-dim);
@@ -340,7 +322,7 @@
     max-width: 100%;
     overflow: hidden;
     color: var(--lcd-text-bright);
-    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-family: var(--font);
     font-size: 0.86rem;
     font-weight: 400;
     letter-spacing: 0.04em;
@@ -349,26 +331,7 @@
     white-space: nowrap;
   }
   .pod-first .pod-name { font-size: 1rem; }
-  .pod-score {
-    color: var(--amber);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-weight: 400;
-    font-size: 0.76rem;
-    letter-spacing: 0.03em;
-    font-variant-numeric: tabular-nums;
-  }
-  .pod-score span {
-    font-size: 1.05rem;
-  }
-  .pod-first .pod-score { font-size: 0.82rem; }
-  .pod-first .pod-score span { font-size: 1.25rem; }
-  .pod-signals,
-  .pod-feedback {
-    color: var(--lcd-text-dim);
-    font-size: 0.66rem;
-    line-height: 1.25;
-  }
-  .pod-feedback { opacity: 0.84; }
+  .pod-signals { color: var(--lcd-text-dim); font-size: 0.66rem; line-height: 1.35; }
   .board {
     list-style: none;
     margin: 0;
@@ -412,7 +375,7 @@
   }
   .rank .num {
     color: var(--lcd-text-dim);
-    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-family: var(--font);
     font-weight: 400;
     font-variant-numeric: tabular-nums;
     font-size: 0.95rem;
@@ -435,7 +398,7 @@
     min-width: 0;
     overflow: hidden;
     color: var(--lcd-text-bright);
-    font-family: 'DotGothic16', ui-monospace, monospace;
+    font-family: var(--font);
     font-weight: 400;
     letter-spacing: 0.04em;
     text-shadow: var(--lcd-text-shadow);
@@ -449,26 +412,7 @@
     align-items: flex-end;
     gap: 0.1rem;
   }
-  .score {
-    color: var(--amber);
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-weight: 400;
-    font-size: 0.72rem;
-    letter-spacing: 0.03em;
-    font-variant-numeric: tabular-nums;
-  }
-  .score-value {
-    font-size: 1rem;
-  }
-  .signals,
-  .feedback {
-    color: var(--lcd-text-dim);
-    font-size: 0.72rem;
-  }
-  .feedback {
-    font-size: 0.66rem;
-    opacity: 0.84;
-  }
+  .signals { color: var(--lcd-text-dim); font-size: 0.72rem; }
   @media (max-width: 560px) {
     .wrap { padding: 0.45rem 0.45rem 3rem; }
     .lb-head,
@@ -476,8 +420,7 @@
     .ranking-panel { margin-bottom: 0.55rem; }
     .lb-head { min-height: 190px; padding: 1rem; }
     .sub { font-size: 0.88rem; }
-    .score-rule { font-size: 0.72rem; }
-    .ranking-panel { padding: 0.8rem; }
+      .ranking-panel { padding: 0.8rem; }
     .track-panel { padding: 0.8rem; }
     .track-head {
       display: block;
@@ -485,28 +428,22 @@
     }
     .track-head p { margin-top: 0.15rem; }
     .track-row {
-      grid-template-columns: 2.25rem minmax(0, 1fr);
+      grid-template-columns: 1.8rem minmax(0, 1fr) auto;
       gap: 0.5rem;
       min-height: 70px;
       padding-block: 0.7rem;
     }
-    .track-votes {
-      grid-column: 2;
-      margin-top: 0.08rem;
-    }
-    .pod-slot { min-height: 166px; padding-inline: 0.25rem; }
+      .pod-slot { min-height: 166px; padding-inline: 0.25rem; }
     .pod-slot.pod-first { min-height: 180px; }
     .pod-av { width: 38px; height: 38px; }
     .pod-first .pod-av { width: 48px; height: 48px; }
     .pod-name { font-size: 0.72rem; }
     .pod-first .pod-name { font-size: 0.82rem; }
-    .pod-signals,
-    .pod-feedback { font-size: 0.58rem; }
+    .pod-signals { font-size: 0.58rem; }
     .row { min-height: 62px; gap: 0.55rem; padding-inline: 0.1rem; }
     .rank { min-width: 2.7rem; }
     .av { width: 36px; height: 36px; }
     .name { font-size: 0.88rem; }
     .signals { font-size: 0.66rem; }
-    .feedback { font-size: 0.6rem; }
-  }
+    }
 </style>

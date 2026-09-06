@@ -28,8 +28,8 @@ account is required.
   lower DJ credibility, while the playing DJ cannot vote on their own track.
 - Sends NIP-57 Lightning zaps directly to DJs; payments do not buy leaderboard
   placement.
-- Ranks human DJs by relay-settled songs and the room's Vibemeter response,
-  with small samples deliberately damped.
+- Ranks the top ten human DJs by accepted votes on relay-settled tracks,
+  with played tracks breaking ties; DJs without votes remain unranked.
 - Supports open, closed, private and Lightning entry-fee clubs.
 - Connects Telegram groups through a dedicated bridge bot.
 
@@ -101,13 +101,12 @@ public DJ leaderboard when it is settled. Manual and broken-track skips do not
 count; the relay also settles the outgoing human track before an Auto DJ
 takeover.
 
-The leaderboard turns the canonical aggregate into a confidence-adjusted score:
-`earned = clamp(tracks + vibeScore, 0, 6 × tracks)` and
-`DJ SCORE = 100 × earned / (6 × (tracks + 10))`. A normal track earns one base
-point plus up to five accepted bangers; a community-skipped track earns zero.
-Manual and broken-track skips add neither a song nor points.
-The ten-track prior gives ten settled songs 50% experience weight, so neither a
-tiny perfect sample nor sheer volume without positive feedback dominates.
+The leaderboard returns the top ten DJs by total accepted votes on settled
+human-DJ tracks. Equal vote totals prefer more settled tracks, then the lexical
+pubkey. DJs without votes remain unranked; Auto-DJ plays and zaps do not affect
+this ranking. Manual and broken-track skips add neither tracks nor votes.
+The API preserves its legacy `score` field for compatibility, but neither the
+ranking nor the leaderboard display uses that score.
 The public leaderboard response also carries a Top 10 of individual settled
 track performances by accepted Banger votes, including the public club ID and
 DJ pubkey for each play. It exposes only the aggregate result, never the voters;

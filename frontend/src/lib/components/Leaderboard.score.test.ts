@@ -8,14 +8,12 @@ describe('DJ leaderboard presentation', () => {
     expect(leaderboard).not.toContain('TOP DJS Leaderboard')
   })
 
-  it('explains and renders the relay DJ SCORE with its underlying signals', () => {
-    expect(leaderboard).toContain('DJ SCORE')
-    expect(leaderboard).toContain('vibe quality × experience factor')
-    expect(leaderboard).toContain('Ten songs reach 50% experience')
-    expect(leaderboard).toContain('e.tracks.toLocaleString()')
-    expect(leaderboard).toContain('e.vibeScore')
+  it('shows votes and played tracks instead of a calculated DJ score', () => {
+    expect(leaderboard).not.toContain('DJ SCORE')
     expect(leaderboard).toContain('e.bangers.toLocaleString()')
-    expect(leaderboard).toContain('e.skipped.toLocaleString()')
+    expect(leaderboard).toContain('e.tracks.toLocaleString()')
+    expect(leaderboard).toContain('entries = r.top.slice(0, 10)')
+    expect(leaderboard).toContain('class="vote-count"')
   })
 
   it('shows relay-settled top tracks with their club, DJ and aggregate Bangers', () => {
@@ -38,7 +36,8 @@ describe('DJ leaderboard presentation', () => {
   it('uses the DJ rank on profiles while preserving private zap history', () => {
     expect(profile).toContain('fetchDJRank')
     expect(profile).toContain('type DJRank')
-    expect(profile).toContain('(djRank.score / 10).toFixed(1)')
+    expect(profile).toContain('djRank.bangers.toLocaleString()')
+    expect(profile).not.toContain('DJ SCORE')
     expect(profile).not.toContain('fetchZapRank')
     expect(profile).not.toContain('type ZapRank')
 

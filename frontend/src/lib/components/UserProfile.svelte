@@ -458,15 +458,12 @@
     >
       <span class="dr-badge"><span class="dr-medal">{medal}</span><span class="dr-rank">#{djRank.rank.toLocaleString()}</span></span>
       <span class="dr-main">
-        <span class="dr-amt">{(djRank.score / 10).toFixed(1)} <span class="dr-unit">DJ SCORE</span></span>
+        <span class="dr-amt">{djRank.bangers.toLocaleString()} <span class="dr-unit">votes</span></span>
         <span class="dr-sub">
           {djRank.tracks.toLocaleString()} {djRank.tracks === 1 ? 'song' : 'songs'}
-          · VIBE {djRank.vibeScore > 0 ? '+' : ''}{djRank.vibeScore.toLocaleString()}
         </span>
         <span class="dr-detail">
-          {djRank.bangers.toLocaleString()} {djRank.bangers === 1 ? 'banger' : 'bangers'}
-          · {djRank.skipped.toLocaleString()} {djRank.skipped === 1 ? 'skip' : 'skips'}
-          · rank {djRank.rank.toLocaleString()} of {djRank.total.toLocaleString()}
+          rank {djRank.rank.toLocaleString()} of {djRank.total.toLocaleString()}
         </span>
       </span>
       <span class="dr-cta">Leaderboard →</span>

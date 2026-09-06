@@ -84,26 +84,28 @@ minus one, and stores the settled DJ score in
 
 ## DJ leaderboard and Zap history
 
-Public `GET /leaderboard` ranks only DJs with at least one rank-eligible human
-track. Its source is the same durable `credibility.json` aggregate that backs
-the signed kind `30078` snapshots; Auto-DJ tracks and Lightning payments are
-excluded. For `tracks=T` and canonical Vibemeter `score=V`, the relay calculates:
+Public `GET /leaderboard` returns the top ten human DJs with at least one
+rank-eligible settled track and one accepted vote. Its source is the same
+durable `credibility.json` aggregate that backs the signed kind `30078`
+snapshots; Auto-DJ tracks and Lightning payments are excluded. Ranks compare
+total accepted votes (`bangers`) descending, then settled tracks descending,
+then the lexical pubkey. DJs without votes remain unranked. Profile lookups
+use the same ordering across all eligible DJs, including ranks beyond ten.
+
+Naturally finished and community-skipped tracks contribute their accepted
+votes. Manual and broken-track skips are persisted as handled for deduplication
+but add neither a track nor votes. An outgoing real-DJ track is settled before
+an Auto-DJ takeover.
+
+The JSON `score` remains an integer in tenths for legacy API compatibility
+(`333` means `33.3`), returned with `tracks`, `bangers`, `skipped` and the
+canonical `vibeScore`. It does not determine rank and is not displayed in the
+leaderboard. Its legacy calculation remains:
 
 ```text
-earned   = clamp(T + V, 0, 6 × T)
-DJ SCORE = 100 × earned / (6 × (T + 10))
+earned = clamp(tracks + vibeScore, 0, 6 × tracks)
+score  = round(1000 × earned / (6 × (tracks + 10)))
 ```
-
-A naturally finished track supplies one play point plus zero to five accepted
-bangers; a community-skipped track supplies zero. Manual and broken-track skips
-are persisted as handled for deduplication but add neither a track nor score.
-The ten-track prior makes ten songs 50% experienced and prevents tiny samples
-or unreviewed volume from dominating. The JSON `score` is an integer in tenths
-(`333` means `33.3`) and is returned with `tracks`, `bangers`, `skipped` and the
-canonical `vibeScore`.
-Ranks compare the unrounded formula, then the larger settled sample, then the
-pubkey for a deterministic order. An outgoing real-DJ track is settled before
-an Auto-DJ takeover.
 
 The same response includes `topTracks`, the ten settled public performances
 with the most accepted Banger votes. This includes Auto-DJ plays without adding

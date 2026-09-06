@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -50,34 +51,61 @@ func TestDJScoreTenthsHandlesExtremeMalformedAggregates(t *testing.T) {
 	}
 }
 
-func TestDJLeaderboardRanksByUnroundedScoreThenExperience(t *testing.T) {
+func TestDJLeaderboardRanksByVotesThenTracks(t *testing.T) {
 	b := newCredibilityBoard(filepath.Join(t.TempDir(), "credibility.json"))
 	b.By = map[string]*credibilityEntry{
-		"best":    {Pubkey: "best", Tracks: 10, Score: 50, Bangers: 50},
-		"veteran": {Pubkey: "veteran", Tracks: 20, Score: 40, Bangers: 40},
-		"rookie":  {Pubkey: "rookie", Tracks: 5, Score: 25, Bangers: 25},
-		"volume":  {Pubkey: "volume", Tracks: 100, Score: 0},
-		"alpha":   {Pubkey: "alpha", Tracks: 10, Score: 20, Bangers: 20},
-		"beta":    {Pubkey: "beta", Tracks: 10, Score: 20, Bangers: 20},
-		"skipped": {Pubkey: "skipped", Tracks: 1, Score: -1, Skipped: 1},
-		"empty":   {Pubkey: "empty", Tracks: 0, Score: 99},
+		"most-votes": {Pubkey: "most-votes", Tracks: 100, Score: 60, Bangers: 60},
+		"best-score": {Pubkey: "best-score", Tracks: 10, Score: 50, Bangers: 50},
+		"veteran":    {Pubkey: "veteran", Tracks: 20, Score: 20, Bangers: 25},
+		"rookie":     {Pubkey: "rookie", Tracks: 5, Score: 25, Bangers: 25},
+		"alpha":      {Pubkey: "alpha", Tracks: 10, Score: 20, Bangers: 20},
+		"beta":       {Pubkey: "beta", Tracks: 10, Score: 20, Bangers: 20},
+		"volume":     {Pubkey: "volume", Tracks: 100, Score: 0},
+		"skipped":    {Pubkey: "skipped", Tracks: 1, Score: -1, Skipped: 1},
+		"empty":      {Pubkey: "empty", Tracks: 0, Score: 99, Bangers: 99},
 	}
 
 	entries, total := b.djTop(100)
-	if total != 7 || len(entries) != 7 {
-		t.Fatalf("ranked total=%d len=%d, want 7", total, len(entries))
+	if total != 6 || len(entries) != 6 {
+		t.Fatalf("ranked total=%d len=%d, want 6", total, len(entries))
 	}
-	want := []string{"best", "veteran", "rookie", "alpha", "beta", "volume", "skipped"}
+	want := []string{"most-votes", "best-score", "veteran", "rookie", "alpha", "beta"}
 	for i, pubkey := range want {
 		if entries[i].Pubkey != pubkey || entries[i].Rank != i+1 {
 			t.Fatalf("entry %d = %+v, want %s at rank %d", i, entries[i], pubkey, i+1)
 		}
 	}
-	if entries[1].Score != entries[2].Score || entries[1].Tracks <= entries[2].Tracks {
-		t.Fatalf("exact score tie must prefer the larger sample: %+v / %+v", entries[1], entries[2])
+	if entries[0].Score >= entries[1].Score {
+		t.Fatal("fixture must prove votes outrank a higher legacy score")
 	}
-	if rank, rankTotal, ok := b.djRankOf("rookie"); !ok || rankTotal != total || rank.Rank != 3 {
+	if rank, rankTotal, ok := b.djRankOf("rookie"); !ok || rankTotal != total || rank.Rank != 4 {
 		t.Fatalf("rookie rank = %+v, total=%d, ok=%v; top and profile rank must agree", rank, rankTotal, ok)
+	}
+	if _, _, ok := b.djRankOf("volume"); ok {
+		t.Fatal("a DJ without accepted votes must remain unranked")
+	}
+}
+
+func TestDJLeaderboardHTTPLimitsDJsToTen(t *testing.T) {
+	b := newCredibilityBoard(filepath.Join(t.TempDir(), "credibility.json"))
+	for i := 1; i <= 12; i++ {
+		pubkey := fmt.Sprintf("dj-%02d", i)
+		b.By[pubkey] = &credibilityEntry{Pubkey: pubkey, Tracks: i, Bangers: i, Score: i}
+	}
+	recorder := httptest.NewRecorder()
+	b.handleLeaderboard(recorder, httptest.NewRequest(http.MethodGet, "/leaderboard", nil))
+	var response struct {
+		Total int                  `json:"total"`
+		Top   []djLeaderboardEntry `json:"top"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Total != 12 || len(response.Top) != 10 || response.Top[9].Pubkey != "dj-03" {
+		t.Fatalf("expected ten ranked DJs and full total: %+v", response)
+	}
+	if rank, total, ok := b.djRankOf("dj-01"); !ok || total != 12 || rank.Rank != 12 {
+		t.Fatalf("profile rank beyond top ten = %+v, total=%d, ok=%v", rank, total, ok)
 	}
 }
 

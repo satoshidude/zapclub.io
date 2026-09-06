@@ -732,7 +732,7 @@ body.site-led-page :is(.pod-name, .board .name) {
   text-shadow: none;
 }
 
-body.site-led-page :is(.pod-score, .leaderboard-page .score, .zap-sats, .s-sats) {
+body.site-led-page :is(.zap-sats, .s-sats) {
   color: #f4e04d !important;
   font-family: var(--font-display) !important;
   font-size: 13px !important;
