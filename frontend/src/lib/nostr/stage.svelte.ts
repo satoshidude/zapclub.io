@@ -1,8 +1,10 @@
 import type { Event } from 'nostr-tools/pure'
-import { KIND_STAGE, KIND_PRESENCE, publishClub } from './groups'
+import { KIND_STAGE, publishSessionClub, type ClubOperationIntent } from './groups'
 import { auth } from './auth.svelte'
 import { selectActiveDjs, MAX_DJS } from './conductor'
 import type { StageDj } from './types'
+import { startPresence, stopPresence } from './presence.svelte'
+import { sessionEventPrincipal } from './sessionSigner'
 
 // zapclub: open stage — any member may take a free slot, up to MAX_DJS. The stage is a
 // content event (30102), NOT a relay role; there is no dj-policy gate.
@@ -124,7 +126,7 @@ const HEARTBEAT_MS = 120_000
 
 interface StageState {
   /** pubkey → last state. `seeded` = provisional (from localStorage, not relay-confirmed). */
-  djs: Record<string, { since: number; lastSeen: number; on: boolean; seeded?: boolean }>
+  djs: Record<string, { since: number; lastSeen: number; on: boolean; eventId?: string; seeded?: boolean }>
   /** pubkey → last kick time (ms). Whoever posts "on" after a kick is back up. */
   kicks: Record<string, number>
   /** Reactive time tick so freshness filters re-evaluate. */
@@ -149,7 +151,7 @@ function ensureTicking(): void {
 }
 
 /**
- * Active stage DJs: on + fresh (<1h) + not kicked (last on-heartbeat newer than the last
+ * Active stage DJs: on + fresh (<5 min) + not kicked (last on-heartbeat newer than the last
  * kick), sorted by stage join, max MAX_DJS.
  */
 function activeDjs(): StageDj[] {
@@ -175,24 +177,26 @@ export const stage = {
 
 /** Handles an incoming on-stage event (kind 30102). */
 export function ingestStage(ev: Event): void {
+  const principal = sessionEventPrincipal(ev)
   // created_at is in seconds — keep lastSeen in ms (compared against Date.now()).
   const lastSeen = ev.created_at * 1000
   const since = Number(ev.tags.find((t) => t[0] === 'since')?.[1]) || ev.created_at
   const on = ev.content !== 'off'
-  const prev = state.djs[ev.pubkey]
+  const prev = state.djs[principal]
   // Only consider the newest event per DJ. Relay events ALWAYS beat provisional seeds —
   // a seed carries lastSeen=now, so an age comparison would let a localStorage ghost
   // outrank the relay's actual (older) state forever.
-  if (prev && !prev.seeded && lastSeen < prev.lastSeen) {
-    console.log(`[zc:stage] ingestStage: skip old ${pk8(ev.pubkey)} on=${on}`)
+  const losesCanonicalTie = !!prev?.eventId && lastSeen === prev.lastSeen && ev.id >= prev.eventId
+  if (prev && !prev.seeded && (lastSeen < prev.lastSeen || losesCanonicalTie)) {
+    console.log(`[zc:stage] ingestStage: skip old ${pk8(principal)} on=${on}`)
     return
   }
   // Read `since` DIRECTLY from the (newest) event — don't freeze the first one seen.
   // Otherwise long-watching clients keep a stale `since` on rejoin and the DJ order
   // (round-robin mapping pos%n) drifts between clients.
-  state.djs[ev.pubkey] = { since, lastSeen, on }
+  state.djs[principal] = { since, lastSeen, on, eventId: ev.id }
   const onCount = Object.values(state.djs).filter((d) => d.on).length
-  console.log(`[zc:stage] ingestStage: ${pk8(ev.pubkey)} on=${on} since=${since} total_on=${onCount}`)
+  console.log(`[zc:stage] ingestStage: ${pk8(principal)} on=${on} since=${since} total_on=${onCount}`)
   const groupId = ev.tags.find((t) => t[0] === 'h')?.[1]
   if (groupId) cacheStage(groupId)
 }
@@ -215,7 +219,6 @@ export function ingestStageKick(ev: Event): string | null {
 // ── my own stage presence ─────────────────────────────────────────────────
 
 let hbTimer: ReturnType<typeof setInterval> | null = null
-let presTimer: ReturnType<typeof setInterval> | null = null
 let myGroupId: string | null = null
 let mySince = 0
 
@@ -223,18 +226,12 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-function postPresence(groupId: string): void {
-  if (!auth.pubkey) return
-  void publishClub({
-    kind: KIND_PRESENCE,
-    created_at: nowSec(),
-    tags: [['h', groupId]],
-    content: '',
-  })
-}
-
-async function postStage(groupId: string, on: boolean): Promise<void> {
-  await publishClub({
+async function postStage(
+  groupId: string,
+  on: boolean,
+  intent: ClubOperationIntent = 'automatic',
+): Promise<void> {
+  await publishSessionClub({
     kind: KIND_STAGE,
     created_at: nowSec(),
     tags: [
@@ -243,15 +240,22 @@ async function postStage(groupId: string, on: boolean): Promise<void> {
       ['since', String(mySince)],
     ],
     content: on ? 'on' : 'off',
-  })
+  }, intent)
+}
+
+function postStageAutomatically(groupId: string, on: boolean): void {
+  void postStage(groupId, on, 'automatic').catch(() => {})
 }
 
 /** Go on stage: post on-stage + start the heartbeat. */
-export async function joinStage(groupId: string): Promise<void> {
+export async function joinStage(
+  groupId: string,
+  intent: ClubOperationIntent = 'explicit',
+): Promise<void> {
   // Switching to a different stage → step off the old one first (you can only DJ in one
   // club at a time). Same club = idempotent re-join (e.g. reload-resume), no off needed.
   console.log(`[zc:stage] joinStage: ${groupId.slice(0, 8)} prev=${myGroupId?.slice(0, 8) ?? 'none'}`)
-  if (myGroupId && myGroupId !== groupId) void postStage(myGroupId, false)
+  if (myGroupId && myGroupId !== groupId) postStageAutomatically(myGroupId, false)
   const prevGroup = myGroupId
   myGroupId = groupId
   // On reload-resume reuse the SAME `since` (stable DJ order across all clients), else
@@ -259,7 +263,7 @@ export async function joinStage(groupId: string): Promise<void> {
   mySince = persistedSince(groupId) ?? nowSec()
   console.log(`[zc:stage] joinStage: since=${mySince} persisted=${persistedSince(groupId) !== null}`)
   try {
-    await postStage(groupId, true)
+    await postStage(groupId, true, intent)
   } catch (e) {
     // Relay refused the join (e.g. "restricted: stage is full" from the DJ-cap gate).
     // Roll back so the client doesn't ghost itself on stage: the persisted marker would
@@ -281,20 +285,12 @@ export async function joinStage(groupId: string): Promise<void> {
   hbTimer = setInterval(() => {
     if (myGroupId) {
       console.log(`[zc:stage] heartbeat: ${myGroupId.slice(0, 8)}`)
-      void postStage(myGroupId, true)
+      postStageAutomatically(myGroupId, true)
     }
   }, HEARTBEAT_MS)
-  // Keep presence (20100) alive while on stage even when the club view isn't mounted.
-  // ClubView.svelte starts/stops its own presence; this ensures a navigated-away DJ
-  // remains "online" so the conductor's offline played-set guard doesn't apply to them.
-  if (presTimer) clearInterval(presTimer)
-  postPresence(groupId) // immediate beat
-  presTimer = setInterval(() => {
-    if (myGroupId) {
-      console.log(`[zc:stage] presbeat: ${myGroupId.slice(0, 8)}`)
-      postPresence(myGroupId)
-    }
-  }, 25_000)
+  // A sticky stage owns a Presence claim even when ClubView is gone. The shared scheduler
+  // deduplicates it with the view claim while both point at the same club.
+  startPresence(groupId, 'stage')
 }
 
 /**
@@ -302,16 +298,16 @@ export async function joinStage(groupId: string): Promise<void> {
  * `myGroupId` was lost after a reload (sticky stage → the relay still has you up, but the
  * module state is gone → otherwise you couldn't leave).
  */
-export async function leaveStage(groupId?: string): Promise<void> {
+export async function leaveStage(
+  groupId?: string,
+  intent: ClubOperationIntent = 'explicit',
+): Promise<void> {
   console.log(`[zc:stage] leaveStage: myGroupId=${myGroupId?.slice(0, 8) ?? 'none'} fallback=${groupId?.slice(0, 8) ?? 'none'}`)
   if (hbTimer) {
     clearInterval(hbTimer)
     hbTimer = null
   }
-  if (presTimer) {
-    clearInterval(presTimer)
-    presTimer = null
-  }
+  stopPresence('stage')
   forgetStage() // explicit leave → no more reload-resume
   const gid = myGroupId ?? groupId ?? null
   myGroupId = null
@@ -320,7 +316,7 @@ export async function leaveStage(groupId?: string): Promise<void> {
   if (me && state.djs[me]) {
     state.djs[me] = { ...state.djs[me], on: false, lastSeen: Date.now() }
   }
-  if (gid) await postStage(gid, false)
+  if (gid) await postStage(gid, false, intent)
 }
 
 /**
@@ -360,10 +356,7 @@ export function resetStage(): void {
     clearInterval(hbTimer)
     hbTimer = null
   }
-  if (presTimer) {
-    clearInterval(presTimer)
-    presTimer = null
-  }
+  stopPresence('stage')
   if (tickTimer) {
     clearInterval(tickTimer)
     tickTimer = null
@@ -371,7 +364,7 @@ export function resetStage(): void {
   // On logout/switch you might still be on stage (resetStage is called without a prior
   // leaveStage) → best-effort post `off` so others don't see us as an orphaned DJ. Fails
   // if the signer is already gone.
-  if (myGroupId) void postStage(myGroupId, false)
+  if (myGroupId) postStageAutomatically(myGroupId, false)
   myGroupId = null
   state.djs = {}
   state.kicks = {}
@@ -386,7 +379,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       state.tick = Date.now()
-      if (myGroupId) void postStage(myGroupId, true)
+      if (myGroupId) postStageAutomatically(myGroupId, true)
     }
   })
 }

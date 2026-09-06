@@ -126,13 +126,8 @@
       return
     }
     void load()
-    // Keep the live listener count + chart fresh without a full reload.
-    const iv = setInterval(() => {
-      loadListeners()
-        .then((l) => (listeners = l))
-        .catch(() => {})
-    }, 30_000)
-    return () => clearInterval(iv)
+    // Authenticated admin reads use single-use NIP-98 signatures. Refresh only through the
+    // visible button; an idle dashboard must not ask the user's signer every 30 seconds.
   })
 </script>
 

@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/fiatjaf/relay29"
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/puzpuzpuz/xsync/v3"
+)
 
 func TestAutoUpcomingTracksMatchesCurrentAndPreplannedCycles(t *testing.T) {
 	tracks := []condTrack{
@@ -47,5 +54,26 @@ func TestAutoUpcomingTracksSingleTrackAnnouncesItsLoop(t *testing.T) {
 	got := autoUpcomingTracks(pb, tracks, 6)
 	if len(got) != 1 || got[0].videoID != "only-track" {
 		t.Fatalf("single-track preview = %v, want the looping track", got)
+	}
+}
+
+func TestBannedOwnerCannotReactivateWarmAutoDJIndex(t *testing.T) {
+	state := &relay29.State{Groups: xsync.NewMapOf[string, *relay29.Group]()}
+	state.Groups.Store("club", state.NewGroup("club", "owner"))
+	c := newConductor(nil, nil, state, nostr.GeneratePrivateKey())
+	c.isMember = func(club, pubkey string) bool { return club == "club" && pubkey == "owner" }
+	c.isBanned = func(pubkey string) bool { return pubkey == "owner" }
+	c.autoDJIdx["club"] = &nostr.Event{
+		Kind: kindAutoDJ, PubKey: "owner", CreatedAt: nostr.Now(),
+		Tags: nostr.Tags{
+			{"h", "club"}, {"d", "club"}, {"status", "armed"},
+			{"track", "yt:one", "One", "120"},
+		},
+	}
+	if got := c.armedAutoClubs(context.Background()); len(got) != 0 {
+		t.Fatalf("banned owner's warm Auto-DJ index became active: %+v", got)
+	}
+	if c.hasActiveAutoDJ("club") {
+		t.Fatal("banned owner's Auto-DJ occupied a stage slot")
 	}
 }

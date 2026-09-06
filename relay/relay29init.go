@@ -16,12 +16,16 @@ func (a relay29Adapter) BroadcastEvent(event *nostr.Event) {
 	a.Relay.BroadcastEvent(event)
 }
 
-// Listener beats use an anonymous, tab-scoped signing key by design. Keep all relay29 group
-// checks except the membership-only write rule for this one narrowly scoped ephemeral kind.
-func allowAnonymousListenerBeat(state *relay29.State) func(context.Context, *nostr.Event) (bool, string) {
+// Listener beats use an anonymous, tab-scoped signing key by design. Session-marked presence
+// and stage events use a separate, fail-closed connection-bound authorization check. Everything
+// else keeps relay29's normal author-is-member group rule.
+func restrictGroupWrites(state *relay29.State, sessions *sessionEventPolicy) func(context.Context, *nostr.Event) (bool, string) {
 	return func(ctx context.Context, event *nostr.Event) (bool, string) {
 		if event.Kind == kindListenerBeat {
 			return false, ""
+		}
+		if isSessionEventCandidate(event) {
+			return sessions.reject(ctx, event)
 		}
 		return state.RestrictWritesBasedOnGroupRules(ctx, event)
 	}
@@ -30,9 +34,10 @@ func allowAnonymousListenerBeat(state *relay29.State) func(context.Context, *nos
 // initRelay29 is the small integration formerly provided by relay29/khatru29.
 // It lives here because that archived adapter no longer compiles with the final
 // Khatru fix needed for per-connection PreventBroadcast behavior.
-func initRelay29(opts relay29.Options) (*khatru.Relay, *relay29.State) {
+func initRelay29(opts relay29.Options) (*khatru.Relay, *relay29.State, *sessionEventPolicy) {
 	pubkey, _ := nostr.GetPublicKey(opts.SecretKey)
 	state := relay29.New(opts)
+	sessions := newSessionEventPolicy()
 	relay := khatru.NewRelay()
 	relay.Info.PubKey = pubkey
 	relay.Info.SupportedNIPs = append(relay.Info.SupportedNIPs, 29)
@@ -53,7 +58,7 @@ func initRelay29(opts relay29.Options) (*khatru.Relay, *relay29.State) {
 	relay.RejectEvent = append(relay.RejectEvent,
 		state.RequireHTagForExistingGroup,
 		state.RequireModerationEventsToBeRecent,
-		allowAnonymousListenerBeat(state),
+		restrictGroupWrites(state, sessions),
 		state.RestrictInvalidModerationActions,
 		state.PreventWritingOfEventsJustDeleted,
 		state.CheckPreviousTag,
@@ -65,5 +70,5 @@ func initRelay29(opts relay29.Options) (*khatru.Relay, *relay29.State) {
 		state.AddToPreviousChecking,
 	)
 	relay.OnConnect = append(relay.OnConnect, khatru.RequestAuth)
-	return relay, state
+	return relay, state, sessions
 }

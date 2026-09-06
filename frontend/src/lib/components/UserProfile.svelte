@@ -54,6 +54,8 @@
   let topClubId = $state<string | null>(null)
   let rolesById = $state<Record<string, string[]>>({})
   let received = $state<ReceivedZaps | null>(null)
+  let receivedLoading = $state(false)
+  let receivedError = $state('')
   let djRank = $state<DJRank | null>(null)
   let credibility = $state<Credibility | null>(null)
   let likedTracks = $state<UserLike[]>([])
@@ -104,14 +106,29 @@
         rolesById = a.rolesById
       })
     }
-    // Public DJ standing plus an authenticated, owner-only zap sender breakdown.
+    // Public DJ standing. The owner-only Zap sender breakdown stays unloaded until the user
+    // explicitly opens it, because its single-use NIP-98 header invokes the account signer.
     received = null
+    receivedLoading = false
+    receivedError = ''
     djRank = null
     credibility = null
     void fetchDJRank(pk).then((result) => (djRank = result))
     void fetchCredibility(pk).then((result) => (credibility = result))
-    if (isMe && auth.canSign) void fetchReceivedZaps().then((r) => (received = r)).catch(() => {})
   })
+
+  async function loadReceivedHistory(): Promise<void> {
+    if (!isMe || !auth.canSign || receivedLoading) return
+    receivedLoading = true
+    receivedError = ''
+    try {
+      received = await fetchReceivedZaps()
+    } catch (error) {
+      receivedError = String((error as Error)?.message ?? error)
+    } finally {
+      receivedLoading = false
+    }
+  }
 
   // ── Create-club form (own profile only) ─────────────────────────────────
   let showClubCreate = $state(false)
@@ -475,10 +492,21 @@
     </a>
   {/if}
 
-  <!-- Who zapped you on Zapclub — NIP-98-authenticated and owner-only. -->
-  {#if isMe && received && received.bySender.length > 0}
+  <!-- Who zapped you on Zapclub — NIP-98-authenticated, owner-only and explicitly loaded. -->
+  {#if isMe && auth.canSign}
     <section class="card zaps-recv led-zone">
       <h2>⚡ Who zapped you <span class="count">private</span></h2>
+      {#if receivedLoading}
+        <p class="dim">Loading private zap history…</p>
+      {:else if receivedError}
+        <p class="err">{receivedError}</p>
+        <button class="btn btn-ghost btn-sm" onclick={loadReceivedHistory}>Try again</button>
+      {:else if !received}
+        <p class="dim">Loaded only on request; requires one signer confirmation.</p>
+        <button class="btn btn-ghost btn-sm" onclick={loadReceivedHistory}>Show zap history</button>
+      {:else if received.bySender.length === 0}
+        <p class="dim">No Zapclub zaps recorded yet.</p>
+      {:else}
       {#if !profile?.lud16}
         <p class="recv-note">
           🙏 No lightning address yet, so these sats went to <strong>zapclub</strong> — thank you!
@@ -509,6 +537,7 @@
           {/if}
         {/each}
       </ul>
+      {/if}
     </section>
   {/if}
 

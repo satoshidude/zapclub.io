@@ -36,8 +36,9 @@ account is required.
 ## Architecture
 
 ```text
-Browser (Svelte 5) ── NIP-07/46 ── Nostr signer
+Browser (Svelte 5) ── NIP-07/46 ── Nostr signer (AUTH + explicit actions)
         │
+        ├── page-local session key ── presence + stage leases
         ├── HTTPS/WSS ── Caddy ─┬── static frontend
         │                       ├── NIP-29 relay + playback conductor
         │                       └── LNURL / NIP-05 proxy
@@ -60,6 +61,13 @@ Telegram bot are small adapters without application state.
 Club metadata, stage state and playback are public. Chat, presence and the
 member roster require NIP-42 authentication and current club membership; that
 boundary also applies to history, direct event queries and live subscriptions.
+
+Automatic presence and stage leases are signed by an in-memory page-session
+key instead of repeatedly invoking the account signer. The relay accepts those
+two event kinds only on the WebSocket currently NIP-42-authenticated as the
+tagged main account, with fresh membership, ban, timestamp, rate and stage-cap
+checks. The session key is never persisted and has no authority for chat,
+queues, reactions, administration or any other event kind.
 
 Logged-out visitors use an ephemeral local key for schema- and rate-limited
 listener heartbeats. Individual heartbeats remain server-side; the relay
@@ -117,9 +125,9 @@ All club content carries an `h` tag. NIP-29 metadata is queried separately by
 |---|---|
 | `9000–9022`, `39000–39002` | NIP-29 administration, metadata, roles and members |
 | `30100`, `1313` | Relay-authored playback state and log |
-| `30101–30105` | Club configuration, stage, DJ queue, saved playlist and Auto DJ |
+| `30101–30105` | Club configuration, connection-bound stage lease, DJ queue, saved playlist and Auto DJ |
 | `30106`, `30107`, `30111`, `30112` | Stage kick, authorized skip, Auto DJ control and public member count |
-| `9`, `20100` | Member-only chat and ephemeral presence |
+| `9`, `20100` | Member-only chat and connection-bound ephemeral presence |
 | `20101–20104` | Zap broadcast, broken-track report, floor reaction and Vibemeter |
 | `20105`, `20106` | Anonymous listener heartbeat and relay-authored aggregate |
 | `30078` | Relay-signed DJ credibility snapshot |

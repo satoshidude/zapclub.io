@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest'
 import { KIND_MEMBER_COUNT, parseOwner, parseAdmins, selectClubMemberCounts, selectOnAirClubDjs, selectOnAirClubTracks, selectOnStageClubDjs } from './groups'
 import type { Event } from 'nostr-tools/pure'
 import { CLUB_RELAY_PUBKEY } from './pool'
+import { SESSION_EVENT_MARKER } from './sessionSigner'
 
 // Minimal 39001 admins event with given [pubkey, role] p-tags (in tag order).
 function adminsEvent(tags: Array<[string, string]>): Event {
@@ -145,23 +146,31 @@ describe('selectClubMemberCounts', () => {
 function stageEvent({
   club,
   dj,
+  principal,
   createdAt,
   since = createdAt,
   on = true,
+  id,
 }: {
   club: string
   dj: string
+  principal?: string
   createdAt: number
   since?: number
   on?: boolean
+  id?: string
 }): Event {
   return {
     kind: 30102,
-    tags: [['h', club], ['since', String(since)]],
+    tags: [
+      ['h', club],
+      ['since', String(since)],
+      ...(principal ? [['p', principal], ['client', SESSION_EVENT_MARKER]] : []),
+    ],
     content: on ? 'on' : 'off',
     created_at: createdAt,
     pubkey: dj,
-    id: `${club}-${dj}-${createdAt}`,
+    id: id ?? `${club}-${dj}-${createdAt}`,
     sig: 'x',
   } as Event
 }
@@ -189,5 +198,23 @@ describe('selectOnStageClubDjs', () => {
       stageEvent({ club: 'club-a', dj: 'first', createdAt: 1_980, since: 1_100 }),
     ]
     expect(selectOnStageClubDjs(events, ['club-a'], nowMs).get('club-a')).toBe('first')
+  })
+
+  it('deduplicates session-key events by their relay-bound principal', () => {
+    const principal = 'a'.repeat(64)
+    const events = [
+      stageEvent({ club: 'club-a', dj: 'b'.repeat(64), principal, createdAt: 1_980 }),
+      stageEvent({ club: 'club-a', dj: 'c'.repeat(64), principal, createdAt: 1_990, on: false }),
+    ]
+    expect(selectOnStageClubDjs(events, ['club-a'], nowMs)).toEqual(new Map())
+  })
+
+  it('uses the canonical lower id when replaceable events share a timestamp', () => {
+    const events = [
+      stageEvent({ club: 'club-a', dj: 'same', createdAt: 1_990, on: true, id: 'f'.repeat(64) }),
+      stageEvent({ club: 'club-a', dj: 'same', createdAt: 1_990, on: false, id: '0'.repeat(64) }),
+    ]
+    expect(selectOnStageClubDjs(events, ['club-a'], nowMs)).toEqual(new Map())
+    expect(selectOnStageClubDjs([...events].reverse(), ['club-a'], nowMs)).toEqual(new Map())
   })
 })

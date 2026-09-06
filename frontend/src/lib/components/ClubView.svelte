@@ -44,7 +44,7 @@
   import { ingestEmote, resetEmotes } from '../nostr/emotes.svelte'
   import { ingestMood, resetMood } from '../nostr/mood.svelte'
   import { ingestAutoDJ, ingestAutoCtrl, resetAutoDJ } from '../nostr/autodj.svelte'
-  import { presence, ingestPresence, startPresence, stopPresence, resetPresence } from '../nostr/presence.svelte'
+  import { presence, ingestPresence, startPresence, stopPresence } from '../nostr/presence.svelte'
   import { listeners, ingestListenerCount, startListening, stopListening } from '../nostr/listeners.svelte'
   import { resetZaps, ingestZapBroadcast, requestEntryInvoice, captureEntryReceipt } from '../nostr/zaps.svelte'
   import { showPay, markPaid } from '../nostr/payModal.svelte'
@@ -138,7 +138,7 @@
           void queryClubAuthed({ kinds: [KIND_MEMBERS], '#d': [id] }).then((events) => {
             const roster = events.find((event) => event.kind === KIND_MEMBERS)
             if (roster) members = parseMembers(roster)
-          })
+          }).catch(() => {})
         }
       },
       onAdmins: (ev) => {
@@ -161,7 +161,7 @@
           // Only self-eject if the kick is genuinely newer than our last stage heartbeat.
           // On page reload, seedMyStage() sets lastSeen=Date.now(), so any replayed stale
           // kick (created_at before this reload) won't trigger a false self-leave.
-          if (ev.created_at * 1000 > stage.rawLastSeen(me)) void leaveStage(id)
+          if (ev.created_at * 1000 > stage.rawLastSeen(me)) void leaveStage(id, 'automatic')
         }
       },
       onQueue: ingestQueue,
@@ -206,7 +206,6 @@
       resetEmotes()
       resetMood()
       resetZaps()
-      resetPresence()
       resetAutoDJ()
     }
   })
@@ -280,7 +279,7 @@
       forgetStage()
       return
     }
-    joinStage(groupId).catch((e) => {
+    joinStage(groupId, 'automatic').catch((e) => {
       // Rejected resume (e.g. stage filled up while we were away) — joinStage already
       // rolled the local state back; nothing to surface on a passive resume.
       console.log(`[zc:stage] resume rejected: ${String((e as Error)?.message ?? e)}`)

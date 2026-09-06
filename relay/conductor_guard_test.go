@@ -25,6 +25,8 @@ func TestIsForeignConductorWrite(t *testing.T) {
 		{"client listener count blocked", kindListenerCount, client, true},
 		{"relay member count ok", kindMemberCount, relay, false},
 		{"client member count blocked", kindMemberCount, client, true},
+		{"relay auto-dj control ok", kindAutoDJCtrl, relay, false},
+		{"client auto-dj control blocked", kindAutoDJCtrl, client, true},
 		{"client listener beat allowed", kindListenerBeat, client, false},
 		{"client stage allowed", kindStage, client, false},
 		{"client queue allowed", kindQueue, client, false},

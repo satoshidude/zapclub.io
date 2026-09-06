@@ -1,10 +1,26 @@
 package main
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestAdminMutationContextSurvivesRequestCancellation(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+	mutationCtx, cancelMutation := adminMutationContext(requestCtx)
+	defer cancelMutation()
+	select {
+	case <-mutationCtx.Done():
+		t.Fatalf("request cancellation leaked into durable admin mutation: %v", mutationCtx.Err())
+	default:
+	}
+}
 
 func TestBanStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "banned.json")
@@ -13,7 +29,9 @@ func TestBanStore(t *testing.T) {
 	if b.isBanned("pk1") {
 		t.Fatal("fresh store should have no bans")
 	}
-	b.ban("pk1", "spam")
+	if err := b.ban("pk1", "spam"); err != nil {
+		t.Fatal(err)
+	}
 	if !b.isBanned("pk1") {
 		t.Fatal("pk1 should be banned")
 	}
@@ -27,12 +45,78 @@ func TestBanStore(t *testing.T) {
 		t.Fatal("ban should persist across reload")
 	}
 
-	b.unban("pk1")
+	if err := b.unban("pk1"); err != nil {
+		t.Fatal(err)
+	}
 	if b.isBanned("pk1") {
 		t.Fatal("pk1 should be unbanned")
 	}
 	if newBanStore(path).isBanned("pk1") {
 		t.Fatal("unban should persist across reload")
+	}
+}
+
+func TestBanStorePersistenceFailureDoesNotChangeLiveState(t *testing.T) {
+	missingParent := filepath.Join(t.TempDir(), "missing", "banned.json")
+	b := newBanStore(missingParent)
+	if err := b.ban("pk1", "spam"); err == nil {
+		t.Fatal("ban should fail when its persistence directory is missing")
+	}
+	if b.isBanned("pk1") {
+		t.Fatal("failed durable ban changed the live ban map")
+	}
+
+	validPath := filepath.Join(t.TempDir(), "banned.json")
+	b = newBanStore(validPath)
+	if err := b.ban("pk1", "spam"); err != nil {
+		t.Fatal(err)
+	}
+	b.path = missingParent
+	if err := b.unban("pk1"); err == nil {
+		t.Fatal("unban should fail when persistence cannot be replaced")
+	}
+	if !b.isBanned("pk1") {
+		t.Fatal("failed durable unban removed the live ban")
+	}
+	if !newBanStore(validPath).isBanned("pk1") {
+		t.Fatal("failed durable unban changed the previously persisted ban")
+	}
+}
+
+func TestAdminBanPersistenceFailureReturnsErrorWithoutRevocation(t *testing.T) {
+	bans := newBanStore(filepath.Join(t.TempDir(), "missing", "banned.json"))
+	revoked := false
+	api := &adminAPI{bans: bans, onBan: func(string) { revoked = true }}
+	req := httptest.NewRequest(http.MethodPost, "/admin/ban", strings.NewReader(
+		`{"pubkey":"`+testMember+`","reason":"spam"}`,
+	))
+	response := httptest.NewRecorder()
+	api.ban(response, req)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Code)
+	}
+	if bans.isBanned(testMember) || revoked {
+		t.Fatal("failed durable ban must neither activate nor run revocation callbacks")
+	}
+}
+
+func TestAdminUnbanPersistenceFailureKeepsBan(t *testing.T) {
+	bans := newBanStore(filepath.Join(t.TempDir(), "banned.json"))
+	if err := bans.ban(testMember, "spam"); err != nil {
+		t.Fatal(err)
+	}
+	bans.path = filepath.Join(t.TempDir(), "missing", "banned.json")
+	api := &adminAPI{bans: bans}
+	req := httptest.NewRequest(http.MethodPost, "/admin/unban", strings.NewReader(
+		`{"pubkey":"`+testMember+`"}`,
+	))
+	response := httptest.NewRecorder()
+	api.unban(response, req)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Code)
+	}
+	if !bans.isBanned(testMember) {
+		t.Fatal("failed durable unban must retain the active ban")
 	}
 }
 

@@ -145,3 +145,102 @@ func TestStageGateRejectsAutoDJArmWhenRealStageIsFull(t *testing.T) {
 		t.Fatalf("Auto DJ arm on full stage: reject=%v reason=%q", reject, reason)
 	}
 }
+
+func TestStageGateUsesSessionEffectivePrincipal(t *testing.T) {
+	principal, _ := nostr.GetPublicKey(nostr.GeneratePrivateKey())
+	var countedAs string
+	g := &stageGate{countFn: func(_ string, sender string) (int, bool) {
+		countedAs = sender
+		return 2, true
+	}}
+	event := signedSessionTestEvent(t, principal, kindStage, nostr.Now(), nil)
+	if rejected, reason := g.reject(context.Background(), event); rejected {
+		t.Fatalf("existing principal's session-key heartbeat rejected: %s", reason)
+	}
+	if countedAs != principal {
+		t.Fatalf("stage gate counted %q, want principal %q", countedAs, principal)
+	}
+}
+
+func TestStageGateOnlyReservingEventCanReleasePendingJoin(t *testing.T) {
+	g := &stageGate{countFn: func(_ string, _ string) (int, bool) { return 2, false }}
+	event := func(id, pubkey, content string) *nostr.Event {
+		return &nostr.Event{
+			ID: id, Kind: kindStage, PubKey: pubkey, Content: content,
+			Tags: nostr.Tags{{"h", "club"}},
+		}
+	}
+	joinA := event("join-a", "a", "on")
+	if rejected, reason := g.reject(context.Background(), joinA); rejected {
+		t.Fatalf("initial final-slot join rejected: %s", reason)
+	}
+
+	offA := event("off-a", "a", "off")
+	if rejected, reason := g.reject(context.Background(), offA); rejected {
+		t.Fatalf("overlapping off event rejected: %s", reason)
+	}
+	g.observe(context.Background(), offA)
+	joinB := event("join-b", "b", "on")
+	if rejected, reason := g.reject(context.Background(), joinB); !rejected || reason != "restricted: stage is full" {
+		t.Fatalf("off event released another event's reservation: reject=%v reason=%q", rejected, reason)
+	}
+
+	duplicateA := event("join-a-duplicate", "a", "on")
+	if rejected, reason := g.reject(context.Background(), duplicateA); rejected {
+		t.Fatalf("duplicate in-flight join rejected: %s", reason)
+	}
+	g.observe(context.Background(), duplicateA)
+	if rejected, reason := g.reject(context.Background(), joinB); !rejected || reason != "restricted: stage is full" {
+		t.Fatalf("duplicate join released another event's reservation: reject=%v reason=%q", rejected, reason)
+	}
+
+	g.observe(context.Background(), joinA)
+	if rejected, reason := g.reject(context.Background(), joinB); rejected {
+		t.Fatalf("reserving event did not release final slot: %s", reason)
+	}
+}
+
+func TestStageGateOnlyReservingEventCanReleasePendingAutoDJArm(t *testing.T) {
+	g := &stageGate{
+		countFn:      func(_ string, _ string) (int, bool) { return 2, false },
+		autoActiveFn: func(string) bool { return false },
+	}
+	auto := func(id, status string, tracks bool) *nostr.Event {
+		tags := nostr.Tags{{"h", "club"}, {"status", status}}
+		if tracks {
+			tags = append(tags, nostr.Tag{"track", "yt:one", "One", "120"})
+		}
+		return &nostr.Event{ID: id, Kind: kindAutoDJ, PubKey: "owner", Tags: tags, Content: "playlist"}
+	}
+	arm := auto("arm", "armed", true)
+	if rejected, reason := g.reject(context.Background(), arm); rejected {
+		t.Fatalf("initial final-slot Auto DJ arm rejected: %s", reason)
+	}
+
+	disarm := auto("disarm", "off", false)
+	if rejected, reason := g.reject(context.Background(), disarm); rejected {
+		t.Fatalf("overlapping disarm rejected: %s", reason)
+	}
+	g.observe(context.Background(), disarm)
+	join := &nostr.Event{
+		ID: "join", Kind: kindStage, PubKey: "dj", Content: "on",
+		Tags: nostr.Tags{{"h", "club"}},
+	}
+	if rejected, reason := g.reject(context.Background(), join); !rejected || reason != "restricted: stage is full" {
+		t.Fatalf("disarm released another event's reservation: reject=%v reason=%q", rejected, reason)
+	}
+
+	replacement := auto("replacement", "armed", true)
+	if rejected, reason := g.reject(context.Background(), replacement); rejected {
+		t.Fatalf("duplicate in-flight Auto DJ arm rejected: %s", reason)
+	}
+	g.observe(context.Background(), replacement)
+	if rejected, reason := g.reject(context.Background(), join); !rejected || reason != "restricted: stage is full" {
+		t.Fatalf("config replacement released another event's reservation: reject=%v reason=%q", rejected, reason)
+	}
+
+	g.observe(context.Background(), arm)
+	if rejected, reason := g.reject(context.Background(), join); rejected {
+		t.Fatalf("reserving Auto DJ event did not release final slot: %s", reason)
+	}
+}

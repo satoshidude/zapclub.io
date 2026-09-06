@@ -28,3 +28,19 @@ func TestMoodLimiterSharesOneTenSecondBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionKeysSharePrincipalRateLimit(t *testing.T) {
+	principal, _ := nostr.GetPublicKey(nostr.GeneratePrivateKey())
+	limiter := newKindLimiter(1, 0, "wait", kindPresence)
+	first := signedSessionTestEvent(t, principal, kindPresence, nostr.Now(), nil)
+	second := signedSessionTestEvent(t, principal, kindPresence, nostr.Now(), nil)
+	if rejected, _ := limiter.reject(context.Background(), first); rejected {
+		t.Fatal("first session key must receive the principal's token")
+	}
+	if rejected, _ := limiter.reject(context.Background(), second); !rejected {
+		t.Fatal("rotating the session key bypassed the principal rate limit")
+	}
+	if len(limiter.buckets) != 1 {
+		t.Fatalf("rate limiter created %d buckets, want one principal bucket", len(limiter.buckets))
+	}
+}

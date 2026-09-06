@@ -7,17 +7,33 @@ import {
   NostrConnectAccount,
   registerCommonAccountTypes,
 } from 'applesauce-accounts/accounts'
-import { NostrConnectSigner } from 'applesauce-signers'
+import { ExtensionSigner, NostrConnectSigner } from 'applesauce-signers'
 import { RelayPool } from 'applesauce-relay'
-import { auth, setLoggedIn, setLoggedOut, setProfile, setProfileLoading } from './auth.svelte'
-import { fetchProfile } from './pool'
+import {
+  auth,
+  setLoggedIn,
+  setLoggedOut,
+  setProfile,
+  setProfileLoading,
+  setSignerReady,
+} from './auth.svelte'
+import { closeClubRelay, fetchProfile } from './pool'
 import { goHome } from '../router.svelte'
 import { openLoginDialog, closeLoginDialog } from './loginDialog.svelte'
 import { resetSync } from './sync.svelte'
 import { resetStage, leaveStage } from './stage.svelte'
+import { resetPresence } from './presence.svelte'
 import { resetQueues } from './queue.svelte'
 import { resetPlaylists } from './playlists.svelte'
 import { resetZaps } from './zaps.svelte'
+import { resetSessionSigner } from './sessionSigner'
+import { resetClubAuthState } from './groups'
+import { handoffSuccessfulNip07Login, resetAccountWatchState } from './accountWatch.svelte'
+import {
+  recordLogicalSignRequest,
+  recordNip07GetPublicKeyCall,
+  recordPhysicalSignEventCall,
+} from './signingDiagnostics'
 import type { LoginMethod } from './types'
 
 // ── applesauce: account manager + signer wiring ─────────────────────────────
@@ -33,6 +49,33 @@ NostrConnectSigner.publishMethod = (relays, event) => nip46Pool.publish(relays, 
 // own relays. Widely supported NIP-46 relay.
 const NIP46_RELAY = 'wss://relay.nsec.app'
 
+/**
+ * Exact set of event kinds the browser can ask a remote signer to sign. Keeping this
+ * allowlist in one place prevents restored bunker sessions and nostrconnect:// sessions
+ * from silently falling back to a permission prompt for every background event.
+ */
+export const NIP46_SIGNING_KINDS = [
+  0, // profile metadata
+  1, // public share note
+  5, // delete reaction / playlist
+  7, // reaction
+  9, // group chat
+  9000, 9001, 9002, 9007, 9021, 9022, // NIP-29 membership and administration
+  9734, // zap request
+  20101, 20102, 20103, 20104, // live club interactions signed by the account key
+  22242, // NIP-42 relay authentication
+  24242, // Blossom authorization
+  27235, // NIP-98 HTTP authorization
+  30101, 30103, 30104, 30105, 30106, 30107, // persistent club state owned by users
+] as const
+
+export const NIP46_PERMISSIONS = NostrConnectSigner.buildSigningPermissions([
+  ...NIP46_SIGNING_KINDS,
+])
+
+const NIP46_CONNECT_TIMEOUT_MS = 15_000
+const SIGN_EVENT_TIMEOUT_MS = 30_000
+
 const manager = new AccountManager()
 registerCommonAccountTypes(manager)
 
@@ -40,9 +83,16 @@ registerCommonAccountTypes(manager)
 function resetSession(): void {
   resetSync()
   resetStage()
+  resetPresence()
   resetQueues()
   resetPlaylists()
   resetZaps()
+  resetAccountWatchState()
+  resetSessionSigner()
+  resetClubAuthState()
+  // NIP-42 authentication belongs to one WebSocket connection. Never let a socket
+  // authenticated as the previous account survive logout or an account switch.
+  closeClubRelay()
   goHome()
 }
 
@@ -126,7 +176,9 @@ export function initAuth(): void {
   //    this prevents the iOS-Safari reload-logout even if the applesauce restore lags.
   const lite = readLite()
   if (lite) {
-    setLoggedIn(lite.pubkey, lite.method)
+    // A lite session proves identity only. Writes stay disabled until its account signer
+    // has actually been restored and initialized below.
+    setLoggedIn(lite.pubkey, lite.method, false)
     void loadProfile(lite.pubkey)
   }
 
@@ -140,10 +192,6 @@ export function initAuth(): void {
       const want = active ?? lite?.pubkey ?? null
       const acc = (want && manager.accounts.find((a) => a.pubkey === want)) || manager.accounts[0]
       if (acc) manager.setActive(acc)
-      // Wake the bunker IMMEDIATELY: a restored NIP-46 signer can only sign after a
-      // connect() round-trip. Without this the first sign after reload hangs until
-      // timeout. Connect proactively in the background.
-      warmSigner()
     }
   } catch (e) {
     console.warn('[auth] restore failed', e)
@@ -152,6 +200,7 @@ export function initAuth(): void {
   // 3. Mirror the active account → app state.
   manager.active$.subscribe((acc) => {
     if (!acc) {
+      setSignerReady(false)
       // Empty-init / failed restore is NOT a logout — otherwise you'd get kicked on
       // reload. Only a user-triggered logout (flag) counts.
       if (intentionalLogout) {
@@ -164,9 +213,15 @@ export function initAuth(): void {
       return
     }
     if (auth.pubkey && auth.pubkey !== acc.pubkey) resetSession()
-    setLoggedIn(acc.pubkey, methodOf(acc.type))
+    const ready = !(acc.signer instanceof NostrConnectSigner) || acc.signer.isConnected
+    setLoggedIn(acc.pubkey, methodOf(acc.type), ready)
     writeLite(acc.pubkey, methodOf(acc.type))
     void loadProfile(acc.pubkey)
+    if (!ready) {
+      // Restore starts eagerly, while ensureSignerReady() below shares this exact
+      // connection with the first operation instead of opening another one.
+      void ensureSignerReady(acc, false).catch((e) => console.warn('[auth] bunker connect failed', e))
+    }
     persist()
   })
   // Persist when the account list changes.
@@ -174,6 +229,10 @@ export function initAuth(): void {
 }
 
 // ── Login actions (called from LoginDialog.svelte) ──────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /** Waits for a NIP-07 provider to appear. Safari extensions (Nostash) inject `window.nostr`
  *  LATE — after page load and often only once the user grants the extension access to the
@@ -194,9 +253,13 @@ async function waitForNostr(ms = 4000): Promise<void> {
  *  (Safari/Nostash) before reading the key. */
 export async function loginExtension(): Promise<void> {
   await waitForNostr()
-  const acc = await ExtensionAccount.fromExtension()
+  const signer = new ExtensionSigner()
+  recordNip07GetPublicKeyCall('nostrLogin')
+  const pubkey = await signer.getPublicKey()
+  const acc = new ExtensionAccount(pubkey, signer)
   manager.addAccount(acc)
   manager.setActive(acc)
+  handoffSuccessfulNip07Login(pubkey)
   closeLoginDialog()
 }
 
@@ -221,7 +284,7 @@ export function loginNsec(nsec: string): void {
 /** NIP-46 bunker via a `bunker://` string. */
 export async function loginBunker(uri: string): Promise<void> {
   const signer = await NostrConnectSigner.fromBunkerURI(uri.trim(), {
-    permissions: NostrConnectSigner.buildSigningPermissions([0, 1, 9, 9002, 9007, 9021, 9022]),
+    permissions: [...NIP46_PERMISSIONS],
   })
   const pubkey = await signer.getPublicKey()
   const acc = new NostrConnectAccount(pubkey, signer)
@@ -236,7 +299,7 @@ export async function loginBunker(uri: string): Promise<void> {
  */
 export function startNostrConnect(): { uri: string; signer: NostrConnectSigner; done: Promise<void> } {
   const signer = new NostrConnectSigner({ relays: [NIP46_RELAY] })
-  const uri = signer.getNostrConnectURI({ name: 'zapclub' })
+  const uri = signer.getNostrConnectURI({ name: 'zapclub', permissions: [...NIP46_PERMISSIONS] })
   const done = signer.waitForSigner().then(async () => {
     const pubkey = await signer.getPublicKey()
     const acc = new NostrConnectAccount(pubkey, signer)
@@ -265,7 +328,7 @@ export async function logout(): Promise<void> {
   clearLite()
   // Step off the stage WHILE the signer is still alive: removeAccount tears the signer down,
   // after which resetStage's best-effort `off` can't sign — the DJ would stay stuck on stage
-  // for the full ~1h sticky window. Bounded so a hung NIP-46 bunker can't block logout.
+  // for the full 5-minute stage lease. Bounded so a hung NIP-46 bunker can't block logout.
   await withTimeout(leaveStage(), 3000, 'logout: leave stage').catch(() => {})
   const acc = manager.active
   if (acc) manager.removeAccount(acc) // active$ → setLoggedOut + resetSession
@@ -273,10 +336,6 @@ export async function logout(): Promise<void> {
     setLoggedOut()
     resetSession()
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
 }
 
 /** Promise with a hard timeout — keeps a NIP-46 signer without an answer from hanging
@@ -297,34 +356,200 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   })
 }
 
-/** Connect a restored bunker signer in the background (idempotent). */
-function warmSigner(): void {
-  const signer = manager.active?.signer
-  if (signer instanceof NostrConnectSigner && !signer.isConnected) {
-    withTimeout(signer.connect(), 15_000, 'bunker connect')
-      .then(() => console.log('[auth] bunker connected'))
-      .catch((e) => console.warn('[auth] bunker connect failed', e))
+type ManagedAccount = NonNullable<ReturnType<typeof manager.getActive>>
+
+type Nip46FlightStatus = 'pending' | 'timed-out' | 'failed' | 'succeeded'
+interface Nip46ConnectionFlight {
+  generation: number
+  status: Nip46FlightStatus
+  promise: Promise<void>
+}
+
+// A failed/timed-out raw request stays latched. Only a later explicit signer operation may
+// replace the signer instance and open one new flight; background warm-up/AUTH never retries it.
+const nip46ConnectionFlights = new WeakMap<NostrConnectSigner, Nip46ConnectionFlight>()
+const nip46ConnectionGenerations = new WeakMap<NostrConnectSigner, number>()
+
+function currentNip46Flight(signer: NostrConnectSigner, flight: Nip46ConnectionFlight): boolean {
+  return nip46ConnectionFlights.get(signer) === flight
+    && nip46ConnectionGenerations.get(signer) === flight.generation
+}
+
+function activeSignerMatches(account: ManagedAccount, signer: NostrConnectSigner): boolean {
+  return manager.active?.id === account.id && account.signer === signer
+}
+
+function startNip46Connection(
+  account: ManagedAccount,
+  signer: NostrConnectSigner,
+  afterClose?: Promise<void>,
+): Nip46ConnectionFlight {
+  const generation = (nip46ConnectionGenerations.get(signer) ?? 0) + 1
+  nip46ConnectionGenerations.set(signer, generation)
+  const flight: Nip46ConnectionFlight = {
+    generation,
+    status: 'pending',
+    promise: Promise.resolve(),
+  }
+  const connect = afterClose
+    ? afterClose.then(() => signer.connect(undefined, [...NIP46_PERMISSIONS]))
+    : signer.connect(undefined, [...NIP46_PERMISSIONS])
+  flight.promise = connect
+    .then(
+      () => {
+        // A timed-out or replaced flight may still complete inside applesauce. It must never
+        // make the current account ready; only the current, still-pending generation may do so.
+        if (!currentNip46Flight(signer, flight) || flight.status !== 'pending') return
+        flight.status = 'succeeded'
+        nip46ConnectionFlights.delete(signer)
+        if (activeSignerMatches(account, signer)) {
+          setSignerReady(true)
+          console.log('[auth] bunker connected')
+        }
+      },
+      (error) => {
+        if (currentNip46Flight(signer, flight) && flight.status === 'pending') {
+          flight.status = 'failed'
+          if (activeSignerMatches(account, signer)) setSignerReady(false)
+        }
+        throw error
+      },
+    )
+  nip46ConnectionFlights.set(signer, flight)
+  // Warm-up deliberately does not own the lifetime of the raw promise.
+  void flight.promise.catch(() => {})
+  return flight
+}
+
+function restartNip46Connection(
+  account: ManagedAccount,
+  staleSigner: NostrConnectSigner,
+): Nip46ConnectionFlight {
+  nip46ConnectionFlights.delete(staleSigner)
+  nip46ConnectionGenerations.set(staleSigner, (nip46ConnectionGenerations.get(staleSigner) ?? 0) + 1)
+  const close = staleSigner.close()
+
+  // applesauce close() does not clear its pending request map. Reusing that instance would let
+  // a late old response mutate the new connection, so explicit recovery gets a fresh instance
+  // with the same client key and connection metadata.
+  const signer = new NostrConnectSigner({
+    relays: [...staleSigner.relays],
+    remote: staleSigner.remote,
+    pubkey: account.pubkey,
+    signer: staleSigner.signer,
+    onAuth: staleSigner.onAuth,
+  })
+  account.signer = signer
+  if (manager.active?.id === account.id) setSignerReady(false)
+  return startNip46Connection(account, signer, close)
+}
+
+async function ensureSignerReady(account: ManagedAccount, allowExplicitReconnect: boolean): Promise<void> {
+  let signer = account.signer
+  if (!(signer instanceof NostrConnectSigner)) {
+    if (manager.active?.id === account.id) setSignerReady(true)
+    return
+  }
+
+  let flight = nip46ConnectionFlights.get(signer)
+  if (flight && (flight.status === 'timed-out' || flight.status === 'failed')) {
+    if (!allowExplicitReconnect) {
+      throw new Error('Bunker reconnect requires an explicit user action')
+    }
+    flight = restartNip46Connection(account, signer)
+    signer = account.signer as NostrConnectSigner
+  }
+
+  if (!flight && signer.isConnected) {
+    if (manager.active?.id === account.id) setSignerReady(true)
+    return
+  }
+
+  if (manager.active?.id === account.id) setSignerReady(false)
+  if (!flight) flight = startNip46Connection(account, signer)
+
+  try {
+    await withTimeout(flight.promise, NIP46_CONNECT_TIMEOUT_MS, 'bunker connect')
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.message.includes('timeout')
+      && currentNip46Flight(signer, flight)
+      && flight.status === 'pending'
+    ) {
+      flight.status = 'timed-out'
+      if (activeSignerMatches(account, signer)) setSignerReady(false)
+    }
+    throw error
+  }
+  if (manager.active?.id !== account.id) throw new Error('Active signer changed while connecting')
+}
+
+export type SignerFailureCode = 'timeout' | 'rejected' | 'unavailable' | 'invalid' | 'failed'
+
+export class SignerOperationError extends Error {
+  constructor(
+    public readonly code: SignerFailureCode,
+    message: string,
+    cause?: unknown,
+  ) {
+    super(message, { cause })
+    this.name = 'SignerOperationError'
   }
 }
 
-/**
- * Signs via the active account. Two failure modes are handled:
- *  – Extension on Safari (window.nostr injected late) → quick retry.
- *  – NIP-46 bunker that must connect first after reload → the first sign triggers the
- *    connect() round-trip; a generous timeout per attempt, else it would hang forever.
- */
-export async function signEvent(template: EventTemplate): Promise<Event> {
-  if (!manager.active) throw new Error('No signer available — please sign in again.')
-  let lastErr: unknown
-  for (let i = 0; i < 4; i++) {
-    try {
-      return (await withTimeout(manager.signer.signEvent(template), 12_000, 'signEvent')) as Event
-    } catch (e) {
-      lastErr = e
-      await sleep(300)
-    }
+function classifySignerError(error: unknown): SignerOperationError {
+  if (error instanceof SignerOperationError) return error
+  const detail = error instanceof Error ? error.message : String(error)
+  const normalized = detail.toLowerCase()
+
+  if (normalized.includes('timeout')) {
+    return new SignerOperationError(
+      'timeout',
+      'The signer did not answer in time. The request was not repeated.',
+      error,
+    )
   }
-  throw lastErr instanceof Error ? lastErr : new Error('Signing failed')
+  if (/reject|denied|declin|cancel/.test(normalized)) {
+    return new SignerOperationError('rejected', 'Signing was rejected in the signer.', error)
+  }
+  if (/no signer|no active|active signer changed|missing signer|extension missing|not connected|disconnect|closed|network/.test(normalized)) {
+    return new SignerOperationError('unavailable', 'The signer is unavailable. Reconnect it and try again.', error)
+  }
+  if (/invalid event|wrong pubkey|mismatch|modified event/.test(normalized)) {
+    return new SignerOperationError('invalid', 'The signer returned an invalid event or a different account.', error)
+  }
+  return new SignerOperationError('failed', `Signing failed: ${detail}`, error)
+}
+
+/** Signs once via the active account. A timed-out request may still complete remotely, so it
+ * is never retried automatically; only a later explicit application action can try again. */
+export async function signEvent(
+  template: EventTemplate,
+  options: { allowNip46Reconnect?: boolean } = {},
+): Promise<Event> {
+  recordLogicalSignRequest(template, 'nostrLogin')
+  const account = manager.active
+  if (!account) {
+    throw new SignerOperationError('unavailable', 'No signer available — please sign in again.')
+  }
+
+  try {
+    await ensureSignerReady(account, options.allowNip46Reconnect !== false)
+    if (manager.active?.id !== account.id) throw new Error('Active signer changed before signing')
+    recordPhysicalSignEventCall(template, 'nostrLogin')
+    const signed = (await withTimeout(
+      manager.signer.signEvent(template),
+      SIGN_EVENT_TIMEOUT_MS,
+      'signEvent',
+    )) as Event
+    if (signed.pubkey !== account.pubkey) {
+      throw new Error('Signer returned an event for the wrong pubkey')
+    }
+    return signed
+  } catch (error) {
+    throw classifySignerError(error)
+  }
 }
 
 /**
@@ -333,7 +558,10 @@ export async function signEvent(template: EventTemplate): Promise<Event> {
  * Throws if the active signer doesn't support NIP-44 (old extensions).
  */
 export async function nip44EncryptSelf(plaintext: string): Promise<string> {
-  if (!manager.signer || !auth.pubkey) throw new Error('Not signed in')
+  const account = manager.active
+  if (!account || !auth.pubkey) throw new Error('Not signed in')
+  await ensureSignerReady(account, true)
+  if (manager.active?.id !== account.id) throw new Error('Active signer changed before encryption')
   const n44 = manager.signer.nip44
   if (!n44) throw new Error('Signer does not support NIP-44 encryption')
   return await withTimeout(n44.encrypt(auth.pubkey, plaintext), 10_000, 'nip44Encrypt')
@@ -343,7 +571,10 @@ export async function nip44EncryptSelf(plaintext: string): Promise<string> {
  * NIP-44 self-decryption: decrypt ciphertext that was encrypted to own pubkey.
  */
 export async function nip44DecryptSelf(ciphertext: string): Promise<string> {
-  if (!manager.signer || !auth.pubkey) throw new Error('Not signed in')
+  const account = manager.active
+  if (!account || !auth.pubkey) throw new Error('Not signed in')
+  await ensureSignerReady(account, true)
+  if (manager.active?.id !== account.id) throw new Error('Active signer changed before decryption')
   const n44 = manager.signer.nip44
   if (!n44) throw new Error('Signer does not support NIP-44 decryption')
   return await withTimeout(n44.decrypt(auth.pubkey, ciphertext), 10_000, 'nip44Decrypt')

@@ -1,10 +1,10 @@
 import type { Event } from 'nostr-tools/pure'
 import { KIND_QUEUE, publishClub, fetchClubQueues } from './groups'
 import { auth } from './auth.svelte'
-import { enrichTitles } from '../player/youtube'
 import { isValidVideoId } from '../util'
 import { CLUB_RELAY_PUBKEY } from './pool'
 import type { DjQueue, QueueTrack } from './types'
+import { withSigningTrigger } from './signingDiagnostics'
 
 const state = $state<{ byDj: Record<string, DjQueue> }>({ byDj: {} })
 
@@ -138,61 +138,41 @@ async function publishMyQueue(groupId: string, tracks: QueueTrack[]): Promise<vo
   if (!me) return
   // Apply locally right away (optimistic), then publish.
   state.byDj[me] = { dj: me, tracks, updatedAt: Math.floor(Date.now() / 1000) }
-  await publishClub({
-    kind: KIND_QUEUE,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['h', groupId],
-      ['d', groupId],
-      ...tracks.map((t) => {
-        const base = ['track', `yt:${t.videoId}`, t.title, String(t.duration)]
-        // 6th element = custom cover; needs the 5th (off|'') as a placeholder to keep position.
-        if (t.image) return [...base, t.active === false ? 'off' : '', t.image]
-        return t.active === false ? [...base, 'off'] : base
-      }),
-    ],
-    content: '',
-  })
+  const template = withSigningTrigger(
+    {
+      kind: KIND_QUEUE,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['h', groupId],
+        ['d', groupId],
+        ...tracks.map((t) => {
+          const base = ['track', `yt:${t.videoId}`, t.title, String(t.duration)]
+          // 6th element = custom cover; needs the 5th (off|'') as a placeholder to keep position.
+          if (t.image) return [...base, t.active === false ? 'off' : '', t.image]
+          return t.active === false ? [...base, 'off'] : base
+        }),
+      ],
+      content: '',
+    },
+    'queue-user-action',
+  )
+  await publishClub(template)
 }
 
-/**
- * Folds the artist into one of MY tracks' titles ("Artist - Title") and republishes — so a
- * channel-derived artist (learned from the YouTube embed when the track plays) PERSISTS and
- * shows in the Live Set, "Up next", and saved playlists, not just live in the now-playing card.
- * No-op unless the track is mine and its title is still bare (no spaced dash) — never clobbers a
- * title that already carries an artist.
- */
+/** Apply player-discovered metadata locally. Automatic playback callbacks must never republish
+ * the durable queue (and therefore ask the user's signer) without an explicit queue action. */
 export function enrichMyTrackTitle(groupId: string, videoId: string, title: string): Promise<void> {
+  void groupId
+  const me = auth.pubkey
+  if (!me) return Promise.resolve()
   const tracks = myTracks()
   const idx = tracks.findIndex((t) => t.videoId === videoId)
   if (idx < 0 || tracks[idx].title === title || / [–—-] /.test(tracks[idx].title)) return Promise.resolve()
-  return publishMyQueue(groupId, tracks.map((t, i) => (i === idx ? { ...t, title } : t)))
-}
-
-/**
- * Backfills MY queue's BARE titles (no "Artist - Title" yet) with the interpreter — resolved via
- * the relay's oEmbed channel lookup (one batch, not bot-gated). One republish for all changes.
- * So the Live Set / saved playlists show the artist like the card, not just played/new tracks.
- */
-export async function enrichQueueTitles(groupId: string): Promise<void> {
-  const me = auth.pubkey
-  if (!me) return
-  const tracks = state.byDj[me]?.tracks
-  if (!tracks?.length) return
-  const bare = tracks.filter((t) => !/ [–—-] /.test(t.title)).map((t) => t.videoId).slice(0, 40)
-  if (bare.length === 0) return
-  const map = await enrichTitles(bare)
-  let changed = false
-  const next = tracks.map((t) => {
-    const nt = map[t.videoId]
-    // Only adopt a resolved title that actually adds an artist (a spaced dash) and differs.
-    if (nt && nt !== t.title && / [–—-] /.test(nt)) {
-      changed = true
-      return { ...t, title: nt }
-    }
-    return t
-  })
-  if (changed) await publishMyQueue(groupId, next)
+  state.byDj[me] = {
+    ...state.byDj[me],
+    tracks: tracks.map((t, i) => (i === idx ? { ...t, title } : t)),
+  }
+  return Promise.resolve()
 }
 
 /** Edits a track's title (by videoId) in MY queue + republishes (only on a real change). */
@@ -205,16 +185,22 @@ export function setTrackTitle(groupId: string, videoId: string, title: string): 
 }
 
 /**
- * Backfills MY track's duration (learned from the YouTube player when it plays) when it's still
- * 0/unknown, and republishes — so the length shows in the Live Set / saved playlists and the
- * relay's now_playing carries it. Only fills a missing duration; never overwrites a known one.
+ * Backfills MY track's duration locally when the player discovers it. Persistence remains tied
+ * to the next explicit queue edit, so playback itself never invokes the user's signer.
  */
 export function enrichMyTrackDuration(groupId: string, videoId: string, duration: number): Promise<void> {
+  void groupId
   if (duration <= 0) return Promise.resolve()
+  const me = auth.pubkey
+  if (!me) return Promise.resolve()
   const tracks = myTracks()
   const idx = tracks.findIndex((t) => t.videoId === videoId)
   if (idx < 0 || tracks[idx].duration > 0) return Promise.resolve()
-  return publishMyQueue(groupId, tracks.map((t, i) => (i === idx ? { ...t, duration } : t)))
+  state.byDj[me] = {
+    ...state.byDj[me],
+    tracks: tracks.map((t, i) => (i === idx ? { ...t, duration } : t)),
+  }
+  return Promise.resolve()
 }
 
 /** Sets/clears a track's custom cover image (by videoId) in MY queue + republishes (on change). */
@@ -232,36 +218,6 @@ export function setTrackActive(groupId: string, videoId: string, active: boolean
   if (idx < 0 || (tracks[idx].active !== false) === active) return Promise.resolve()
   const next = tracks.map((t, i) => (i === idx ? { ...t, active } : t))
   return publishMyQueue(groupId, next)
-}
-
-/**
- * Marks MY currently-playing track as played (off) — reliably, even when my club queue isn't
- * resident (I navigated away while staying sticky on stage): falls back to fetch-modify-
- * publish. Idempotent: no-op if already off or the track isn't in my queue. This is the
- * single source of truth for "played" (the round-robin scans from the top and skips `off`),
- * so it must run regardless of whether the club view is mounted — hence driven by the
- * persistent mini-player layer, not a club-view effect.
- */
-export async function markMyTrackPlayed(groupId: string, videoId: string): Promise<void> {
-  const me = auth.pubkey
-  if (!me) return
-  let tracks = state.byDj[me]?.tracks
-  if (!tracks) {
-    // Not resident → fetch my own queue for this club.
-    const events = await fetchClubQueues(groupId)
-    const mine = events
-      .filter((e) => e.pubkey === me)
-      .sort((a, b) => b.created_at - a.created_at)[0]
-    if (!mine) return
-    tracks = parseTracks(mine)
-    state.byDj[me] = { dj: me, tracks, updatedAt: mine.created_at }
-  }
-  const idx = tracks.findIndex((t) => t.videoId === videoId)
-  if (idx < 0 || tracks[idx].active === false) return // gone or already off
-  await publishMyQueue(
-    groupId,
-    tracks.map((t, i) => (i === idx ? { ...t, active: false } : t)),
-  )
 }
 
 /**

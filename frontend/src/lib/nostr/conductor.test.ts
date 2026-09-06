@@ -19,9 +19,9 @@ describe('selectActiveDjs', () => {
     expect(selectActiveDjs(djs, {}, NOW).map((d) => d.pubkey)).toEqual(['a'])
   })
 
-  it('drops stale DJs (no heartbeat within 1h) — the 72-min-DJ from the repro', () => {
+  it('drops stale DJs (no heartbeat within 5 min) — the 6-min-DJ from the repro', () => {
     const djs = { fresh: dj(100, 60_000), stale: dj(50, STALE_MS + 60_000) }
-    // `stale` joined earliest but hasn't been seen in >1h → excluded.
+    // `stale` joined earliest but hasn't been seen in >5 min → excluded.
     expect(selectActiveDjs(djs, {}, NOW).map((d) => d.pubkey)).toEqual(['fresh'])
   })
 

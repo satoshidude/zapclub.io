@@ -2,7 +2,7 @@ import type { Event } from 'nostr-tools/pure'
 import { KIND_SKIP, publishClub, reportBrokenTrack } from './groups'
 import { auth } from './auth.svelte'
 import { stage } from './stage.svelte'
-import { queues, markMyTrackPlayed } from './queue.svelte'
+import { queues } from './queue.svelte'
 import { fairSequence } from './roundrobin'
 import { presence } from './presence.svelte'
 import { isValidVideoId } from '../util'
@@ -29,6 +29,7 @@ interface SyncState {
 }
 
 const state = $state<SyncState>({ np: null, offsetMs: 0, now: Date.now() })
+let reportedTrackErrorKey: string | null = null
 
 // Reactive clock: without incoming events, `live` must still flip to the lobby once the relay
 // goes silent. A plain Date.now() in the getter wouldn't be reactive.
@@ -101,13 +102,12 @@ export function ingestNowPlaying(ev: Event, clubId: string): void {
     console.log(`[zc:sync] drop old np sentAt=${np.sentAt} cur=${state.np.sentAt} track=${np.videoId}`)
     return
   }
-  // When the track changes and the previous DJ was me, mark that track as played (off).
-  // This is what keeps the round-robin moving — without marking off, the conductor always
-  // sees the same track as "first active" and replays it every other round.
-  const prev = state.np
-  const me = auth.pubkey
-  if (prev && me && prev.dj === me && prev.pos !== np.pos && clubId) {
-    void markMyTrackPlayed(clubId, prev.videoId)
+  // The relay conductor marks the settled track off before broadcasting the new position.
+  // Mirroring that authoritative transition from the browser would create a redundant queue
+  // signature (and can race the relay-authored queue event).
+  const previous = state.np
+  if (previous && (previous.videoId !== np.videoId || previous.pos !== np.pos)) {
+    reportedTrackErrorKey = null
   }
   if (np.sentAt > 0) state.offsetMs = np.sentAt - Date.now()
   console.log(`[zc:sync] now_playing: ${np.videoId} pos=${np.pos} status=${np.status} offset=${Math.round(state.offsetMs)}ms sentAt=${np.sentAt}`)
@@ -240,6 +240,9 @@ export function shouldReportTrackError(
 
 export function onTrackError(groupId: string, videoId: string, isMember: boolean): void {
   if (!shouldReportTrackError(state.np?.videoId ?? null, videoId, isMember, auth.canSign)) return
+  const reportKey = `${groupId}:${videoId}:${state.np?.pos ?? -1}`
+  if (reportedTrackErrorKey === reportKey) return
+  reportedTrackErrorKey = reportKey
   void reportBrokenTrack(groupId, videoId).catch((error) => {
     console.warn('[zc:sync] broken-track report failed:', error)
   })
@@ -249,4 +252,5 @@ export function resetSync(): void {
   console.log('[zc:sync] reset')
   state.np = null
   state.offsetMs = 0
+  reportedTrackErrorKey = null
 }

@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Event } from 'nostr-tools/pure'
 import { ingestNowPlaying, resetSync, shouldReportTrackError, upcomingTracks } from './sync.svelte'
 import { ingestAutoDJ, resetAutoDJ } from './autodj.svelte'
-import { ingestQueue, resetQueues } from './queue.svelte'
+import { ingestQueue, queues, resetQueues } from './queue.svelte'
 import { ingestStage, resetStage } from './stage.svelte'
+import { setLoggedIn, setLoggedOut } from './auth.svelte'
+
+const ME = 'a'.repeat(64)
 
 function event(kind: number, pubkey: string, tags: string[][], content = ''): Event {
   return {
@@ -85,6 +88,7 @@ afterEach(() => {
   resetAutoDJ()
   resetQueues()
   resetStage()
+  setLoggedOut()
 })
 
 describe('Auto DJ upcoming preview', () => {
@@ -145,5 +149,33 @@ describe('broken-track reporting', () => {
     expect(shouldReportTrackError('video', 'video', false, true)).toBe(false)
     expect(shouldReportTrackError('video', 'video', true, false)).toBe(false)
     expect(shouldReportTrackError('other', 'video', true, true)).toBe(false)
+  })
+})
+
+describe('relay-authoritative queue progress', () => {
+  it('does not mark the previous local queue track off on a now-playing transition', () => {
+    setLoggedIn(ME, 'nstart')
+    ingestQueue(event(30103, ME, [
+      ['h', 'club'],
+      ['d', 'club'],
+      ['track', 'yt:REALCUR0001', 'First', '180'],
+      ['track', 'yt:REALNEXT001', 'Second', '180'],
+    ]))
+    const live = (videoId: string, pos: string): Event => event(30100, 'relay', [
+      ['h', 'club'],
+      ['d', 'club'],
+      ['track', `yt:${videoId}`],
+      ['dj', ME],
+      ['pos', pos],
+      ['started_at', '1000'],
+      ['sent_at', String(Date.now())],
+      ['duration', '180'],
+      ['status', 'playing'],
+    ], videoId)
+
+    ingestNowPlaying(live('REALCUR0001', '1'), 'club')
+    ingestNowPlaying(live('REALNEXT001', '2'), 'club')
+
+    expect(queues.get(ME)?.tracks[0].active).toBe(true)
   })
 })

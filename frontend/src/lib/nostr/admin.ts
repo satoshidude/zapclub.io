@@ -2,6 +2,7 @@ import { pool, CLUB_RELAY } from './pool'
 import { auth } from './auth.svelte'
 import { nip98Header } from './nip98'
 import { parseClubMetadata, parseMembers, parseAdmins, parseOwner, queryClubAuthed } from './groups'
+import { sessionEventPrincipal } from './sessionSigner'
 import type { Club, ClubMember } from './types'
 
 // The superadmin (satoshidude). Only this pubkey may open the dashboard and the relay
@@ -107,16 +108,19 @@ export async function loadAdminData(): Promise<AdminClub[]> {
     })
   }
 
-  // Active DJs per club: newest 30102 per (club, author), not stepped "off", fresh.
+  // Active DJs per club: newest 30102 per relay-bound principal, not stepped "off", fresh.
   const nowMs = Date.now()
-  const djNewest = new Map<string, Map<string, { at: number; on: boolean }>>()
+  const djNewest = new Map<string, Map<string, { at: number; id: string; on: boolean }>>()
   for (const ev of stage) {
     const id = hTag(ev)
     if (!id) continue
+    const principal = sessionEventPrincipal(ev)
     let m = djNewest.get(id)
     if (!m) djNewest.set(id, (m = new Map()))
-    const prev = m.get(ev.pubkey)
-    if (!prev || ev.created_at > prev.at) m.set(ev.pubkey, { at: ev.created_at, on: ev.content !== 'off' })
+    const prev = m.get(principal)
+    if (!prev || ev.created_at > prev.at || (ev.created_at === prev.at && ev.id < prev.id)) {
+      m.set(principal, { at: ev.created_at, id: ev.id, on: ev.content !== 'off' })
+    }
   }
   const djsById = new Map<string, string[]>()
   for (const [id, m] of djNewest) {

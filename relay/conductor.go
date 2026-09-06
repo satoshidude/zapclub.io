@@ -113,6 +113,7 @@ type stageEntry struct {
 	since    int64
 	lastSeen int64
 	on       bool
+	eventID  string
 }
 
 type conductor struct {
@@ -124,8 +125,12 @@ type conductor struct {
 	sk    string
 	pub   string
 	cred  *credibilityBoard
-	mu    sync.Mutex
-	clubs map[string]*condClub
+	// Membership and bans are wired before startup scans. They are rechecked when reading the
+	// stage index so an old lease can never remain authoritative after revocation.
+	isMember func(club, pubkey string) bool
+	isBanned func(pubkey string) bool
+	mu       sync.Mutex
+	clubs    map[string]*condClub
 	// played tracks per (club, dj, videoID) → ms timestamp when played; guarded by mu.
 	// Used to block stale-tab republishes: a track is blocked only when the DJ's current
 	// 30103 queue version predates the play timestamp (qAddedMs <= pAt). A legitimate
@@ -162,7 +167,7 @@ type conductor struct {
 	// Event-driven in-memory indexes (populated by warmIndexes + observeEvent). Replacing
 	// per-tick full-table DB scans with O(1) lookups. Guarded by idxMu.
 	idxMu         sync.Mutex
-	stageIdx      map[string]map[string]stageEntry   // club → pubkey → newest 30102
+	stageIdx      map[string]map[string]stageEntry   // club → effective principal → newest 30102
 	kickIdx       map[string]map[string]int64        // club → dj → newest kick ms
 	queueIdx      map[string]map[string]*nostr.Event // club → pubkey → newest 30103
 	skipIdx       map[string]*nostr.Event            // club → newest 30107
@@ -201,7 +206,8 @@ func newConductor(db *badger.BadgerBackend, relay *khatru.Relay, state *relay29.
 
 // warmIndexes seeds the in-memory indexes from BadgerDB in parallel at startup.
 // After this, observeEvent keeps them current via OnEventSaved.
-// Staleable kinds (stage, kick) use a 2-hour since-filter to skip irrelevant old events.
+// Staleable kinds (stage, kick) use a bounded 2-hour recovery lookback, then the runtime
+// authority checks the stricter five-minute stage lease below.
 // Replaceable kinds (queue, autoDJ, autoDJCtrl) must NOT be since-filtered — their
 // single live record may be arbitrarily old.
 func (c *conductor) warmIndexes(ctx context.Context) {
@@ -211,8 +217,8 @@ func (c *conductor) warmIndexes(ctx context.Context) {
 	}
 	staleWindow := nostr.Timestamp(time.Now().Unix() - 7200) // 2 h
 	kinds := []kindFilter{
-		{kindStage, staleWindow},     // 30102: heartbeat, stale after ~1 h
-		{kindStageKick, staleWindow}, // 30106: kick marker, similarly time-bound
+		{kindStage, staleWindow},     // 30102: recovery lookback; authoritative for five minutes
+		{kindStageKick, staleWindow}, // 30106: recent kick markers only
 		{kindQueue, 0},               // 30103: replaceable per DJ/club — keep all
 		{kindSkip, 0},                // 30107: replaceable per club — keep latest
 		{kindAutoDJ, 0},              // 30105: replaceable per club
@@ -333,7 +339,36 @@ func (c *conductor) repairClubAdmins(ctx context.Context, club, owner string) {
 
 // observeEvent is registered on relay.OnEventSaved and keeps the indexes current.
 func (c *conductor) observeEvent(_ context.Context, ev *nostr.Event) {
+	if club := conductorEventClub(ev); club != "" && !c.clubExists(club) {
+		return
+	}
 	c.indexEvent(ev)
+}
+
+func conductorEventClub(ev *nostr.Event) string {
+	if ev == nil {
+		return ""
+	}
+	switch ev.Kind {
+	case kindNowPlaying, kindPlay, kindStage, kindStageKick, kindQueue, kindSkip, kindAutoDJ, kindAutoDJCtrl:
+		if club := tagVal(ev, "h"); club != "" {
+			return club
+		}
+		return tagVal(ev, "d")
+	default:
+		return ""
+	}
+}
+
+func (c *conductor) clubExists(club string) bool {
+	if club == "" {
+		return false
+	}
+	if c.state == nil {
+		return true
+	}
+	_, ok := c.state.Groups.Load(club)
+	return ok
 }
 
 func (c *conductor) indexEvent(ev *nostr.Event) {
@@ -358,6 +393,10 @@ func (c *conductor) idxStage(ev *nostr.Event) {
 	if club == "" {
 		return
 	}
+	principal := effectiveEventPubKey(ev)
+	if !c.stagePrincipalEligible(club, principal) {
+		return
+	}
 	lastSeen := int64(ev.CreatedAt) * 1000
 	since := int64(ev.CreatedAt)
 	if s := tagVal(ev, "since"); s != "" {
@@ -365,16 +404,17 @@ func (c *conductor) idxStage(ev *nostr.Event) {
 			since = v
 		}
 	}
-	entry := stageEntry{since: since, lastSeen: lastSeen, on: ev.Content != "off"}
+	entry := stageEntry{since: since, lastSeen: lastSeen, on: ev.Content != "off", eventID: ev.ID}
 	c.idxMu.Lock()
 	m := c.stageIdx[club]
 	if m == nil {
 		m = map[string]stageEntry{}
 		c.stageIdx[club] = m
 	}
-	if ex, ok := m[ev.PubKey]; !ok || lastSeen > ex.lastSeen {
-		m[ev.PubKey] = entry
-		log.Printf("conductor [%.8s] stage dj=%.8s on=%v since=%d createdAt=%d", club, ev.PubKey, entry.on, since, ev.CreatedAt)
+	if ex, ok := m[principal]; !ok || lastSeen > ex.lastSeen ||
+		(lastSeen == ex.lastSeen && (ex.eventID == "" || ev.ID < ex.eventID)) {
+		m[principal] = entry
+		log.Printf("conductor [%.8s] stage dj=%.8s on=%v since=%d createdAt=%d", club, principal, entry.on, since, ev.CreatedAt)
 	}
 	c.idxMu.Unlock()
 }
@@ -715,6 +755,26 @@ func (c *conductor) sqLoadOwner(club string) string {
 	return owner
 }
 
+func (c *conductor) sqDeleteClub(club string) error {
+	if c.sq == nil || club == "" {
+		return nil
+	}
+	tx, err := c.sq.Begin()
+	if err != nil {
+		return fmt.Errorf("sqlite delete_club [%.8s]: begin: %w", club, err)
+	}
+	for _, table := range []string{"conductor_state", "played", "club_owners"} {
+		if _, err = tx.Exec(`DELETE FROM `+table+` WHERE club=?`, club); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqlite delete_club [%.8s]: %s: %w", club, table, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite delete_club [%.8s]: commit: %w", club, err)
+	}
+	return nil
+}
+
 // ── stageGate in-memory helpers ───────────────────────────────────────────────
 
 // countActiveOtherDJs counts the capped stage occupants excluding `senderPubkey`, and reports
@@ -735,6 +795,9 @@ func (c *conductor) countActiveOtherDJs(club, senderPubkey string) (active int, 
 	c.idxMu.Unlock()
 	list := make([]condDJ, 0, len(stageMap))
 	for pk, entry := range stageMap {
+		if !c.stagePrincipalEligible(club, pk) {
+			continue
+		}
 		if !entry.on {
 			continue
 		}
@@ -756,6 +819,127 @@ func (c *conductor) countActiveOtherDJs(club, senderPubkey string) (active int, 
 	return
 }
 
+func (c *conductor) stagePrincipalEligible(club, pubkey string) bool {
+	if c.isBanned != nil && c.isBanned(pubkey) {
+		return false
+	}
+	return c.isMember == nil || c.isMember(club, pubkey)
+}
+
+// revokeClubStagePrincipal removes a lease from the authoritative runtime immediately. The
+// corresponding persisted stage rows are removed by stageAliasCleaner before this is called.
+func (c *conductor) revokeClubStagePrincipal(club, pubkey string) {
+	if club == "" || pubkey == "" {
+		return
+	}
+	c.idxMu.Lock()
+	delete(c.stageIdx[club], pubkey)
+	if len(c.stageIdx[club]) == 0 {
+		delete(c.stageIdx, club)
+	}
+	c.idxMu.Unlock()
+
+	c.presMu.Lock()
+	delete(c.pres[club], pubkey)
+	if len(c.pres[club]) == 0 {
+		delete(c.pres, club)
+	}
+	c.presMu.Unlock()
+}
+
+// revokePrincipal clears all cached authority derived from an account whose relay-wide ban has
+// just taken effect. The durable author/session rows are purged separately by adminAPI.
+func (c *conductor) revokePrincipal(pubkey string) {
+	if pubkey == "" {
+		return
+	}
+	c.idxMu.Lock()
+	for club, stage := range c.stageIdx {
+		delete(stage, pubkey)
+		if len(stage) == 0 {
+			delete(c.stageIdx, club)
+		}
+	}
+	for club, queues := range c.queueIdx {
+		delete(queues, pubkey) // idxQueue is keyed by the effective DJ, including relay patches.
+		if len(queues) == 0 {
+			delete(c.queueIdx, club)
+		}
+	}
+	for club, event := range c.skipIdx {
+		if event != nil && event.PubKey == pubkey {
+			delete(c.skipIdx, club)
+		}
+	}
+	for club, event := range c.autoDJIdx {
+		if event != nil && event.PubKey == pubkey {
+			delete(c.autoDJIdx, club)
+		}
+	}
+	c.idxMu.Unlock()
+
+	c.presMu.Lock()
+	for club, presence := range c.pres {
+		delete(presence, pubkey)
+		if len(presence) == 0 {
+			delete(c.pres, club)
+		}
+	}
+	c.presMu.Unlock()
+}
+
+// deleteClub drops every source from which the conductor could resurrect or continue a deleted
+// club. The outer playback lock serializes with tick(); no stop/settlement event is published.
+// Dynamic clubExists checks remain the authority boundary for observers that were already in
+// flight when relay29 removed the group.
+func (c *conductor) deleteClub(club string) error {
+	if club == "" {
+		return nil
+	}
+	c.mu.Lock()
+	delete(c.clubs, club)
+	delete(c.played, club)
+	delete(c.bootstrapAt, club)
+	delete(c.brokenSkipAt, club)
+	delete(c.moodSkipAt, club)
+	c.queueWakeup.Delete(club)
+
+	c.idxMu.Lock()
+	delete(c.stageIdx, club)
+	delete(c.kickIdx, club)
+	delete(c.queueIdx, club)
+	delete(c.skipIdx, club)
+	delete(c.autoDJIdx, club)
+	delete(c.autoDJCtrlIdx, club)
+	delete(c.ownerCache, club)
+	c.idxMu.Unlock()
+
+	c.presMu.Lock()
+	delete(c.pres, club)
+	c.presMu.Unlock()
+
+	c.brokenMu.Lock()
+	delete(c.broken, club)
+	delete(c.brokenVids, club)
+	c.brokenMu.Unlock()
+
+	c.moodMu.Lock()
+	delete(c.moods, club)
+	delete(c.skipCounts, club)
+	c.moodMu.Unlock()
+
+	c.qLogMu.Lock()
+	for key := range c.qLogged {
+		if strings.HasPrefix(key, club+":") {
+			delete(c.qLogged, key)
+		}
+	}
+	c.qLogMu.Unlock()
+	c.mu.Unlock()
+
+	return c.sqDeleteClub(club)
+}
+
 // observeBroken records an ephemeral "I can't play this track" report (kind 20102, content =
 // videoId). Registered on OnEphemeralEvent (like presence). The conductor skips the running
 // track when an AUTHORIZED reporter (owner/mod/playing-DJ) reports it broken, OR when a quorum
@@ -767,6 +951,9 @@ func (c *conductor) observeBroken(_ context.Context, ev *nostr.Event) {
 	}
 	club, vid := tagVal(ev, "h"), ev.Content
 	if club == "" || vid == "" {
+		return
+	}
+	if !c.clubExists(club) {
 		return
 	}
 	c.brokenMu.Lock()
@@ -829,6 +1016,9 @@ func (c *conductor) observeMood(_ context.Context, ev *nostr.Event) {
 	posStr := tagVal(ev, "pos")
 	vote := tagVal(ev, "v")
 	if club == "" || posStr == "" || (vote != "banger" && vote != "skip") {
+		return
+	}
+	if !c.clubExists(club) {
 		return
 	}
 	pos, err := strconv.Atoi(posStr)
@@ -1023,6 +1213,13 @@ func (c *conductor) observePresence(_ context.Context, ev *nostr.Event) {
 	if club == "" {
 		return
 	}
+	if !c.clubExists(club) {
+		return
+	}
+	principal := effectiveEventPubKey(ev)
+	if !c.stagePrincipalEligible(club, principal) {
+		return
+	}
 	c.presMu.Lock()
 	m := c.pres[club]
 	if m == nil {
@@ -1030,12 +1227,12 @@ func (c *conductor) observePresence(_ context.Context, ev *nostr.Event) {
 		c.pres[club] = m
 	}
 	t := int64(ev.CreatedAt) * 1000
-	if t > m[ev.PubKey] {
-		prev := m[ev.PubKey]
-		m[ev.PubKey] = t
+	if t > m[principal] {
+		prev := m[principal]
+		m[principal] = t
 		// Log only when first seen or returning after the online window expired.
 		if prev == 0 || t-prev > condOnlineMS {
-			log.Printf("conductor [%.8s] presence dj=%.8s online (gap %dms)", club, ev.PubKey, t-prev)
+			log.Printf("conductor [%.8s] presence dj=%.8s online (gap %dms)", club, principal, t-prev)
 		}
 	}
 	c.presMu.Unlock()
@@ -1107,6 +1304,10 @@ func (c *conductor) tick() {
 	// Forget state for clubs with no active real DJ AND no auto-DJ.
 	// Tracks always play to completion — only an explicit skip interrupts them.
 	for club := range c.clubs {
+		if !c.clubExists(club) {
+			delete(c.clubs, club)
+			continue
+		}
 		if _, ok := active[club]; ok {
 			continue
 		}
@@ -1139,9 +1340,15 @@ func (c *conductor) tick() {
 	}
 	// Real DJs take full priority — Auto DJ is a fallback only, never injected alongside.
 	for club, djs := range active {
+		if !c.clubExists(club) {
+			continue
+		}
 		c.driveClub(ctx, club, djs, nil, now)
 	}
 	for club, st := range auto {
+		if !c.clubExists(club) {
+			continue
+		}
 		if _, hasRealDJ := active[club]; hasRealDJ {
 			continue // real DJs on stage → auto-DJ stands down
 		}
@@ -1154,7 +1361,7 @@ func (c *conductor) tick() {
 
 // activeClubs returns, per club with ≥1 active stage DJ, the DJ list in round-robin order
 // (oldest `since` first, pubkey tiebreak, capped) — the same selection as conductor.ts
-// selectActiveDjs: on + fresh (<1h) + not kicked. Reads from the in-memory indexes (no DB).
+// selectActiveDjs: on + fresh (<5 min) + not kicked. Reads from the in-memory indexes (no DB).
 func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 	now := time.Now().UnixMilli()
 	// Snapshot indexes under lock, then process without holding it.
@@ -1178,8 +1385,14 @@ func (c *conductor) activeClubs(ctx context.Context) map[string][]condDJ {
 
 	out := map[string][]condDJ{}
 	for club, snap := range snaps {
+		if !c.clubExists(club) {
+			continue
+		}
 		var list []condDJ
 		for _, se := range snap.djs {
+			if !c.stagePrincipalEligible(club, se.pubkey) {
+				continue
+			}
 			if !se.entry.on || now-se.entry.lastSeen >= condStageStaleMS {
 				continue
 			}
@@ -1744,6 +1957,9 @@ func (c *conductor) publishPlay(ctx context.Context, club string, pb *condClub, 
 // bypassing the RejectEvent chain — the relay's own events are trusted.
 // Retries up to 3× on badger transaction conflicts (transient, safe to retry immediately).
 func (c *conductor) publish(ctx context.Context, ev *nostr.Event, replace bool) {
+	if club := conductorEventClub(ev); club != "" && !c.clubExists(club) {
+		return
+	}
 	if err := ev.Sign(c.sk); err != nil {
 		log.Printf("conductor sign kind %d: %v", ev.Kind, err)
 		return
@@ -2039,6 +2255,12 @@ func (c *conductor) armedAutoClubs(ctx context.Context) map[string]*autoState {
 
 	out := map[string]*autoState{}
 	for club, entry := range armed {
+		if !c.clubExists(club) {
+			continue
+		}
+		if !c.stagePrincipalEligible(club, entry.owner) {
+			continue
+		}
 		if disarmedAt[club] >= entry.ev.CreatedAt {
 			continue // manually disarmed; owner must re-arm
 		}
@@ -2058,10 +2280,16 @@ func (c *conductor) armedAutoClubs(ctx context.Context) map[string]*autoState {
 // hasActiveAutoDJ reports whether a club's owner-armed Auto DJ currently owns the
 // virtual stage slot. It mirrors armedAutoClubs without rebuilding every club.
 func (c *conductor) hasActiveAutoDJ(club string) bool {
+	if !c.clubExists(club) {
+		return false
+	}
 	c.idxMu.Lock()
 	defer c.idxMu.Unlock()
 	ev := c.autoDJIdx[club]
 	if ev == nil || tagVal(ev, "status") != "armed" {
+		return false
+	}
+	if !c.stagePrincipalEligible(club, ev.PubKey) {
 		return false
 	}
 	if c.autoDJCtrlIdx[club] >= ev.CreatedAt {
@@ -2215,7 +2443,7 @@ func (c *conductor) publishAutoDJDisarm(ctx context.Context, club string) {
 type stageGate struct {
 	db      *badger.BadgerBackend
 	mu      sync.Mutex
-	pending map[string]map[string]time.Time
+	pending map[string]map[string]stageReservation
 	// Set after the conductor is initialized (main.go) so reject() reads
 	// the conductor's in-memory indexes instead of querying BadgerDB.
 	countFn func(club, sender string) (active int, alreadyOnStage bool)
@@ -2225,6 +2453,11 @@ type stageGate struct {
 }
 
 const autoDJStageReservation = "\x00autodj"
+
+type stageReservation struct {
+	deadline time.Time
+	eventID  string
+}
 
 // reject atomically reserves the three shared stage slots for real DJ joins and
 // newly armed Auto DJs. Heartbeats and Auto-DJ config replacements are always
@@ -2239,18 +2472,22 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	if club == "" {
 		return false, ""
 	}
+	principal := evt.PubKey
+	if isStageJoin {
+		principal = effectiveEventPubKey(evt)
+	}
 	// Serialize admission and reserve accepted joins until OnEventSaved updates
 	// the conductor index. Without this reservation, simultaneous connections
 	// could all observe the same free final slot.
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.pending == nil {
-		g.pending = map[string]map[string]time.Time{}
+		g.pending = map[string]map[string]stageReservation{}
 	}
 	now := time.Now()
 	for group, byPubkey := range g.pending {
-		for pubkey, deadline := range byPubkey {
-			if !deadline.After(now) {
+		for pubkey, reservation := range byPubkey {
+			if !reservation.deadline.After(now) {
 				delete(byPubkey, pubkey)
 			}
 		}
@@ -2263,7 +2500,7 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	active := 0
 	alreadyOnStage := false
 	if g.countFn != nil {
-		active, alreadyOnStage = g.countFn(club, evt.PubKey)
+		active, alreadyOnStage = g.countFn(club, principal)
 	} else {
 		// Fallback: query BadgerDB (used only during the brief startup window before
 		// main.go wires g.countFn, or in tests).
@@ -2276,9 +2513,10 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 		}
 		newestByPk := map[string]*nostr.Event{}
 		for ev := range ch {
-			if ex, ok := newestByPk[ev.PubKey]; !ok || ev.CreatedAt > ex.CreatedAt {
+			pk := effectiveEventPubKey(ev)
+			if ex, ok := newestByPk[pk]; !ok || eventNewer(ev, ex) {
 				cp := *ev
-				newestByPk[ev.PubKey] = &cp
+				newestByPk[pk] = &cp
 			}
 		}
 		kickMs := map[string]int64{}
@@ -2322,7 +2560,7 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 			list = append(list, condDJ{pubkey: pk, since: since})
 		}
 		for _, dj := range orderAndCapDJs(list) {
-			if dj.pubkey == evt.PubKey {
+			if dj.pubkey == principal {
 				alreadyOnStage = true
 			} else {
 				active++
@@ -2342,7 +2580,7 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 	} else if g.autoActiveFn != nil && g.autoActiveFn(club) {
 		active++
 	}
-	reservation := evt.PubKey
+	reservation := principal
 	if isAutoArm {
 		reservation = autoDJStageReservation
 	}
@@ -2355,14 +2593,19 @@ func (g *stageGate) reject(ctx context.Context, evt *nostr.Event) (bool, string)
 		return true, "restricted: stage is full"
 	}
 	if g.pending[club] == nil {
-		g.pending[club] = map[string]time.Time{}
+		g.pending[club] = map[string]stageReservation{}
 	}
-	g.pending[club][reservation] = now.Add(10 * time.Second)
+	g.pending[club][reservation] = stageReservation{
+		deadline: now.Add(10 * time.Second),
+		eventID:  evt.ID,
+	}
 	return false, ""
 }
 
 // observe releases the short admission reservation after the stage event has
 // been stored and the normal event observers can make it visible in the index.
+// The event id binding is important: an overlapping heartbeat, off/disarm, or
+// config replacement from the same principal never owns the join/arm reservation.
 func (g *stageGate) observe(_ context.Context, evt *nostr.Event) {
 	if evt == nil || (evt.Kind != kindStage && evt.Kind != kindAutoDJ) {
 		return
@@ -2374,12 +2617,51 @@ func (g *stageGate) observe(_ context.Context, evt *nostr.Event) {
 	reservation := evt.PubKey
 	if evt.Kind == kindAutoDJ {
 		reservation = autoDJStageReservation
+	} else {
+		reservation = effectiveEventPubKey(evt)
 	}
 	g.mu.Lock()
-	delete(g.pending[club], reservation)
+	if pending, ok := g.pending[club][reservation]; ok && pending.eventID == evt.ID {
+		delete(g.pending[club], reservation)
+	}
 	if len(g.pending[club]) == 0 {
 		delete(g.pending, club)
 	}
+	g.mu.Unlock()
+}
+
+func (g *stageGate) revokeClubPrincipal(club, pubkey string) {
+	if g == nil || club == "" || pubkey == "" {
+		return
+	}
+	g.mu.Lock()
+	delete(g.pending[club], pubkey)
+	if len(g.pending[club]) == 0 {
+		delete(g.pending, club)
+	}
+	g.mu.Unlock()
+}
+
+func (g *stageGate) revokePrincipal(pubkey string) {
+	if g == nil || pubkey == "" {
+		return
+	}
+	g.mu.Lock()
+	for club, pending := range g.pending {
+		delete(pending, pubkey)
+		if len(pending) == 0 {
+			delete(g.pending, club)
+		}
+	}
+	g.mu.Unlock()
+}
+
+func (g *stageGate) deleteClub(club string) {
+	if g == nil || club == "" {
+		return
+	}
+	g.mu.Lock()
+	delete(g.pending, club)
 	g.mu.Unlock()
 }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { queues, addTrack, addTracks, removeTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, enrichQueueTitles, reactivateMyQueue } from '../../nostr/queue.svelte'
+  import { queues, addTrack, addTracks, removeTrack, setMyQueue, clearQueue, shuffleQueue, setTrackActive, reactivateMyQueue } from '../../nostr/queue.svelte'
   import { requestSkip, canSkip } from '../../nostr/sync.svelte'
   import { playlists, savePlaylistAs, deletePlaylist, loadMyPlaylists } from '../../nostr/playlists.svelte'
 	import { autodj, armAutoDJ, disarmAutoDJ } from '../../nostr/autodj.svelte'
@@ -22,16 +22,6 @@
     if (me && !playlists.loaded) void loadMyPlaylists()
   })
 
-  // Backfill bare titles with the interpreter (like the card) — once per mount, when my queue
-  // has tracks still missing an artist. Resolved via the relay (oEmbed), persisted to the queue.
-  let titlesEnriched = false
-  $effect(() => {
-    if (titlesEnriched || !me) return
-    if (tracks.some((t) => !/ [–—-] /.test(t.title))) {
-      titlesEnriched = true
-      void enrichQueueTitles(groupId)
-    }
-  })
   let saving = $state(false)
   let saveName = $state('')
   let showLib = $state(false)

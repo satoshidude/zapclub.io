@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -24,6 +26,15 @@ var superadmin = env("RELAY_SUPERADMIN", "661419f8f48b1b496e2249aee97a6ad9d5bea9
 // allowOrigin is the frontend origin permitted to call the admin API (CORS). The relay
 // itself sits behind Caddy; the browser enforces this, the auth check below is the teeth.
 var allowOrigin = env("RELAY_ADMIN_ORIGIN", "https://zapclub.io")
+
+const adminMutationTimeout = 30 * time.Second
+
+// Once an authenticated destructive request starts, closing the HTTP connection must not cancel
+// its durable mutation halfway through. The deadline remains bounded so a wedged store cannot
+// hold a handler forever.
+func adminMutationContext(_ context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), adminMutationTimeout)
+}
 
 // banStore is a relay-wide ban list, persisted as JSON next to the DB so it survives
 // restarts and binary swaps (the working dir is persistent across deploys).
@@ -52,18 +63,28 @@ func (b *banStore) isBanned(pk string) bool {
 	return ok
 }
 
-func (b *banStore) ban(pk, reason string) {
+func (b *banStore) ban(pk, reason string) error {
 	b.mu.Lock()
-	b.banned[pk] = reason
-	b.save()
-	b.mu.Unlock()
+	defer b.mu.Unlock()
+	next := cloneBans(b.banned)
+	next[pk] = reason
+	if err := b.save(next); err != nil {
+		return err
+	}
+	b.banned = next
+	return nil
 }
 
-func (b *banStore) unban(pk string) {
+func (b *banStore) unban(pk string) error {
 	b.mu.Lock()
-	delete(b.banned, pk)
-	b.save()
-	b.mu.Unlock()
+	defer b.mu.Unlock()
+	next := cloneBans(b.banned)
+	delete(next, pk)
+	if err := b.save(next); err != nil {
+		return err
+	}
+	b.banned = next
+	return nil
 }
 
 func (b *banStore) list() map[string]string {
@@ -76,17 +97,31 @@ func (b *banStore) list() map[string]string {
 	return out
 }
 
-// save persists the list atomically. Caller must hold the write lock.
-func (b *banStore) save() {
-	data, _ := json.MarshalIndent(b.banned, "", "  ")
+func cloneBans(source map[string]string) map[string]string {
+	cloned := make(map[string]string, len(source))
+	for pubkey, reason := range source {
+		cloned[pubkey] = reason
+	}
+	return cloned
+}
+
+// save persists a proposed list atomically. Caller must hold the write lock; the in-memory
+// state is committed only after this succeeds, so a failed ban/unban never creates split-brain
+// revocation state between the running relay and its next restart.
+func (b *banStore) save(next map[string]string) error {
+	data, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode banlist: %w", err)
+	}
 	tmp := b.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		log.Printf("banlist save: %v", err)
-		return
+		return fmt.Errorf("write banlist: %w", err)
 	}
 	if err := os.Rename(tmp, b.path); err != nil {
-		log.Printf("banlist rename: %v", err)
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace banlist: %w", err)
 	}
+	return nil
 }
 
 // verifyNIP98 checks a kind-27235 Authorization header and returns its signer. Path-only URL
@@ -171,10 +206,14 @@ func pruneAdminNonces() {
 
 // adminAPI exposes superadmin-only relay management over HTTP (NIP-98 authenticated).
 type adminAPI struct {
-	db        *badger.BadgerBackend
-	bans      *banStore
-	state     *relay29.State
-	listeners *listenerStats
+	db           *badger.BadgerBackend
+	bans         *banStore
+	state        *relay29.State
+	listeners    *listenerStats
+	stageAliases *stageAliasCleaner
+	onBan        func(pubkey string)
+	onDeleteClub func(context.Context, string) error
+	onClubPurged func(context.Context, string) error
 }
 
 func (a *adminAPI) handle(w http.ResponseWriter, r *http.Request) {
@@ -225,8 +264,22 @@ func (a *adminAPI) ban(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot ban the superadmin", http.StatusForbidden)
 		return
 	}
-	a.bans.ban(body.Pubkey, body.Reason)
-	purged := a.purgeAuthor(r.Context(), body.Pubkey)
+	ctx, cancel := adminMutationContext(r.Context())
+	defer cancel()
+	if err := a.bans.ban(body.Pubkey, body.Reason); err != nil {
+		log.Printf("admin: persist ban %s: %v", body.Pubkey, err)
+		http.Error(w, "ban persistence failed", http.StatusInternalServerError)
+		return
+	}
+	if a.onBan != nil {
+		a.onBan(body.Pubkey)
+	}
+	purged, err := a.purgeAuthor(ctx, body.Pubkey)
+	if err != nil {
+		log.Printf("admin: banned %s but purge incomplete after %d events: %v", body.Pubkey, purged, err)
+		http.Error(w, "ban active, durable purge incomplete; retry", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("admin: banned %s (%q), purged %d events", body.Pubkey, body.Reason, purged)
 	a.writeJSON(w, map[string]any{"ok": true, "purged": purged})
 }
@@ -239,7 +292,11 @@ func (a *adminAPI) unban(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	a.bans.unban(body.Pubkey)
+	if err := a.bans.unban(body.Pubkey); err != nil {
+		log.Printf("admin: persist unban %s: %v", body.Pubkey, err)
+		http.Error(w, "unban persistence failed", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("admin: unbanned %s", body.Pubkey)
 	a.writeJSON(w, map[string]any{"ok": true})
 }
@@ -252,57 +309,93 @@ func (a *adminAPI) deleteClub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	ctx := r.Context()
+	ctx, cancel := adminMutationContext(r.Context())
+	defer cancel()
 	// Evict the live group from relay29's in-memory map FIRST — otherwise the relay keeps
 	// regenerating/serving its 39000/39002 metadata and the club reappears after purging.
 	a.state.Groups.Delete(body.GroupID)
+	// The conductor, social/privacy indexes, stage admissions and analytics all keep their own
+	// runtime state. Revoke it before the durable purge so a running tick cannot recreate
+	// relay-authored rows after the delete endpoint returns.
+	var runtimeErr error
+	if a.onDeleteClub != nil {
+		runtimeErr = a.onDeleteClub(ctx, body.GroupID)
+	}
 	// All club content + management events carry an h-tag = group id.
-	n := a.purgeFilter(ctx, nostr.Filter{Tags: nostr.TagMap{"h": []string{body.GroupID}}})
+	n, err := a.purgeFilter(ctx, nostr.Filter{Tags: nostr.TagMap{"h": []string{body.GroupID}}})
 	// Relay-signed metadata/admins/members are addressable (d = group id).
-	n += a.purgeFilter(ctx, nostr.Filter{
+	metadata, metadataErr := a.purgeFilter(ctx, nostr.Filter{
 		Tags:  nostr.TagMap{"d": []string{body.GroupID}},
 		Kinds: []int{39000, 39001, 39002, 39003},
 	})
+	n += metadata
+	if err == nil {
+		err = metadataErr
+	}
+	if err == nil && a.onClubPurged != nil {
+		err = a.onClubPurged(ctx, body.GroupID)
+	}
+	if err == nil {
+		err = runtimeErr
+	}
+	if err != nil {
+		log.Printf("admin: delete club %s incomplete after %d events: %v", body.GroupID, n, err)
+		http.Error(w, "club disabled, durable purge incomplete; retry", http.StatusInternalServerError)
+		return
+	}
 	log.Printf("admin: deleted club %s (evicted from memory), purged %d events", body.GroupID, n)
 	a.writeJSON(w, map[string]any{"ok": true, "purged": n})
 }
 
 // purgeAuthor deletes every event authored by a pubkey from the store.
-func (a *adminAPI) purgeAuthor(ctx context.Context, pk string) int {
-	return a.purgeFilter(ctx, nostr.Filter{Authors: []string{pk}})
+func (a *adminAPI) purgeAuthor(ctx context.Context, pk string) (int, error) {
+	total, err := a.purgeFilter(ctx, nostr.Filter{Authors: []string{pk}})
+	if a.stageAliases != nil {
+		aliases, aliasErr := a.stageAliases.purgeSessionPrincipal(ctx, pk)
+		total += aliases
+		err = errors.Join(err, aliasErr)
+	}
+	return total, err
 }
 
 // purgeFilter deletes every event matching a filter. The badger store caps a single query
 // (~250 events), so we LOOP: each pass collects the current matches, deletes them, and
 // repeats until a pass deletes nothing — otherwise a ban/club-delete would leave most of a
 // prolific author's / busy club's events in the DB. Bounded by a hard pass cap.
-func (a *adminAPI) purgeFilter(ctx context.Context, f nostr.Filter) int {
+func (a *adminAPI) purgeFilter(ctx context.Context, f nostr.Filter) (int, error) {
 	total := 0
 	for pass := 0; pass < 2000; pass++ {
 		ch, err := a.db.QueryEvents(ctx, f)
 		if err != nil {
 			log.Printf("purge query: %v", err)
-			break
+			return total, err
 		}
 		var evs []*nostr.Event
 		for ev := range ch { // drain the channel fully before deleting
 			evs = append(evs, ev)
 		}
 		if len(evs) == 0 {
-			break
+			return total, nil
 		}
 		deleted := 0
+		var deleteErr error
 		for _, ev := range evs {
 			if err := a.db.DeleteEvent(ctx, ev); err == nil {
 				deleted++
 			} else {
 				log.Printf("purge delete %s: %v", ev.ID, err)
+				if deleteErr == nil {
+					deleteErr = err
+				}
 			}
 		}
 		total += deleted
+		if deleteErr != nil {
+			return total, deleteErr
+		}
 		if deleted == 0 {
-			break // no progress (all deletes failing) — avoid an infinite loop
+			return total, fmt.Errorf("purge made no progress")
 		}
 	}
-	return total
+	return total, fmt.Errorf("purge exceeded pass limit")
 }

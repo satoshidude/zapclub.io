@@ -15,6 +15,7 @@ const POWBITS = { 9: 12, 9021: 15 }
 
 const URL = process.env.RELAY_URL || 'ws://127.0.0.1:3334'
 const RELAY_PK = process.env.RELAY_PK || ''
+const SESSION_MARKER = 'zapclub-session-v1'
 const now = () => Math.floor(Date.now() / 1000)
 const G = 'zc' + Math.random().toString(16).slice(2, 16)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -41,6 +42,7 @@ function conn(sk, authenticate = true) {
       return send(finalizeEvent(tt, sk))
     },
     evRaw: (t) => send(finalizeEvent(t, sk)),
+    sendEvent: send,
     queryResult: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: r, got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
     query: (filter) => new Promise((r) => { const id = 'q' + Math.random(); pend.set('r:' + id, { res: (result) => r(result.events), got: [] }); ws.send(JSON.stringify(['REQ', id, filter])) }),
     watch: (filter) => {
@@ -53,6 +55,10 @@ function conn(sk, authenticate = true) {
     },
   }), 400) })
 }
+const sessionEvent = (principal, sessionSK, template) => finalizeEvent({
+  ...template,
+  tags: [...(template.tags || []), ['client', SESSION_MARKER], ['p', principal]],
+}, sessionSK)
 const ok = (r) => (r[0] ? 'OK' : 'REJECT ' + r[1])
 let failures = 0
 const assert = (cond, msg) => { console.log((cond ? '  ✓ ' : '  ✗ FAIL ') + msg); if (!cond) failures++ }
@@ -117,22 +123,100 @@ assert(forgedMemberCount[0] === false && /relay-authored/i.test(forgedMemberCoun
 const directLeak = mined ? await stranger.query({ ids: [mined.id] }) : []
 assert(directLeak.length === 0, 'direct event-id query cannot leak a chat message')
 
+// NIP-29 membership mutations also carry identities. Join requests may additionally carry
+// paid-entry proof material, so they are an owner/moderator inbox rather than member history.
+const memberHistory = await mem.query({ kinds: [9000, 9001, 9022], '#h': [G] })
+assert(memberHistory.length > 0, 'current member can read protected membership history')
+const strangerMemberHistory = await stranger.queryResult({ kinds: [9000, 9001, 9022], '#h': [G] })
+assert(/restricted/i.test(strangerMemberHistory.closed), 'non-member membership-history subscription rejected')
+const directMemberLeak = memberHistory[0] ? await stranger.query({ ids: [memberHistory[0].id] }) : []
+assert(directMemberLeak.length === 0, 'direct event-id query cannot leak a membership mutation')
+const ownerJoinRequests = await host.query({ kinds: [9021], '#h': [G] })
+const memberJoinRequests = await mem.queryResult({ kinds: [9021], '#h': [G] })
+const strangerJoinRequests = await stranger.queryResult({ kinds: [9021], '#h': [G] })
+assert(ownerJoinRequests.some((event) => event.pubkey === mem.pub), 'owner can read the protected join-request inbox')
+assert(/restricted/i.test(memberJoinRequests.closed), 'plain member cannot read join-request identities/proofs')
+assert(/restricted/i.test(strangerJoinRequests.closed), 'non-member cannot read join-request identities/proofs')
+const directJoinLeak = ownerJoinRequests[0] ? await stranger.query({ ids: [ownerJoinRequests[0].id] }) : []
+assert(directJoinLeak.length === 0, 'direct event-id query cannot leak a join request')
+
 const liveChat = mem.watch({ kinds: [9], '#h': [G], since: now() })
+const liveMembership = mem.watch({ kinds: [9000, 9001, 9022], '#h': [G], since: now() })
 await liveChat.ready
+await liveMembership.ready
 await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'before kick' })
 await sleep(300)
 assert(liveChat.got.some((e) => e.content === 'before kick'), 'member receives live chat')
 await host.ev({ kind: 9001, created_at: now(), tags: [['h', G], ['p', mem.pub]], content: '' })
 await sleep(300)
+assert(liveMembership.got.some((event) => event.kind === 9001 && event.tags.some((tag) => tag[0] === 'p' && tag[1] === mem.pub)),
+  'removed member receives its own exact live kick transition')
+const unrelatedPub = getPublicKey(generateSecretKey())
+await host.ev({ kind: 9001, created_at: now() + 1, tags: [['h', G], ['p', unrelatedPub]], content: '' })
+await sleep(300)
+assert(!liveMembership.got.some((event) => event.tags.some((tag) => tag[0] === 'p' && tag[1] === unrelatedPub)),
+  'removed member receives no later membership transitions on the open subscription')
 await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'after kick' })
 await sleep(300)
 assert(!liveChat.got.some((e) => e.content === 'after kick'), 'kick revokes an already-open chat subscription')
 liveChat.close()
+liveMembership.close()
+const kickedSessionPresence = await mem.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+  kind: 20100, created_at: now(), tags: [['h', G]], content: '',
+}))
+assert(kickedSessionPresence[0] === false && /current club members/i.test(kickedSessionPresence[1] || ''),
+  'session event is rejected immediately after membership revocation: ' + ok(kickedSessionPresence))
+const selfPutWatch = mem.watch({ kinds: [9000, 9001], '#h': [G], '#p': [mem.pub], since: now() - 1 })
+await selfPutWatch.ready
 const postKickRejoin = await mem.ev({ kind: 9021, created_at: now() + 1, tags: [['h', G]], content: '' })
 await sleep(500)
 assert(postKickRejoin[0] === true, 'kicked member can rejoin an open club')
+assert(selfPutWatch.got.some((event) => {
+  const targets = event.tags.filter((tag) => tag[0] === 'p')
+  return event.kind === 9000 && targets.length > 0 && targets.every((tag) => tag[1] === mem.pub)
+}),
+  'non-member #p=self subscription receives only its generated auto-join put-user transition')
+selfPutWatch.close()
 
-// 2d. Listener sessions are independent of login/member presence. An unauthenticated browser
+// 2d. High-frequency presence/stage leases may use a throwaway page key, but only while the
+// socket is NIP-42 authenticated as the p-tagged current member. The event stays normally signed
+// by that page key; stale/future events and exact event replays are rejected.
+console.log('\n-- connection-bound session events --')
+const presenceSessionSK = generateSecretKey()
+const sessionPresence = sessionEvent(mem.pub, presenceSessionSK, {
+  kind: 20100, created_at: now(), tags: [['h', G]], content: '',
+})
+const acceptedPresence = await mem.sendEvent(sessionPresence)
+assert(acceptedPresence[0] === true, 'member session-key presence accepted: ' + ok(acceptedPresence))
+const replayedPresence = await mem.sendEvent(sessionPresence)
+assert(replayedPresence[0] === false && /already accepted/i.test(replayedPresence[1] || ''),
+  'exact session event replay rejected: ' + ok(replayedPresence))
+
+const unauthSession = await conn(generateSecretKey(), false)
+const unauthPresence = await unauthSession.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+  kind: 20100, created_at: now(), tags: [['h', G]], content: '',
+}))
+assert(unauthPresence[0] === false && /auth-required/i.test(unauthPresence[1] || ''),
+  'session event without NIP-42 rejected: ' + ok(unauthPresence))
+const wrongPrincipal = await mem.sendEvent(sessionEvent(host.pub, generateSecretKey(), {
+  kind: 20100, created_at: now(), tags: [['h', G]], content: '',
+}))
+assert(wrongPrincipal[0] === false && /does not match/i.test(wrongPrincipal[1] || ''),
+  'session p tag must match the authenticated socket: ' + ok(wrongPrincipal))
+const stalePresence = await mem.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+  kind: 20100, created_at: now() - 70, tags: [['h', G]], content: '',
+}))
+assert(stalePresence[0] === false && /too old/i.test(stalePresence[1] || ''),
+  'stale session event rejected: ' + ok(stalePresence))
+const futurePresence = await mem.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+  kind: 20100, created_at: now() + 60, tags: [['h', G]], content: '',
+}))
+assert(futurePresence[0] === false && /future/i.test(futurePresence[1] || ''),
+  'session event over 30 seconds in the future rejected: ' + ok(futurePresence))
+const mainKeyPresence = await mem.evRaw({ kind: 20100, created_at: now(), tags: [['h', G]], content: '' })
+assert(mainKeyPresence[0] === true, 'ordinary main-key presence remains compatible: ' + ok(mainKeyPresence))
+
+// 2e. Listener sessions are independent of login/member presence. An unauthenticated browser
 // can heartbeat an open club; clients receive only the relay-authored aggregate count.
 const listener = await conn(generateSecretKey(), false)
 const listenerCounts = host.watch({ kinds: [20106], '#h': [G], since: now() })
@@ -156,15 +240,19 @@ assert(listenerCounts.got.at(-1)?.tags.find((t) => t[0] === 'count')?.[1] === '0
 listenerCounts.close()
 rawListenerBeats.close()
 
-// 3. now_playing (30100) + play-log (1313) are relay-authored ONLY — even a MEMBER's write is
-//    rejected (the relay is the sole conductor). Guards against per-author tombstones. The
+// 3. Playback state, play-log and Auto-DJ control are relay-authored ONLY — even a MEMBER's
+//    write is rejected. Guards against forged canonical state and per-author tombstones. The
 //    ReplaceEvent dedup of the relay's OWN writes is asserted in the conductor section below.
 const memNp = await mem.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:AAA'], ['pos', '0']], content: 'member now_playing' })
 assert(memNp[0] === false && /relay-authored/.test(memNp[1] || ''), 'member now_playing (30100) write rejected: ' + ok(memNp))
 const memPlay = await mem.ev({ kind: 1313, created_at: now(), tags: [['h', G], ['p', mem.pub], ['pos', '0']], content: 'yt:AAA' })
 assert(memPlay[0] === false && /relay-authored/.test(memPlay[1] || ''), 'member play-log (1313) write rejected: ' + ok(memPlay))
+const memAutoCtrl = await mem.ev({ kind: 30111, created_at: now(), tags: [['h', G], ['d', G], ['armed', '0']], content: '' })
+assert(memAutoCtrl[0] === false && /relay-authored/.test(memAutoCtrl[1] || ''), 'member Auto-DJ control (30111) write rejected: ' + ok(memAutoCtrl))
 const npNone = await host.query({ kinds: [30100], '#h': [G] })
 assert(npNone.length === 0, `no now_playing stored from a member write (got ${npNone.length})`)
+const autoCtrlNone = await host.query({ kinds: [30111], '#h': [G] })
+assert(autoCtrlNone.length === 0, `no Auto-DJ control stored from a member write (got ${autoCtrlNone.length})`)
 
 // 4. non-member write is rejected
 const strangerWrite = await stranger.ev({ kind: 30100, created_at: now(), tags: [['h', G], ['d', G], ['track', 'yt:EVIL']], content: 'intruder' })
@@ -357,16 +445,42 @@ if (process.env.RELAY_PK) {
   )
   await sleep(700)
 
-  const takeSlot = (dj, since) => dj.ev({ kind: 30102, created_at: now(), tags: [['h', S], ['d', S], ['since', String(since)]], content: '' })
+  const takeSlot = (dj, since) => dj.ev({ kind: 30102, created_at: now(), tags: [['h', S], ['d', S], ['since', String(since)]], content: 'on' })
+  const firstStageSession = sessionEvent(stageHost.pub, generateSecretKey(), {
+    kind: 30102, created_at: now(), tags: [['h', S], ['d', S], ['since', '1']], content: 'on',
+  })
   const firstThree = await Promise.all([
-    takeSlot(stageHost, 1),
+    stageHost.sendEvent(firstStageSession),
     takeSlot(stage2, 2),
     takeSlot(stage3, 3),
   ])
   assert(firstThree.every((result) => result[0] === true), 'stage cap: first three DJs accepted')
   await sleep(500)
+
+  // Rotate the page key while all slots are full. This is an existing-DJ heartbeat, not a
+  // fourth participant, and the old author alias must be removed from persistent storage.
+  const rotatedStageSession = sessionEvent(stageHost.pub, generateSecretKey(), {
+    kind: 30102, created_at: now() + 1, tags: [['h', S], ['d', S], ['since', '1']], content: 'on',
+  })
+  const rotated = await stageHost.sendEvent(rotatedStageSession)
+  assert(rotated[0] === true, 'rotated session key keeps the same effective stage slot: ' + ok(rotated))
+  const stageRows = await stageHost.query({ kinds: [30102], '#h': [S] })
+  const hostRows = stageRows.filter((event) =>
+    event.tags.some((tag) => tag[0] === 'client' && tag[1] === SESSION_MARKER) &&
+    event.tags.some((tag) => tag[0] === 'p' && tag[1] === stageHost.pub))
+  assert(hostRows.length === 1 && hostRows[0].id === rotatedStageSession.id,
+    `stage aliases collapse to exactly the newest effective-principal state (got ${hostRows.length})`)
+
   const fourth = await takeSlot(stage4, 4)
   assert(fourth[0] === false && /stage is full/i.test(fourth[1] || ''), 'stage cap: fourth DJ rejected: ' + ok(fourth))
+
+  await stageHost.ev({ kind: 9001, created_at: now(), tags: [['h', S], ['p', stage2.pub]], content: '' })
+  await sleep(500)
+  const replacement = await takeSlot(stage4, 4)
+  assert(replacement[0] === true, 'membership revocation immediately frees the former DJ stage slot: ' + ok(replacement))
+  const stageAfterRevoke = await stageHost.query({ kinds: [30102], '#h': [S] })
+  assert(!stageAfterRevoke.some((event) => event.pubkey === stage2.pub),
+    'membership revocation removes the former DJ persistent stage lease')
 
   await stageHost.ev({ kind: 9008, created_at: now(), tags: [['h', S]], content: '' })
 }
@@ -488,12 +602,35 @@ if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
   assert(lis.status === 200 && !!clubL && clubL.live.includes(listener.pub), 'listeners: anonymous session shows as live in the club')
   assert(!!clubL && clubL.seen.some((s) => s.pubkey === listener.pub), 'listeners: anonymous session appears in the 24h seen list')
 
+  const stageBeforeBan = await mem.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+    kind: 30102, created_at: now(), tags: [['h', G], ['d', G], ['since', String(now())]], content: 'on',
+  }))
+  assert(stageBeforeBan[0] === true, 'session stage exists before principal ban: ' + ok(stageBeforeBan))
+  const banLiveChat = mem.watch({ kinds: [9], '#h': [G], since: now() })
+  await banLiveChat.ready
+
   const ban = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub, reason: 'e2e' })
   assert(ban.status === 200, 'ban → 200 (got ' + ban.status + ' ' + ban.body.slice(0, 60) + ')')
   await sleep(500)
 
   const afterBan = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'still here?' })
   assert(afterBan[0] === false, 'banned member write rejected: ' + ok(afterBan))
+  const sessionAfterBan = await mem.sendEvent(sessionEvent(mem.pub, generateSecretKey(), {
+    kind: 20100, created_at: now(), tags: [['h', G]], content: '',
+  }))
+  assert(sessionAfterBan[0] === false && /banned/i.test(sessionAfterBan[1] || ''),
+    'ban applies to a session event’s effective principal: ' + ok(sessionAfterBan))
+  const stageAfterBan = await host.query({ kinds: [30102], '#h': [G] })
+  assert(!stageAfterBan.some((event) => event.tags.some((tag) => tag[0] === 'p' && tag[1] === mem.pub)),
+    'ban purges persistent stage aliases of the effective principal')
+  const bannedHistory = await mem.queryResult({ kinds: [9], '#h': [G] })
+  assert(/restricted/i.test(bannedHistory.closed), 'banned member cannot read protected chat history')
+  await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'during ban' })
+  await sleep(300)
+  assert(!banLiveChat.got.some((event) => event.content === 'during ban'),
+    'ban blocks protected pushes on an already-open subscription')
+  const bannedPublic = await mem.query({ kinds: [30112], '#h': [G] })
+  assert(bannedPublic.length > 0, 'banned member can still read public club state')
 
   const replay = await adminReq('/admin/ban', 'POST', { pubkey: mem.pub }, ban.auth)
   assert(replay.status === 401, 'NIP-98 token replay rejected → 401 (got ' + replay.status + ')')
@@ -503,12 +640,61 @@ if (process.env.ADMIN_SK && process.env.ADMIN_URL) {
   await sleep(400)
   const afterUnban = await mem.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'back' })
   assert(afterUnban[0] === true, 'unbanned member can write again: ' + ok(afterUnban))
+  await host.ev({ kind: 9, created_at: now(), tags: [['h', G]], content: 'after unban' })
+  await sleep(300)
+  assert(banLiveChat.got.some((event) => event.content === 'after unban'),
+    'unban restores protected pushes on the existing subscription')
+  banLiveChat.close()
+
+  // Keep a virtual participant armed across the administrative delete. The endpoint must
+  // clear runtime indexes as well as Badger rows; otherwise later conductor ticks resurrect
+  // now_playing/play events for a club that no longer exists.
+  const deleteWatch = host.watch({
+    kinds: [30100, 1313, 30103, 30111, 20106, 30112],
+    '#h': [G],
+    since: now(),
+  })
+  await deleteWatch.ready
+  const armBeforeDelete = await host.ev({
+    kind: 30105,
+    created_at: now(),
+    tags: [['h', G], ['d', G], ['status', 'armed'], ['track', 'yt:DELETEauto01', 'Delete race', '120']],
+    content: 'delete-race',
+  })
+  assert(armBeforeDelete[0] === true, 'Auto DJ armed before administrative club deletion: ' + ok(armBeforeDelete))
+  await sleep(3000)
 
   const del = await adminReq('/admin/delete-club', 'POST', { groupId: G })
   assert(del.status === 200, 'delete-club → 200 (got ' + del.status + ')')
-  await sleep(600)
+  await sleep(150)
+  const deliveredAtDelete = deleteWatch.got.length
+  // Three scheduler cycles are enough to expose a stale active/Auto-DJ snapshot.
+  await sleep(7500)
   const metaAfter = await host.query({ kinds: [39000], '#d': [G] })
   assert(metaAfter.length === 0, 'club metadata gone after delete-club (got ' + metaAfter.length + ')')
+  const authorityAfter = await host.query({
+    kinds: [30100, 1313, 30103, 30111, 20106, 30112],
+    '#h': [G],
+  })
+  assert(authorityAfter.length === 0,
+    `deleted club stays silent across later conductor/listener ticks (got ${authorityAfter.length} events)`)
+  assert(deleteWatch.got.length === deliveredAtDelete,
+    `deleted club emits no new live authority events across later ticks (got ${deleteWatch.got.length - deliveredAtDelete})`)
+  deleteWatch.close()
+  const listenersAfterDelete = await adminReq('/admin/listeners', 'GET')
+  let listenersAfter = {}
+  try { listenersAfter = JSON.parse(listenersAfterDelete.body) } catch { /* ignore */ }
+  assert(!(listenersAfter.clubs || []).some((club) => club.id === G),
+    'administrative delete removes retained listener analytics for the club')
+
+  // host created G plus the two conductor fixture clubs, reaching the account cap. Removing G
+  // destructively removes its 9007 row, so the in-memory cap must release that exact count too.
+  const replacement = 'zc' + Math.random().toString(16).slice(2, 16)
+  const replacementCreate = await host.ev({ kind: 9007, created_at: now(), tags: [['h', replacement]], content: '' })
+  assert(replacementCreate[0] === true, 'administrative delete releases the owner club-cap slot: ' + ok(replacementCreate))
+  if (replacementCreate[0]) {
+    await host.ev({ kind: 9008, created_at: now(), tags: [['h', replacement]], content: '' })
+  }
   cleaned = true
 }
 

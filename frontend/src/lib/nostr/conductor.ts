@@ -5,7 +5,7 @@ import type { StageDj } from './types'
 // gone: the RELAY is the sole conductor now, so clients never elect one.)
 
 export const MAX_DJS = 3
-// Sticky stage: a DJ stays up to 1h after their last heartbeat (survives backgrounded tabs).
+// Sticky stage: a DJ stays up to 5 min after their last heartbeat (survives short tab suspends).
 export const STALE_MS = 300_000 // max 5 min on stage after the last heartbeat (matches relay condStageStaleMS)
 
 export interface DjState {

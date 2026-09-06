@@ -1,11 +1,19 @@
 // @vitest-environment happy-dom
 // (queue.svelte.ts → groups.ts → nostrLogin.ts → router reads location.pathname at import)
-import { describe, it, expect } from 'vitest'
-import { ingestQueue, queues } from './queue.svelte'
+import { afterEach, describe, it, expect } from 'vitest'
+import {
+  enrichMyTrackDuration,
+  enrichMyTrackTitle,
+  ingestQueue,
+  queues,
+  resetQueues,
+} from './queue.svelte'
+import { setLoggedIn, setLoggedOut } from './auth.svelte'
 import type { Event } from 'nostr-tools/pure'
 
 // A valid 11-char YouTube id (parseTracks drops anything else).
 const VID = (n: number) => `dQw4w9WgX0${n}`
+const ME = 'a'.repeat(64)
 
 function queueEvent(pubkey: string, createdAt: number, ids: number[]): Event {
   return {
@@ -18,6 +26,11 @@ function queueEvent(pubkey: string, createdAt: number, ids: number[]): Event {
     sig: 'x',
   } as Event
 }
+
+afterEach(() => {
+  resetQueues()
+  setLoggedOut()
+})
 
 // The periodic re-sync (refreshQueues) re-ingests whatever the relay currently holds. That is
 // only safe if ingestQueue never regresses a DJ's state to an older/equal snapshot — these
@@ -48,5 +61,23 @@ describe('ingestQueue (re-sync safety: newest created_at wins)', () => {
     ingestQueue(queueEvent('dave', 500, [2])) // newer → replaces
     expect(queues.get('dave')?.tracks.map((t) => t.videoId)).toEqual([VID(2)])
     expect(queues.get('dave')?.updatedAt).toBe(500)
+  })
+})
+
+describe('automatic player metadata', () => {
+  it('updates title and duration locally without requiring a signer', async () => {
+    setLoggedIn(ME, 'nstart')
+    ingestQueue({
+      ...queueEvent(ME, 600, []),
+      tags: [['track', `yt:${VID(1)}`, 'Bare title', '0']],
+    })
+
+    await expect(enrichMyTrackTitle('club', VID(1), 'Artist - Bare title')).resolves.toBeUndefined()
+    await expect(enrichMyTrackDuration('club', VID(1), 213)).resolves.toBeUndefined()
+
+    expect(queues.get(ME)?.tracks[0]).toMatchObject({
+      title: 'Artist - Bare title',
+      duration: 213,
+    })
   })
 })

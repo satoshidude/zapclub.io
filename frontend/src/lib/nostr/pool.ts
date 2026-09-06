@@ -55,6 +55,113 @@ export const LOBBY_VIDEO_ID = 'w8NRrAOS6s0'
 /** Shared pool for profile and club relays. */
 export const pool = new SimplePool()
 
+type ClubRelay = Awaited<ReturnType<SimplePool['ensureRelay']>>
+type ClubAuthSigner = Parameters<ClubRelay['auth']>[0]
+type ClubAuthFailureHandler = (error: Error) => void
+
+interface SafeAuthState {
+  originalAuth: ClubRelay['auth']
+  flight: Promise<string> | null
+}
+
+const CLUB_RELAY_URL = new URL(CLUB_RELAY).toString()
+const safeAuthStates = new WeakMap<ClubRelay, SafeAuthState>()
+let clubAuthFailureHandler: ClubAuthFailureHandler | null = null
+let currentClubRelay: ClubRelay | null = null
+let clubRelayGeneration = 0
+
+function errorOf(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value || 'Club relay AUTH failed'))
+}
+
+function hardTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`club relay AUTH acknowledgement: timeout after ${ms}ms`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+function installSafeAuth(relay: ClubRelay): void {
+  if (safeAuthStates.has(relay)) return
+  const state: SafeAuthState = { originalAuth: relay.auth.bind(relay), flight: null }
+  safeAuthStates.set(relay, state)
+
+  relay.auth = (signer: ClubAuthSigner): Promise<string> => {
+    if (currentClubRelay !== relay) {
+      return Promise.reject(new Error('Club relay connection was replaced'))
+    }
+    if (state.flight) return state.flight
+    let rejectSigner!: (error: unknown) => void
+    const signerFailure = new Promise<string>((_resolve, reject) => {
+      rejectSigner = reject
+    })
+    const wrappedSigner: ClubAuthSigner = async (template) => {
+      try {
+        return await signer(template)
+      } catch (error) {
+        rejectSigner(error)
+        throw error
+      }
+    }
+
+    // nostr-tools swallows signer rejection inside AbstractRelay.auth(). Racing the same
+    // physical relay-auth flight against our wrapper makes every parallel pool caller settle.
+    const raw = Promise.race([state.originalAuth(wrappedSigner), signerFailure])
+    let flight!: Promise<string>
+    flight = hardTimeout(raw, 20_000).then(
+      (result) => {
+        if (state.flight === flight) state.flight = null
+        return result
+      },
+      (cause) => {
+        if (state.flight === flight) state.flight = null
+        const error = errorOf(cause)
+        const isCurrentRelay = currentClubRelay === relay
+        if (isCurrentRelay) currentClubRelay = null
+        // close() synchronously invalidates the private rejected/hanging authPromise; the pool's
+        // onclose hook removes this relay instance so an explicit retry receives a clean one.
+        void relay.close()
+        // A late result from a relay already replaced by an explicit retry must not re-pause
+        // the fresh generation.
+        if (isCurrentRelay) clubAuthFailureHandler?.(error)
+        throw error
+      },
+    )
+    state.flight = flight
+    return flight
+  }
+}
+
+const ensureRelay = pool.ensureRelay.bind(pool)
+pool.ensureRelay = async (url, params) => {
+  const isClubRelay = new URL(url).toString() === CLUB_RELAY_URL
+  const generation = clubRelayGeneration
+  const relay = await ensureRelay(url, params)
+  if (isClubRelay) {
+    if (generation !== clubRelayGeneration) {
+      void relay.close()
+      throw new Error('Club relay connection was replaced')
+    }
+    installSafeAuth(relay)
+    currentClubRelay = relay
+  }
+  return relay
+}
+
+/** Registers the central lifecycle callback used by groups.ts for AUTH pause/cleanup. */
+export function setClubAuthFailureHandler(handler: ClubAuthFailureHandler | null): void {
+  clubAuthFailureHandler = handler
+}
+
 /** Reads the latest kind:0 profile of a pubkey from the public pool. */
 export async function fetchProfile(pubkey: string): Promise<ProfileMetadata | null> {
   const event = await pool.get(PROFILE_RELAYS, { kinds: [0], authors: [pubkey] }, { maxWait: 4000 })
@@ -79,6 +186,14 @@ export async function publishProfile(event: Event): Promise<void> {
   }
 }
 
+/** Closes only the account-bound club-relay connection. */
+export function closeClubRelay(): void {
+  clubRelayGeneration++
+  currentClubRelay = null
+  pool.close([CLUB_RELAY])
+}
+
 export function closePool(): void {
-  pool.close([...PROFILE_RELAYS, CLUB_RELAY])
+  closeClubRelay()
+  pool.close(PROFILE_RELAYS)
 }

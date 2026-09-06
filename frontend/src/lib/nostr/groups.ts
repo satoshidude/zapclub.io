@@ -1,12 +1,20 @@
 import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { minePow } from 'nostr-tools/nip13'
-import { pool, CLUB_RELAY, CLUB_RELAY_PUBKEY, PROFILE_RELAYS } from './pool'
+import {
+  pool,
+  CLUB_RELAY,
+  CLUB_RELAY_PUBKEY,
+  PROFILE_RELAYS,
+  closeClubRelay,
+  setClubAuthFailureHandler,
+} from './pool'
 import { signEvent } from './nostrLogin'
-import { auth } from './auth.svelte'
+import { auth, onAuthSigningStateChange } from './auth.svelte'
 import { resolveZapper } from './zaps.svelte'
 import type { Club, ClubMember, ClubConfig } from './types'
 import { SESSION_LOOKBACK_MS } from './playlog'
+import { sessionEventPrincipal, signSessionEvent } from './sessionSigner'
 
 // NIP-29 group event kinds.
 export const KIND_PUT_USER = 9000
@@ -40,31 +48,234 @@ export const KIND_AUTODJ_CTRL = 30111 // replaceable per club (d=club): relay-si
 
 const RELAYS = [CLUB_RELAY]
 
-/** NIP-42 AUTH handler: signs the relay challenge via the active signer. */
-const onauth = (evt: EventTemplate): Promise<VerifiedEvent> =>
-  signEvent(evt) as Promise<VerifiedEvent>
+export type ClubOperationIntent = 'automatic' | 'explicit'
 
-/** One-shot relay query that can complete the NIP-42 challenge and replay itself. */
-export function queryClubAuthed(filter: Filter, maxWait = 4000): Promise<Event[]> {
-  return new Promise((resolve) => {
-    const events: Event[] = []
+export class ClubAuthPausedError extends Error {
+  constructor(message = 'Club relay authentication is paused until the next explicit action') {
+    super(message)
+    this.name = 'ClubAuthPausedError'
+  }
+}
+
+type AuthFailureListener = (error: Error) => void
+type AuthRecoveryListener = () => void
+type AuthPauseListener = () => void
+type ClubAuthBlock = { pubkey: string; phase: 'paused' | 'retrying' }
+
+const AUTH_SIGN_TIMEOUT_MS = 15_000
+const PUBLISH_TIMEOUT_MS = AUTH_SIGN_TIMEOUT_MS + 5_000
+const authFailureListeners = new Set<AuthFailureListener>()
+const authRecoveryListeners = new Set<AuthRecoveryListener>()
+const authPauseListeners = new Set<AuthPauseListener>()
+let authBlock: ClubAuthBlock | null = null
+let authGeneration = 0
+
+function errorOf(value: unknown, fallback: string): Error {
+  if (value instanceof Error) return value
+  const detail = String(value || fallback)
+  return new Error(detail)
+}
+
+function isConnectionFailure(value: unknown): boolean {
+  return typeof value === 'string' && value.toLowerCase().startsWith('connection failure:')
+}
+
+function requiresAuthPause(error: Error): boolean {
+  return isConnectionFailure(error.message)
+    || /\b(?:auth|authenticate|authentication)\b|timed? out|websocket|\bsocket\b|\bconnection\b|\bnetwork\b|\boffline\b/i.test(error.message)
+}
+
+function signalAuthFailure(error: Error): void {
+  for (const listener of [...authFailureListeners]) listener(error)
+}
+
+function pauseClubAuth(pubkey: string | null, generation: number, cause: unknown): Error {
+  const error = errorOf(cause, 'Club relay authentication failed')
+  if (!pubkey || auth.pubkey !== pubkey || authGeneration !== generation) return error
+  if (authBlock?.pubkey === pubkey && authBlock.phase === 'paused') return error
+  authBlock = { pubkey, phase: 'paused' }
+  signalAuthFailure(error)
+  closeClubRelay()
+  for (const listener of [...authPauseListeners]) listener()
+  return error
+}
+
+setClubAuthFailureHandler((error) => {
+  pauseClubAuth(auth.pubkey, authGeneration, error)
+})
+
+function withHardTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}: timeout after ${ms}ms`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/** True while background club operations must not reopen/authenticate the relay. */
+export function isClubAuthPaused(pubkey = auth.pubkey): boolean {
+  return !!pubkey && authBlock?.pubkey === pubkey
+}
+
+/** Account switch/logout boundary: reject old operations and forget their auth latch. */
+export function resetClubAuthState(): void {
+  authGeneration++
+  authBlock = null
+  signalAuthFailure(new Error('Club relay authentication reset'))
+}
+
+/** Live subscriptions use this to reopen after the one allowed explicit AUTH retry succeeds. */
+export function onClubAuthRecovered(listener: AuthRecoveryListener): () => void {
+  authRecoveryListeners.add(listener)
+  return () => authRecoveryListeners.delete(listener)
+}
+
+/** Public club subscriptions refresh immediately into prompt-free mode after an AUTH pause. */
+export function onClubAuthPaused(listener: AuthPauseListener): () => void {
+  authPauseListeners.add(listener)
+  return () => authPauseListeners.delete(listener)
+}
+
+function assertOperationAllowed(intent: ClubOperationIntent): void {
+  if (intent === 'automatic' && isClubAuthPaused()) throw new ClubAuthPausedError()
+}
+
+function prepareExplicitRetry(intent: ClubOperationIntent): void {
+  if (intent !== 'explicit' || !auth.pubkey || authBlock?.pubkey !== auth.pubkey) return
+  if (authBlock.phase === 'retrying') return
+  authBlock = { pubkey: auth.pubkey, phase: 'retrying' }
+  authGeneration++
+  closeClubRelay()
+  for (const listener of [...authPauseListeners]) listener()
+}
+
+function markClubOperationSucceeded(pubkey: string | null): void {
+  if (!pubkey || auth.pubkey !== pubkey || authBlock?.pubkey !== pubkey) return
+  if (authBlock.phase !== 'retrying') return
+  authBlock = null
+  for (const listener of [...authRecoveryListeners]) listener()
+}
+
+function runClubOperation<T>(
+  start: () => Promise<T>,
+  timeoutMs: number,
+  label: string,
+  cleanup?: () => void,
+): Promise<T> {
+  const pubkey = auth.pubkey
+  const generation = authGeneration
+  return new Promise<T>((resolve, reject) => {
     let settled = false
-    const finish = () => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const finish = (error?: unknown, value?: T) => {
       if (settled) return
       settled = true
-      resolve(events)
+      if (timer) clearTimeout(timer)
+      authFailureListeners.delete(onAuthFailure)
+      cleanup?.()
+      if (error !== undefined) reject(errorOf(error, `${label} failed`))
+      else resolve(value as T)
     }
-    pool.subscribeEose(RELAYS, filter, {
-      onauth,
-      maxWait,
-      onevent: (event) => events.push(event),
-      onclose: finish,
+    const onAuthFailure = (error: Error) => finish(error)
+    authFailureListeners.add(onAuthFailure)
+    timer = setTimeout(() => {
+      const error = new Error(`${label}: timeout after ${timeoutMs}ms`)
+      pauseClubAuth(pubkey, generation, error)
+      finish(error)
+    }, timeoutMs)
+
+    void Promise.resolve().then(async () => {
+      // resetSession/resetClubAuthState may settle this operation before the scheduled
+      // start callback runs. Re-check the captured identity boundary immediately before
+      // touching the pool so an old account cannot reopen or authenticate a new socket.
+      if (settled) return
+      if (generation !== authGeneration || pubkey !== auth.pubkey) {
+        finish(new Error(`${label}: authentication context changed`))
+        return
+      }
+      try {
+        const value = await start()
+        finish(undefined, value)
+      } catch (cause) {
+        const error = errorOf(cause, `${label} failed`)
+        if (requiresAuthPause(error)) pauseClubAuth(pubkey, generation, error)
+        else markClubOperationSucceeded(pubkey)
+        finish(error)
+      }
     })
+  })
+}
+
+/** NIP-42 signer shared by every club query, publish and protected subscription. */
+export const clubAuthHandler = async (evt: EventTemplate): Promise<VerifiedEvent> => {
+  const pubkey = auth.pubkey
+  const generation = authGeneration
+  if (!pubkey) throw new ClubAuthPausedError('No authenticated identity for club relay AUTH')
+  if (authBlock?.pubkey === pubkey && authBlock.phase === 'paused') throw new ClubAuthPausedError()
+  try {
+    return await withHardTimeout(
+      signEvent(evt, { allowNip46Reconnect: false }) as Promise<VerifiedEvent>,
+      AUTH_SIGN_TIMEOUT_MS,
+      'club relay AUTH',
+    )
+  } catch (cause) {
+    throw pauseClubAuth(pubkey, generation, cause)
+  }
+}
+
+/** One-shot relay query that can complete the NIP-42 challenge and replay itself. */
+export async function queryClubAuthed(filter: Filter, maxWait = 4000): Promise<Event[]> {
+  assertOperationAllowed('automatic')
+  const events: Event[] = []
+  let sub: ReturnType<typeof pool.subscribeEose> | null = null
+  const pubkey = auth.pubkey
+  const operation = runClubOperation(
+    () => new Promise<Event[]>((resolve, reject) => {
+      let querySettled = false
+      const finish = (error?: Error) => {
+        if (querySettled) return
+        querySettled = true
+        if (error) reject(error)
+        else resolve(events)
+      }
+      sub = pool.subscribeEose(RELAYS, filter, {
+        onauth: clubAuthHandler,
+        maxWait,
+        onevent: (event) => events.push(event),
+        onclose: (reasons) => {
+          const reason = reasons.find((entry) =>
+            entry && !entry.includes('closed automatically on eose') && !entry.includes('club query cleanup'))
+          if (reason) finish(new Error(reason))
+          else finish()
+        },
+      })
+    }),
+    maxWait + AUTH_SIGN_TIMEOUT_MS + 5_000,
+    'club query',
+    () => { void sub?.close('club query cleanup') },
+  )
+  return operation.then((result) => {
+    markClubOperationSucceeded(pubkey)
+    return result
   })
 }
 
 function tagValue(ev: Event, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
+}
+
+/** NIP-01 replaceable ordering: newest timestamp, then lexicographically lowest event id. */
+function preferredReplacement(candidate: Event, current: Event): boolean {
+  return candidate.created_at > current.created_at
+    || (candidate.created_at === current.created_at && candidate.id < current.id)
 }
 
 /** Generates a short, unique group id (NIP-29 d-tag). */
@@ -73,19 +284,52 @@ function generateGroupId(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+async function publishToClub(
+  signed: Event,
+  intent: ClubOperationIntent,
+  failureMessage: string,
+): Promise<void> {
+  assertOperationAllowed(intent)
+  prepareExplicitRetry(intent)
+  const pubkey = auth.pubkey
+  await runClubOperation(async () => {
+    const results = await Promise.allSettled(pool.publish(RELAYS, signed, { onauth: clubAuthHandler }))
+    const accepted = results.some((result) => result.status === 'fulfilled' && !isConnectionFailure(result.value))
+    if (accepted) return
+    const connectionFailure = results.find(
+      (result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled' && isConnectionFailure(result.value),
+    )
+    if (connectionFailure) throw new Error(connectionFailure.value)
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    throw errorOf(rejected?.reason, failureMessage)
+  }, PUBLISH_TIMEOUT_MS, 'club publish')
+  markClubOperationSucceeded(pubkey)
+}
+
 /** Publishes an already-signed event to the club relay (with AUTH). Fire-and-forget-ok. */
-export async function publishSignedClub(signed: Event): Promise<void> {
-  await Promise.allSettled(pool.publish(RELAYS, signed, { onauth }))
+export async function publishSignedClub(signed: Event, intent: ClubOperationIntent = 'automatic'): Promise<void> {
+  await publishToClub(signed, intent, 'Relay rejected the signed event')
+}
+
+/**
+ * Publishes a connection-bound runtime event signed by the page-session key. The relay accepts
+ * this path only for Presence/Stage and only after NIP-42 authenticated the p-tagged main key.
+ */
+export async function publishSessionClub(
+  template: EventTemplate,
+  intent: ClubOperationIntent = 'automatic',
+): Promise<Event> {
+  assertOperationAllowed(intent)
+  const signed = signSessionEvent(template)
+  await publishToClub(signed, intent, 'Relay rejected the session event')
+  return signed
 }
 
 /** Signs a template and publishes it to the club relay. Throws on total failure. */
-async function publishClub(template: EventTemplate): Promise<Event> {
-  const signed = await signEvent(template)
-  const results = await Promise.allSettled(pool.publish(RELAYS, signed, { onauth }))
-  if (!results.some((r) => r.status === 'fulfilled')) {
-    const reason = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-    throw new Error(reason?.reason?.toString() ?? 'Relay rejected the event')
-  }
+async function publishClub(template: EventTemplate, intent: ClubOperationIntent = 'explicit'): Promise<Event> {
+  assertOperationAllowed(intent)
+  const signed = await signEvent(template, { allowNip46Reconnect: intent === 'explicit' })
+  await publishToClub(signed, intent, 'Relay rejected the event')
   return signed
 }
 
@@ -257,7 +501,7 @@ export async function reportBrokenTrack(groupId: string, videoId: string): Promi
     created_at: now(),
     tags: [['h', groupId]],
     content: videoId,
-  })
+  }, 'automatic')
 }
 
 // ── Moderation (host/moderator only — the relay enforces the role) ────────────
@@ -313,10 +557,9 @@ export async function fetchJoinRequests(
   groupId: string,
   existingMembers: string[] = [],
 ): Promise<{ pubkey: string; createdAt: number }[]> {
-  const evs = await pool.querySync(
-    RELAYS,
+  const evs = await queryClubAuthed(
     { kinds: [KIND_JOIN_REQUEST], '#h': [groupId] },
-    { maxWait: 4000 },
+    4000,
   )
   // Keep newest request per pubkey.
   const map = new Map<string, number>()
@@ -606,7 +849,7 @@ interface StageClubDj {
 
 /**
  * Select the first active stage DJ per club from replaceable stage events.
- * The newest event per author wins, so a later `off` event removes that DJ.
+ * The newest event per relay-bound principal wins, so a later `off` event removes that DJ.
  */
 export function selectOnStageClubDjs(
   events: Event[],
@@ -619,9 +862,10 @@ export function selectOnStageClubDjs(
   for (const ev of events) {
     const clubId = tagValue(ev, 'h')
     if (!clubId || !allowed.has(clubId)) continue
-    const key = `${clubId}:${ev.pubkey}`
+    const principal = sessionEventPrincipal(ev)
+    const key = `${clubId}:${principal}`
     const previous = newest.get(key)
-    if (!previous || ev.created_at > previous.created_at) newest.set(key, ev)
+    if (!previous || preferredReplacement(ev, previous)) newest.set(key, ev)
   }
 
   const byClub = new Map<string, StageClubDj[]>()
@@ -630,7 +874,7 @@ export function selectOnStageClubDjs(
     if (ev.content === 'off' || nowMs - ev.created_at * 1000 >= DIRECTORY_STAGE_STALE_MS) continue
     const since = Number(tagValue(ev, 'since')) || ev.created_at
     const djs = byClub.get(clubId) ?? []
-    djs.push({ pubkey: ev.pubkey, since })
+    djs.push({ pubkey: sessionEventPrincipal(ev), since })
     byClub.set(clubId, djs)
   }
 
@@ -669,7 +913,7 @@ export function subscribeClubPresence(
     {
       onevent(ev) {
         const h = ev.tags.find((t) => t[0] === 'h')?.[1]
-        if (h) onBeat(h, ev.pubkey, ev.created_at * 1000)
+        if (h) onBeat(h, sessionEventPrincipal(ev), ev.created_at * 1000)
       },
     },
   )
@@ -729,7 +973,7 @@ export async function fetchMyClubs(pubkey: string): Promise<MyClub[]> {
 
 // A DJ's stage event (30102) is considered "live" within this window of its last
 // heartbeat — matches the stage's own sticky STALE_MS.
-const STAGE_STALE_MS = 3_600_000
+const STAGE_STALE_MS = 300_000
 
 export interface UserClubActivity {
   /** Every club the user is a member of (incl. ones they host), as full cards, ordered:
@@ -777,7 +1021,7 @@ export async function fetchUserClubActivity(pubkey: string): Promise<UserClubAct
   const ids = [...memberIds]
   const stageEvents = ids.length
     ? (await pool.querySync(RELAYS, { kinds: [KIND_STAGE], '#h': ids }, { maxWait: 4000 })).filter(
-        (ev) => ev.pubkey === pubkey,
+        (ev) => sessionEventPrincipal(ev) === pubkey,
       )
     : []
 
@@ -789,8 +1033,8 @@ export async function fetchUserClubActivity(pubkey: string): Promise<UserClubAct
     const h = tagValue(ev, 'h')
     if (!h) continue
     const ex = newestByGroup.get(h)
-    if (!ex || ev.created_at > ex.created_at) newestByGroup.set(h, ev)
-    if (!lastStage || ev.created_at > lastStage.created_at) lastStage = ev
+    if (!ex || preferredReplacement(ev, ex)) newestByGroup.set(h, ev)
+    if (!lastStage || preferredReplacement(ev, lastStage)) lastStage = ev
   }
   const nowMs = Date.now()
   const liveIds = new Set<string>()
@@ -907,83 +1151,106 @@ export function subscribeClub(groupId: string, h: ClubSubHandlers): () => void {
     since: Math.floor((Date.now() - SESSION_LOOKBACK_MS) / 1000),
   }
 
-  const metaSub = pool.subscribe(RELAYS, metaFilter, {
-    onauth,
-    onevent(ev) {
-      if (ev.kind === KIND_METADATA) h.onMeta?.(ev)
-      else if (ev.kind === KIND_ADMINS) h.onAdmins?.(ev)
-    },
-  })
+  let active = true
+  let observedPubkey = auth.pubkey
+  let observedCanSign = auth.canSign
+  let subscriptions: Array<{ close: (reason?: string) => unknown }> = []
+  const closeSubscriptions = () => {
+    const current = subscriptions
+    subscriptions = []
+    for (const subscription of current) void subscription.close('club subscription refresh')
+  }
+  const openSubscriptions = () => {
+    if (!active) return
+    closeSubscriptions()
+    const automaticAuth = auth.canSign && !isClubAuthPaused() ? clubAuthHandler : undefined
+    const authOptions = automaticAuth ? { onauth: automaticAuth } : {}
 
-  // Member roster + presence are a separate authenticated social layer. Keeping
-  // them out of the public filters prevents a rejected protected kind from also
-  // closing the public stream subscription for guests and non-members.
-  const membersSub = auth.canSign
-    ? pool.subscribe(RELAYS, membersFilter, {
-        onauth,
+    subscriptions.push(pool.subscribe(RELAYS, metaFilter, {
+      ...authOptions,
+      onevent(ev) {
+        if (ev.kind === KIND_METADATA) h.onMeta?.(ev)
+        else if (ev.kind === KIND_ADMINS) h.onAdmins?.(ev)
+      },
+    }))
+
+    // Member roster + presence are a separate authenticated social layer. During an AUTH
+    // pause they stay closed, so a timer or component remount cannot prompt the signer.
+    if (auth.canSign && !isClubAuthPaused()) {
+      subscriptions.push(pool.subscribe(RELAYS, membersFilter, {
+        onauth: clubAuthHandler,
         onevent(ev) {
           if (ev.kind === KIND_MEMBERS) h.onMembers?.(ev)
         },
-      })
-    : null
-
-  const presenceSub = auth.canSign
-    ? pool.subscribe(RELAYS, { kinds: [KIND_PRESENCE], '#h': [groupId] }, {
-        onauth,
+      }))
+      subscriptions.push(pool.subscribe(RELAYS, { kinds: [KIND_PRESENCE], '#h': [groupId] }, {
+        onauth: clubAuthHandler,
         onevent(ev) {
           if (ev.kind === KIND_PRESENCE) h.onPresence?.(ev)
         },
-      })
-    : null
-
-  // A short live moderation tail lets the affected browser react immediately
-  // when this account joins, leaves or is kicked. Keeping it separate prevents
-  // old moderation history from crowding state events out of content EOSE.
-  const membershipChangeSub = auth.canSign
-    ? pool.subscribe(RELAYS, {
+      }))
+      // A short live moderation tail lets the affected browser react immediately when this
+      // account joins, leaves or is kicked.
+      subscriptions.push(pool.subscribe(RELAYS, {
         kinds: [KIND_PUT_USER, KIND_REMOVE_USER],
         '#h': [groupId],
+        '#p': [auth.pubkey!],
         since: Math.floor(Date.now() / 1000) - 60,
       }, {
-        onauth,
+        onauth: clubAuthHandler,
         onevent: (ev) => h.onMembershipChange?.(ev),
-      })
-    : null
+      }))
+    }
 
-  const contentSub = pool.subscribe(RELAYS, contentFilter, {
-    onauth,
-    oneose: () => h.onEose?.(),
-    onevent(ev) {
-      if (ev.kind === KIND_NOW_PLAYING) h.onNowPlaying?.(ev)
-      else if (ev.kind === KIND_STAGE) h.onStage?.(ev)
-      else if (ev.kind === KIND_STAGE_KICK) h.onStageKick?.(ev)
-      else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
-      else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
-      else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
-      else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
-      else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
-      else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
-      else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
-      else if (ev.kind === KIND_MOOD) h.onMood?.(ev)
-      else if (ev.kind === KIND_LISTENER_COUNT) h.onListenerCount?.(ev)
-      else if (ev.kind === KIND_MEMBER_COUNT) h.onMemberCount?.(ev)
-    },
+    subscriptions.push(pool.subscribe(RELAYS, contentFilter, {
+      ...authOptions,
+      oneose: () => h.onEose?.(),
+      onevent(ev) {
+        if (ev.kind === KIND_NOW_PLAYING) h.onNowPlaying?.(ev)
+        else if (ev.kind === KIND_STAGE) h.onStage?.(ev)
+        else if (ev.kind === KIND_STAGE_KICK) h.onStageKick?.(ev)
+        else if (ev.kind === KIND_QUEUE) h.onQueue?.(ev)
+        else if (ev.kind === KIND_SKIP) h.onSkip?.(ev)
+        else if (ev.kind === KIND_CLUB_CONFIG) h.onConfig?.(ev)
+        else if (ev.kind === KIND_ZAP_BROADCAST) h.onZapBroadcast?.(ev)
+        else if (ev.kind === KIND_FLOOR_REACTION) h.onEmote?.(ev)
+        else if (ev.kind === KIND_AUTODJ) h.onAutoDJ?.(ev)
+        else if (ev.kind === KIND_AUTODJ_CTRL) h.onAutoDJCtrl?.(ev)
+        else if (ev.kind === KIND_MOOD) h.onMood?.(ev)
+        else if (ev.kind === KIND_LISTENER_COUNT) h.onListenerCount?.(ev)
+        else if (ev.kind === KIND_MEMBER_COUNT) h.onMemberCount?.(ev)
+      },
+    }))
+
+    subscriptions.push(pool.subscribe(RELAYS, playFilter, {
+      ...authOptions,
+      onevent(ev) {
+        if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
+      },
+    }))
+  }
+
+  openSubscriptions()
+  const stopPause = onClubAuthPaused(openSubscriptions)
+  const stopRecovery = onClubAuthRecovered(openSubscriptions)
+  const stopSigningState = onAuthSigningStateChange((next) => {
+    if (next.pubkey === observedPubkey && next.canSign === observedCanSign) return
+    const switchedAccounts = observedPubkey !== null
+      && next.pubkey !== null
+      && next.pubkey !== observedPubkey
+    observedPubkey = next.pubkey
+    observedCanSign = next.canSign
+    // goHome() has already scheduled this old club view for unmount. Reopening its
+    // subscriptions under the new account could otherwise trigger an unnecessary AUTH.
+    if (switchedAccounts) return
+    openSubscriptions()
   })
-
-  const playSub = pool.subscribe(RELAYS, playFilter, {
-    onauth,
-    onevent(ev) {
-      if (ev.kind === KIND_PLAY) h.onPlay?.(ev)
-    },
-  })
-
   return () => {
-    metaSub.close()
-    membersSub?.close()
-    presenceSub?.close()
-    membershipChangeSub?.close()
-    contentSub.close()
-    playSub.close()
+    active = false
+    stopPause()
+    stopRecovery()
+    stopSigningState()
+    closeSubscriptions()
   }
 }
 

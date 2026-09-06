@@ -29,13 +29,48 @@ Only group members may write club content; the relay checks membership against
 the `h`-tag group. The sole exception is the empty, anonymous `20105` listener
 heartbeat; its relay-signed `20106` aggregate exposes only the count. The public
 relay-signed `30112` member aggregate likewise exposes only a club ID and count,
-never roster identities. `30100`, `1313`, `20106`, `30112` and NIP-78
+never roster identities. `30100`, `1313`, `20106`, `30111`, `30112` and NIP-78
 credibility snapshots are relay-authored only. NIP-42 AUTH runs on connect.
 Public club metadata, playback, stage and aggregate counts remain readable
-without AUTH, while kind `9`, presence and `39002` are served only to
-authenticated current members. The check applies to history, direct event-ID
-queries and every live push, so leave/kick also revokes an already-open
-subscription.
+without AUTH. Kind `9`, presence, `39002` and membership transitions (`9000`,
+`9001`, `9022`) are served only to authenticated current members. Join requests
+(`9021`) can contain paid-entry proof material and are visible only to the current
+owner or a moderator. These checks apply to `#h`, direct event-ID/reference queries
+and every live push. A non-member may subscribe to an authenticated, `#p=self`
+`9000`/`9001` tail so an open-club auto-join can complete; the relay returns only
+single-principal events targeted exclusively at that account. A removed member
+likewise receives only its own exact kick/leave transition before the already-open
+subscription is revoked.
+
+Kinds `20100` (member presence, ephemeral) and `30102` (stage lease) also accept a
+page-local session signature with exactly one `client=zapclub-session-v1` tag and
+one `p=<main pubkey>` tag. This is not a durable Nostr delegation: the relay accepts
+it only on a WebSocket currently NIP-42-authenticated as that `p`, after rechecking
+current membership and the relay ban list for the event's single `h` club. Session
+events older than 60 seconds, more than 30 seconds in the future, or replayed with
+the same event ID are rejected. Khatru still verifies the event ID and Schnorr
+signature against the page-local author key before these checks run. Authorization
+is rechecked at the final commit boundary. The bounded replay reservation is also
+the final write gate and is rolled back when stage admission fails, so rejected
+traffic cannot grow the replay cache or strand a stage slot.
+
+After authorization, the relay uses `p` as the effective principal for per-account
+rate limits, conductor presence, the stage index and the three-slot stage cap. Normal
+main-key-signed `20100`/`30102` events remain compatible. `20100` remains protected
+and ephemeral. `30102` remains addressable and persistent, but the relay removes old
+main-key/session-key author aliases for the same effective principal and club, leaving
+exactly the newest stage state when a page session key rotates.
+Kick, leave and relay-wide ban revoke that effective principal immediately from
+the conductor/stage-cap indexes and delete its durable stage lease, so neither a
+restart nor a later rejoin can resurrect an old session alias.
+Relay-wide bans also remove protected chat, presence and roster access from an
+already authenticated connection; public playback and aggregate state stay public.
+An administrative club deletion first removes the relay29 group authority, then
+evicts social membership, listener analytics, Stage/Auto-DJ admissions, all
+Conductor indexes and playback state, and the matching SQLite rows before the Badger
+purge. Errors abort the remaining purge and are reported to the caller. Later
+scheduler ticks therefore cannot recreate relay-signed state for a deleted club;
+the removed create row also releases its owner's club-cap slot.
 
 Vibemeter kind `20104` is ephemeral and membership-gated. The relay rejects
 Banger and Skip reactions from the DJ whose track is currently playing. Other
@@ -111,7 +146,8 @@ cd relay && ./e2e.sh     # builds + boots a throwaway relay, runs grouptest.mjs,
 `e2e.sh` generates fresh keys, boots a temp-DB relay with `RELAY_SUPERADMIN` set to the
 test admin key, and runs the full suite — **including the admin NIP-98 path**: ban (+
 event purge), banned-member write rejection, NIP-98 token replay → 401, unban, and
-delete-club (metadata gone). No manual setup. Expect `ALL PASSED`.
+delete-club (metadata, runtime authority and retained listener state gone across
+multiple scheduler ticks; owner cap released). No manual setup. Expect `ALL PASSED`.
 
 ## E2E test (manual, against a running relay)
 

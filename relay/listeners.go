@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"sort"
 	"sync"
@@ -45,6 +46,7 @@ type span struct {
 
 type listenerStats struct {
 	mu            sync.Mutex
+	persistMu     sync.Mutex
 	path          string
 	Seen          map[string]map[string]*span    `json:"seen"`     // club -> anonymous session pubkey -> span
 	Series        map[string][]listenerSample    `json:"series"`   // club -> finalized buckets
@@ -202,6 +204,24 @@ func (s *listenerStats) remove(club, pubkey string) {
 		}
 	}
 	s.mu.Unlock()
+}
+
+// deleteClub removes both live and retained anonymous analytics for an administratively deleted
+// club. In particular, clearing published prevents the periodic broadcaster from recreating a
+// relay-signed zero-count event after the Badger purge.
+func (s *listenerStats) deleteClub(club string) error {
+	if club == "" {
+		return nil
+	}
+	s.mu.Lock()
+	delete(s.Seen, club)
+	delete(s.Series, club)
+	delete(s.CurSets, club)
+	delete(s.active, club)
+	delete(s.published, club)
+	delete(s.lastPublished, club)
+	s.mu.Unlock()
+	return s.save()
 }
 
 func (s *listenerStats) pruneActiveLocked(now int64) {
@@ -385,16 +405,25 @@ func (s *listenerStats) tick(now int64, persist bool) {
 	}
 }
 
-func (s *listenerStats) save() {
+func (s *listenerStats) save() error {
+	// Serialize the snapshot and the fixed-name atomic replace as one operation. Otherwise a
+	// periodic save racing an administrative deletion could restore an older snapshot last.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	data, err := json.Marshal(s)
 	s.mu.Unlock()
 	if err != nil {
-		return
+		return err
 	}
 	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, data, 0o600) != nil {
-		return
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		log.Printf("listener analytics save: %v", err)
+		return err
 	}
-	_ = os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		log.Printf("listener analytics rename: %v", err)
+		return err
+	}
+	return nil
 }

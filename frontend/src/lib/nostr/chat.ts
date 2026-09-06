@@ -1,18 +1,14 @@
-import type { Event, EventTemplate, VerifiedEvent } from 'nostr-tools/pure'
+import type { Event, EventTemplate } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { minePow } from 'nostr-tools/nip13'
 import { auth } from './auth.svelte'
-import { publishClub } from './groups'
-import { signEvent } from './nostrLogin'
+import { clubAuthHandler, isClubAuthPaused, onClubAuthRecovered, publishClub } from './groups'
 import { CLUB_RELAY, pool } from './pool'
 
 export const KIND_CHAT = 9
 export const CHAT_MAX_LENGTH = 1000
 export const CHAT_HISTORY_LIMIT = 100
 const CHAT_POW_DIFFICULTY = 10
-
-const onauth = (event: EventTemplate): Promise<VerifiedEvent> =>
-  signEvent(event) as Promise<VerifiedEvent>
 
 function now(): number {
   return Math.floor(Date.now() / 1000)
@@ -64,14 +60,28 @@ export function subscribeChat(groupId: string, handlers: ChatSubscriptionHandler
     '#h': [groupId],
     limit: CHAT_HISTORY_LIMIT,
   }
-  const sub = pool.subscribe([CLUB_RELAY], filter, {
-    onauth,
-    onevent: handlers.onMessage,
-    oneose: handlers.onEose,
-    onclose: (reasons) => {
-      const reason = reasons.find((entry) => entry && !entry.includes('closed by caller'))
-      if (reason) handlers.onClose?.(reason)
-    },
-  })
-  return () => sub.close('closed by caller')
+  let active = true
+  let sub: ReturnType<typeof pool.subscribe> | null = null
+  const open = () => {
+    if (!active || isClubAuthPaused()) return
+    void sub?.close('closed for auth recovery')
+    sub = pool.subscribe([CLUB_RELAY], filter, {
+      onauth: clubAuthHandler,
+      onevent: handlers.onMessage,
+      oneose: handlers.onEose,
+      onclose: (reasons) => {
+        const reason = reasons.find((entry) =>
+          entry && !entry.includes('closed by caller') && !entry.includes('closed for auth recovery'))
+        if (reason) handlers.onClose?.(reason)
+      },
+    })
+  }
+  open()
+  const stopRecovery = onClubAuthRecovered(open)
+  return () => {
+    active = false
+    stopRecovery()
+    void sub?.close('closed by caller')
+    sub = null
+  }
 }

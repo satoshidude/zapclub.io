@@ -8,7 +8,8 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Token-Bucket-Rate-Limiter pro pubkey für ausgewählte Event-Kinds. Greift
+// Token-Bucket-Rate-Limiter pro effective principal für ausgewählte Event-Kinds. Bei normalen
+// Events ist das der Autor; bei akzeptierten Session-Events der p-getaggte Hauptschlüssel. Greift
 // ZUSÄTZLICH zum allgemeinen Limiter und ist bewusst streng für Nutzer-Content
 // (Chat/Reaktionen), um Flood/Spam zu stoppen, ohne legitime Nutzung zu behindern.
 type kindLimiter struct {
@@ -48,10 +49,11 @@ func (l *kindLimiter) reject(_ context.Context, evt *nostr.Event) (bool, string)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	b := l.buckets[evt.PubKey]
+	principal := effectiveEventPubKey(evt)
+	b := l.buckets[principal]
 	if b == nil {
 		b = &tokenBucket{tokens: l.burst, last: now}
-		l.buckets[evt.PubKey] = b
+		l.buckets[principal] = b
 	}
 	// Auffüllen nach vergangener Zeit, gedeckelt auf burst.
 	b.tokens += now.Sub(b.last).Seconds() * l.refillPerSec
@@ -67,7 +69,7 @@ func (l *kindLimiter) reject(_ context.Context, evt *nostr.Event) (bool, string)
 	return false, ""
 }
 
-// sweep entfernt länger inaktive Buckets, damit die per-pubkey-Map nicht unbegrenzt
+// sweep entfernt länger inaktive Buckets, damit die per-principal-Map nicht unbegrenzt
 // wächst (Memory-DoS-Schutz — billig erzeugte Spam-pubkeys hinterließen sonst dauerhaft
 // Einträge). Vom 5-Minuten-Ticker in main.go aufgerufen.
 func (l *kindLimiter) sweep(idle time.Duration) {

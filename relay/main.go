@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -66,9 +67,9 @@ func pruneOldPlays(db *badger.BadgerBackend, cutoffSec int64) int {
 }
 
 // isForeignConductorWrite reports whether an event in the relay-authored state surface came from
-// anyone but the relay key. Clients must not forge playback or credibility snapshots.
+// anyone but the relay key. Clients must not forge playback, control or aggregate snapshots.
 func isForeignConductorWrite(kind int, pubkey, relayPub string) bool {
-	return (kind == kindNowPlaying || kind == kindPlay || kind == kindCredibility || kind == kindListenerCount || kind == kindMemberCount) && pubkey != relayPub
+	return (kind == kindNowPlaying || kind == kindPlay || kind == kindCredibility || kind == kindListenerCount || kind == kindMemberCount || kind == kindAutoDJCtrl) && pubkey != relayPub
 }
 
 // purgeForeignNowPlaying deletes any now_playing (30100) NOT authored by the relay key. These
@@ -121,7 +122,7 @@ func main() {
 		log.Fatalf("db init: %v", err)
 	}
 
-	relay, state := initRelay29(relay29.Options{
+	relay, state, sessions := initRelay29(relay29.Options{
 		Domain:                  domain,
 		DB:                      db,
 		SecretKey:               sk,
@@ -200,24 +201,26 @@ func main() {
 	// can no longer write ANY event — so it's locked out of joining/DJing/chatting. Checked
 	// first (cheapest reject). Their existing events are purged when the ban is issued.
 	bans := newBanStore(env("RELAY_BANLIST", "./banned.json"))
+	sessions.setAuthorizers(social.isMember, bans.isBanned)
+	social.setBanChecker(bans.isBanned)
 	relay.RejectEvent = append(relay.RejectEvent,
 		func(_ context.Context, evt *nostr.Event) (bool, string) {
-			if bans.isBanned(evt.PubKey) {
+			if bans.isBanned(effectiveEventPubKey(evt)) {
 				return true, "blocked: banned by the relay administrator"
 			}
 			return false, ""
 		},
 	)
 
-	// now_playing, play-log and credibility snapshots are relay-authored ONLY — the relay is the
-	// conductor. The relay's own writes go straight to the store and bypass this chain
+	// Playback, Auto-DJ control, credibility and public aggregate snapshots are relay-authored
+	// ONLY. The relay's own writes go straight to the store and bypass this chain
 	// (conductor.go), so this only blocks CLIENTS: a member writing 30100/1313 used to be stored-
 	// but-ignored (clients accept now_playing only from the relay key), leaving stale per-author
 	// tombstones in badger. Reject them outright.
 	relay.RejectEvent = append(relay.RejectEvent,
 		func(_ context.Context, evt *nostr.Event) (bool, string) {
 			if isForeignConductorWrite(evt.Kind, evt.PubKey, relayPub) {
-				return true, "blocked: playback/credibility state is relay-authored"
+				return true, "blocked: playback/control/aggregate state is relay-authored"
 			}
 			return false, ""
 		},
@@ -259,6 +262,9 @@ func main() {
 	// rolling 24h analytics and broadcasts only a relay-signed aggregate (20106).
 	listeners := newListenerStats(env("RELAY_LISTENERS", "./listeners.json"))
 	listeners.setCountPublisher(func(club string, count int, now int64) {
+		if _, exists := state.Groups.Load(club); !exists {
+			return
+		}
 		event := &nostr.Event{
 			Kind:      kindListenerCount,
 			CreatedAt: nostr.Timestamp(now / 1000),
@@ -282,6 +288,8 @@ func main() {
 	credibility := newCredibilityBoard(env("RELAY_CREDIBILITY", "./credibility.json"))
 	cond := newConductor(db, relay, state, sk)
 	cond.cred = credibility
+	cond.isMember = social.isMember
+	cond.isBanned = bans.isBanned
 
 	// Paid-club entry gate: a join (9021) to a club whose owner config (30101) marks it paid
 	// must carry a valid NIP-57 zap receipt proving the joiner paid the entry price. Relay-
@@ -326,9 +334,9 @@ func main() {
 		},
 		cond.rejectMood,
 		moodLimiter.reject,
-		// Allgemeiner Spam-/Flood-Schutz pro pubkey: Bucket 50 (Burst), 30/min.
+		// Allgemeiner Spam-/Flood-Schutz pro effective principal: Bucket 50 (Burst), 30/min.
 		// Deckt strukturelle Events (now_playing-Heartbeat ~8/min, stage, queue, presence).
-		// IP-Limit greift hinter Caddy nicht (nur localhost), daher pubkey-basiert.
+		// IP-Limit greift hinter Caddy nicht (nur localhost), daher account-basiert.
 		// ABER: NIP-29-Verwaltungs-Events (9000–9022) werden NIE rate-limitet — sonst
 		// kann ein eventreicher Nutzer (aktiver DJ) den Club nicht mehr VERLASSEN.
 		func() func(context.Context, *nostr.Event) (bool, string) {
@@ -337,7 +345,13 @@ func main() {
 				if evt.Kind >= 9000 && evt.Kind <= 9022 {
 					return false, ""
 				}
-				return limit(ctx, evt)
+				principal := effectiveEventPubKey(evt)
+				if principal == evt.PubKey {
+					return limit(ctx, evt)
+				}
+				copy := *evt
+				copy.PubKey = principal
+				return limit(ctx, &copy)
 			}
 		}(),
 		policies.PreventLargeTags(128),
@@ -369,12 +383,28 @@ func main() {
 	// Stage cap: three shared slots for real DJs and the active virtual Auto DJ.
 	// Authorization runs first so a rejected Auto-DJ event never reserves a slot.
 	stageG := &stageGate{db: db}
-	relay.RejectEvent = append(relay.RejectEvent, stageG.reject)
+	stageAliases := &stageAliasCleaner{db: db}
+	stageAliases.setAuthorizers(social.isMember, bans.isBanned)
+	social.setMemberRevoker(func(_ context.Context, club, pubkey string) {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := stageAliases.purgeClubPrincipal(cleanupCtx, club, pubkey); err != nil {
+			log.Printf("stage revocation purge [%.8s/%.8s]: %v", club, pubkey, err)
+		}
+		cond.revokeClubStagePrincipal(club, pubkey)
+		stageG.revokeClubPrincipal(club, pubkey)
+	})
+	// This composite hook is intentionally LAST. It makes replay reservation + atomic stage
+	// admission one accepted-only operation, including rollback when the stage is full.
+	relay.RejectEvent = append(relay.RejectEvent, finalSessionReplayAndStageGate(sessions, stageG))
 
 	var memberCountPublishMu sync.Mutex
 	publishMemberCount := func(groupID string, count int) {
 		memberCountPublishMu.Lock()
 		defer memberCountPublishMu.Unlock()
+		if _, exists := state.Groups.Load(groupID); !exists {
+			return
+		}
 		now := time.Now()
 		cond.publish(context.Background(), &nostr.Event{
 			Kind:      kindMemberCount,
@@ -408,7 +438,9 @@ func main() {
 	// After this, the OnEventSaved observers keep everything current — no per-tick DB reads.
 	cond.warmIndexes(context.Background())
 	cap.warmCount(context.Background())
-	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, cap.observeEvent, stageG.observe)
+	// Commit the in-memory stage/Auto-DJ state and release its exact reservation before the
+	// potentially slower alias DB scan. This keeps the cap closed even if cleanup takes >10s.
+	relay.OnEventSaved = append(relay.OnEventSaved, cond.observeEvent, stageG.observe, stageAliases.observe, cap.observeEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, cond.observePresence, cond.observeBroken, cond.observeMood)
 	// Wire callbacks so gates use the conductor's cached lookups instead of raw DB scans.
 	stageG.countFn = cond.countActiveOtherDJs
@@ -432,7 +464,23 @@ func main() {
 
 	// Superadmin relay management (NIP-98 authenticated, satoshidude only). Registered
 	// before the "/" catch-all so the exact paths win.
-	admin := &adminAPI{db: db, bans: bans, state: state, listeners: listeners}
+	admin := &adminAPI{
+		db: db, bans: bans, state: state, listeners: listeners, stageAliases: stageAliases,
+		onBan: func(pubkey string) {
+			cond.revokePrincipal(pubkey)
+			stageG.revokePrincipal(pubkey)
+		},
+		onDeleteClub: func(ctx context.Context, club string) error {
+			social.deleteClub(club)
+			listenerErr := listeners.deleteClub(club)
+			conductorErr := cond.deleteClub(club)
+			stageG.deleteClub(club)
+			return errors.Join(listenerErr, conductorErr)
+		},
+		onClubPurged: func(ctx context.Context, club string) error {
+			return cap.reload(ctx)
+		},
+	}
 	relay.Router().HandleFunc("/admin/logs", handleLogs)
 	relay.Router().HandleFunc("/admin/access-logs", handleAccessLogs)
 	relay.Router().HandleFunc("/admin/bans", admin.handle)
@@ -453,7 +501,7 @@ func main() {
 		for range ticker.C {
 			sweepCache()
 			ytLimiter.sweep(10 * time.Minute)
-			// Per-pubkey content limiters also need sweeping or their maps grow forever.
+			// Per-principal content limiters also need sweeping or their maps grow forever.
 			chatLimiter.sweep(10 * time.Minute)
 			reactionLimiter.sweep(10 * time.Minute)
 			listenerLimiter.sweep(10 * time.Minute)
