@@ -223,6 +223,8 @@
         cover={currentCover}
         ledCover={miniArtworkVisible}
         poster={clubImage}
+        onvideotoggle={toggleVideoWide}
+        videoExpanded={videoWide}
         oncontrolstate={handleControlState}
         onmeta={(author) => {
           if (!np) return

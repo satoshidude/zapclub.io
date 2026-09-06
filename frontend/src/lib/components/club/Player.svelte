@@ -26,6 +26,9 @@
     ledCover?: boolean
     /** Artwork shown while the club is in the lobby. */
     poster?: string
+    /** Optional action for the transparent shield above an embedded video. */
+    onvideotoggle?: () => void
+    videoExpanded?: boolean
     oncontrolstate?: (state: { ready: boolean; muted: boolean; volume: number; fullscreen: boolean; playing: boolean }) => void
     /** Live embed metadata (channel + title) once a real track plays — no extraction, no bot
      *  gate. Lets the card show the artist (from a "Artist - Topic" channel) for bare titles. */
@@ -44,6 +47,8 @@
     cover = '',
     ledCover = false,
     poster = '',
+    onvideotoggle,
+    videoExpanded = false,
     oncontrolstate,
     onmeta,
     onduration,
@@ -308,10 +313,21 @@
       </div>
     {/if}
 
-    <!-- Shield catches mouse events so YouTube never adds hover chrome. In the embedded LCD
-         it is deliberately non-interactive; standalone players may still use video-tap mute. -->
+    <!-- Shield catches pointer events so YouTube never adds hover chrome. The embedded LCD can
+         use it to resize the video; standalone players retain video-tap mute. -->
     {#if embedded}
-      <div class="shield" aria-hidden="true"></div>
+      {#if onvideotoggle}
+        <button
+          type="button"
+          class="shield video-toggle"
+          onclick={onvideotoggle}
+          aria-label={videoExpanded ? 'Collapse video' : 'Expand video'}
+          aria-expanded={videoExpanded}
+          title={videoExpanded ? 'Collapse video' : 'Expand video'}
+        ></button>
+      {:else}
+        <div class="shield" aria-hidden="true"></div>
+      {/if}
     {:else}
       <button
         class="shield"
@@ -461,6 +477,13 @@
   }
   .shield.clickable {
     cursor: pointer;
+  }
+  .shield.video-toggle {
+    cursor: pointer;
+  }
+  .shield.video-toggle:focus-visible {
+    outline: 1px solid var(--lcd-text);
+    outline-offset: -3px;
   }
   /* Lobby overlay covers the idle stream with a calm placeholder. */
   .lobby {

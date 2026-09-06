@@ -19,7 +19,7 @@ describe('player DJ zap action', () => {
     expect(nowPlaying).not.toContain('<span>DJ:</span>')
     expect(zapButton).toContain('iconLabel || displayName(dj, djProfile)')
     expect(zapButton).toContain('<path d="M13.2 2 5.5 13h5.7L10.8 22l7.7-11h-5.7L13.2 2z"></path>')
-    expect(nowPlaying).toMatch(/<div class="lcd-media">[\s\S]*?<div class="video-surface">[\s\S]*?<Player[\s\S]*?<\/div>[\s\S]*?\{#if np && !videoWide && \(miniVideoMaskVisible \|\| audioOnly\)\}[\s\S]*?<\/div>\s*<div class="lcd-content"/)
+    expect(nowPlaying).toMatch(/<div class="lcd-media">[\s\S]*?<div\s+class="video-surface"[\s\S]*?<Player[\s\S]*?<\/div>[\s\S]*?\{#if np && !videoWide && \(miniVideoMaskVisible \|\| audioOnly\)\}[\s\S]*?<\/div>\s*<div class="lcd-content"/)
     expect(nowPlaying).toMatch(/\.video-surface\s*\{[\s\S]*?width: 100%;[\s\S]*?height: 100%;/)
     expect(nowPlaying).toMatch(/\.lcd-dj-line :global\(\.zap-mini\.icon-only\.with-name\) \{[\s\S]*?color: #f4e04d;/)
   })
