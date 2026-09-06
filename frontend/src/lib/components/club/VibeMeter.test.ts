@@ -81,7 +81,7 @@ describe('Vibemeter own-track voting', () => {
 
       expect(skip).toContain('disabled')
       expect(banger).toContain('disabled')
-      expect(html).toContain('YOUR TRACK — NO VOTE')
+      expect(html).toContain('Your track — no vote')
       expect(skip).toContain(`aria-describedby="vibe-vote-state-${CLUB}"`)
       expect(html).toContain('aria-live="polite"')
     })
@@ -91,7 +91,7 @@ describe('Vibemeter own-track voting', () => {
     const html = renderMeter(OTHER)
     expect(button(html, 'Vote skip')).not.toContain('disabled')
     expect(button(html, 'Vote banger')).not.toContain('disabled')
-    expect(html).toContain('RATE THE DJ')
+    expect(html).toContain('Rate the DJ')
   })
 
   it('updates eligibility when playback changes to the signed-in DJ', () => {
@@ -102,7 +102,7 @@ describe('Vibemeter own-track voting', () => {
 
     expect(button(html, 'Vote skip')).toContain('disabled')
     expect(button(html, 'Vote banger')).toContain('disabled')
-    expect(html).toContain('YOUR TRACK — NO VOTE')
+    expect(html).toContain('Your track — no vote')
   })
 
   it('snapshots the target before awaiting the relay and animates only the same track', () => {

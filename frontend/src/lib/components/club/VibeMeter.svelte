@@ -23,11 +23,11 @@
   const canSkip   = $derived(canVote && skips < SKIP_THRESHOLD)
   const canBanger = $derived(canVote && bangers < BANGER_MAX)
 
-  // Single-word labels — keep them short so SVG buttons fit alongside
+  // Shared mood labels for the gauge.
   const NAMES = ['skip', 'meh', 'groove', 'fire', 'banger']
 
   // ── SVG gauge geometry ──────────────────────────────────────────────────────
-  // viewBox "-10 -5 220 165": y from -5 to 160, room for inline buttons below pivot
+  // The viewBox includes the mood label below the pivot.
   const CX = 100, CY = 112
   const Ro = 85, Ri = 62
   const SPAN = 78   // degrees either side of top (156° total)
@@ -81,15 +81,15 @@
 
   const labelName = $derived(NAMES[activeIdx].toUpperCase())
 
-  const skipTxt   = $derived(skips > 0 ? `SKIP ${skips}/${SKIP_THRESHOLD}` : 'SKIP')
-  const bangerTxt = $derived(bangers > 0 ? `BANGER ${bangers}/${BANGER_MAX}` : 'BANGER')
   const readyTxt = $derived(
-    !sync.live || pos < 0 ? 'WAITING FOR A TRACK'
-      : ownTrack ? 'YOUR TRACK — NO VOTE'
-        : !auth.canSign ? 'SIGN IN TO VOTE'
-          : !isMember ? 'JOIN TO VOTE'
-          : sending ? 'SENDING…'
-          : cooldownSeconds > 0 ? `NEXT VOTE IN ${cooldownSeconds}s` : 'RATE THE DJ',
+    !sync.live || pos < 0 ? 'Waiting for a track'
+      : ownTrack ? 'Your track — no vote'
+        : !auth.canSign ? 'Sign in to vote'
+          : !isMember ? 'Join to vote'
+          : sending ? 'Sending…'
+          : cooldownSeconds > 0 ? `Next vote in ${cooldownSeconds}s`
+          : ownVote ? `${ownVote === 'banger' ? 'Banger' : 'Skip'} · Your vote`
+          : 'Rate the DJ',
   )
 
   // ── Fireworks (unified: brief on each banger vote, longer on threshold) ──────
@@ -179,37 +179,37 @@
         class="meter-label"
         x={CX} y="145"
         text-anchor="middle" dominant-baseline="middle"
-        font-family="'DotGothic16', ui-monospace, monospace"
-        font-size="21" font-weight="700" letter-spacing="1.6"
+        font-size="21" font-weight="400" letter-spacing="0.08em"
       >{labelName}</text>
 
     </svg>
 
     <div class="meter-actions">
-      <button class="meter-action skip" class:active={ownVote === 'skip'} onclick={() => vote('skip')} disabled={!canSkip} aria-label="Vote skip" aria-describedby={voteStateId}>
-        <svg class="action-icon" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M3 7l9 9-9 9V7zm11 0 9 9-9 9V7z" fill="currentColor"></path>
-          <path d="M27 7v18" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"></path>
-        </svg>
-        <span>{skipTxt}</span>
+      <button type="button" class="meter-action skip" class:active={ownVote === 'skip'} onclick={() => vote('skip')} disabled={!canSkip} aria-pressed={ownVote === 'skip'} aria-label="Vote skip" aria-describedby={voteStateId}>
+        <span class="action-label">
+          <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+            <line x1="19" y1="4" x2="19" y2="20"></line>
+          </svg>
+          <span>Skip</span>
+        </span>
+        <span class="action-count">{skips}/{SKIP_THRESHOLD}</span>
       </button>
 
-      <span class="action-divider" aria-hidden="true"></span>
-
-      <button class="meter-action banger" class:active={ownVote === 'banger'} onclick={() => vote('banger')} disabled={!canBanger} aria-label="Vote banger" aria-describedby={voteStateId}>
-        <svg class="action-icon" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M16 2.5l3 6.3 6.7-2.5-2.5 6.6 6.3 3.1-6.3 3.1 2.5 6.6-6.7-2.5-3 6.3-3-6.3-6.7 2.5 2.5-6.6L2.5 16l6.3-3.1-2.5-6.6L13 8.8 16 2.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
-          <path d="m17.5 9.5-5 7h4L14.5 23l5-7h-4l2-6.5z" fill="currentColor"></path>
-        </svg>
-        <span>{bangerTxt}</span>
+      <button type="button" class="meter-action banger" class:active={ownVote === 'banger'} onclick={() => vote('banger')} disabled={!canBanger} aria-pressed={ownVote === 'banger'} aria-label="Vote banger" aria-describedby={voteStateId}>
+        <span class="action-label">
+          <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8.5 14.5A6 6 0 0 1 9 7a8 8 0 0 0 4-5 8 8 0 0 1 4 10 4 4 0 0 0 1-5 9 9 0 0 1 2 6 8 8 0 1 1-16 0 6 6 0 0 1 1-3 6 6 0 0 0 3.5 4.5Z"></path>
+          </svg>
+          <span>Banger</span>
+        </span>
+        <span class="action-count">{bangers}/{BANGER_MAX}</span>
       </button>
     </div>
     <div
       id={voteStateId}
       class="vote-state"
-      class:rate-ready={readyTxt === 'RATE THE DJ'}
-      class:cooling={cooldownSeconds > 0}
-      aria-live={ownTrack ? 'polite' : 'off'}
+      aria-live={cooldownSeconds > 0 ? 'off' : 'polite'}
       aria-atomic="true"
     >{readyTxt}</div>
   </div>
@@ -217,6 +217,7 @@
 
 <style>
   .vm {
+    container-type: inline-size;
     position: relative;
     overflow: hidden;
     background: transparent;
@@ -265,69 +266,97 @@
     fill: var(--lcd-text);
     text-shadow: var(--lcd-text-shadow);
     filter: drop-shadow(0 0 2px rgba(90, 160, 255, 0.42));
+    font-family: var(--font-headline);
+    -webkit-text-stroke: 0.25px currentColor;
   }
   .meter-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
-    align-items: center;
-    gap: 0.45rem;
-    margin-top: -0.25rem;
-    padding: 0 0.35rem 0.35rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+    padding: 0 0.35rem;
   }
   .meter-action {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.55rem;
+    justify-content: space-between;
+    gap: 8px;
     min-width: 0;
-    min-height: 42px;
-    padding: 0 0.3rem;
+    min-height: 46px;
+    padding: 0 12px;
     border: 0;
-    color: var(--lcd-text-soft);
-    background: transparent;
-    font-family: inherit;
-    font-size: clamp(0.88rem, 1.55vw, 1rem);
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    border-radius: 0;
+    color: var(--lcd-text);
+    background: rgba(9, 11, 12, 0.8);
+    box-shadow: inset 0 -2px rgba(183, 188, 196, 0.5);
+    font-family: var(--font);
     white-space: nowrap;
     cursor: pointer;
   }
-  .meter-action:hover:not(:disabled),
-  .meter-action:focus-visible,
+  .meter-action:hover:not(:disabled) {
+    background: rgba(241, 243, 244, 0.08);
+  }
   .meter-action.active {
-    color: var(--lcd-text-bright);
+    box-shadow: inset 0 -2px var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, #17191b);
+  }
+  .meter-action.active .action-label {
+    color: var(--accent);
   }
   .meter-action:focus-visible {
     outline: 1px dashed var(--lcd-text);
     outline-offset: 2px;
   }
   .meter-action:disabled {
-    opacity: 0.5;
     cursor: default;
   }
-  .action-icon {
-    flex: 0 0 32px;
-    width: 32px;
-    height: 32px;
+  .meter-action:disabled:not(.active) {
+    opacity: 0.5;
   }
-  .action-divider {
-    width: 1px;
-    height: 24px;
-    background: rgba(241, 243, 244, 0.2);
+  .action-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-headline);
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    -webkit-text-stroke: 0.25px currentColor;
+  }
+  .action-icon {
+    flex: 0 0 17px;
+    width: 17px;
+    height: 17px;
+  }
+  .action-count {
+    color: var(--lcd-text-soft);
+    font-size: 11px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
   }
   .vote-state {
-    min-height: 1rem;
-    margin-top: -0.15rem;
+    min-height: 20px;
+    margin-top: 12px;
     text-align: center;
-    color: var(--lcd-text-soft);
-    font-size: 0.62rem;
-    letter-spacing: 0.15em;
+    color: var(--lcd-text-dim);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    text-shadow: var(--lcd-copy-shadow);
   }
-  .vote-state.cooling {
-    color: var(--lcd-text);
-  }
-  .vote-state.rate-ready {
-    font-size: calc(0.62rem + 3px);
+  @container (max-width: 270px) {
+    .meter-action {
+      padding-inline: 8px;
+      gap: 4px;
+    }
+    .action-label {
+      gap: 5px;
+      letter-spacing: 0.04em;
+    }
   }
   @media (max-width: 760px) {
     .gauge-wrap {
@@ -336,9 +365,6 @@
     }
     .gauge-svg {
       height: 148px;
-    }
-    .meter-actions {
-      margin-top: -0.4rem;
     }
   }
 </style>
