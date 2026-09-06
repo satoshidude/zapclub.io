@@ -30,17 +30,17 @@ cd "$ROOT"
 commit=$(git rev-parse HEAD)
 version=$(node -p "require('./frontend/package.json').version")
 
-if [ "$SKIP_DEPS" -eq 1 ] && [ -d "$ROOT/frontend/node_modules" ]; then
+if [ "$SKIP_DEPS" = 1 ] && [ -d "$ROOT/frontend/node_modules" ]; then
 	echo "Skipping dependency install (ZAPCLUB_FAST_SKIP_DEPS_INSTALL=1)."
 else
 	npm --prefix frontend ci
 fi
-if [ "$SKIP_AUDIT" -eq 1 ]; then
+if [ "$SKIP_AUDIT" = 1 ]; then
 	echo "Skipping frontend audit (ZAPCLUB_FAST_SKIP_AUDIT=1)."
 else
 	npm --prefix frontend audit --audit-level=high
 fi
-if [ "$SKIP_CHECKS" -eq 1 ]; then
+if [ "$SKIP_CHECKS" = 1 ]; then
 	echo "Skipping frontend checks (ZAPCLUB_FAST_SKIP_CHECKS=1)."
 else
 	npm --prefix frontend run check
