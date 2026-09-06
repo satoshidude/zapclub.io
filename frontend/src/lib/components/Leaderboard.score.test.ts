@@ -3,6 +3,11 @@ import leaderboard from './Leaderboard.svelte?raw'
 import profile from './UserProfile.svelte?raw'
 
 describe('DJ leaderboard presentation', () => {
+  it('uses the Top 10 product name consistently', () => {
+    expect(leaderboard).toContain('TOP 10 LEADERBOARD')
+    expect(leaderboard).not.toContain('TOP DJS Leaderboard')
+  })
+
   it('explains and renders the relay DJ SCORE with its underlying signals', () => {
     expect(leaderboard).toContain('DJ SCORE')
     expect(leaderboard).toContain('vibe quality × experience factor')
@@ -36,6 +41,9 @@ describe('DJ leaderboard presentation', () => {
     expect(profile).toContain('(djRank.score / 10).toFixed(1)')
     expect(profile).not.toContain('fetchZapRank')
     expect(profile).not.toContain('type ZapRank')
+
+    expect(profile).not.toContain('DJ Credibility')
+    expect(profile).not.toContain('fetchCredibility')
 
     expect(profile).toContain('fetchReceivedZaps')
     expect(profile).toContain('Who zapped you')

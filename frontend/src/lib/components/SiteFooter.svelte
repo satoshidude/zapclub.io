@@ -20,7 +20,7 @@
   data-build-commit={build.commit}
 >
   <nav class="footer-nav" aria-label="Project information">
-    <a href="/leaderboard" onclick={(event) => follow(event, '/leaderboard')}>TOP DJs</a>
+    <a href="/leaderboard" onclick={(event) => follow(event, '/leaderboard')}>TOP 10</a>
     <a href="/about" onclick={(event) => follow(event, '/about')}>About</a>
     <a href="/disclaimer" onclick={(event) => follow(event, '/disclaimer')}>Disclaimer</a>
     <a href={repository} target="_blank" rel="noopener noreferrer">GitHub</a>

@@ -26,7 +26,6 @@
   import { requestZapInvoice } from '../nostr/zaps.svelte'
   import { showPay } from '../nostr/payModal.svelte'
   import { fetchDJRank, fetchReceivedZaps, type DJRank, type ReceivedZaps } from '../nostr/leaderboard'
-  import { fetchCredibility, type Credibility } from '../nostr/credibility'
   import { fetchUserLikes, unlikeTrack, type UserLike } from '../nostr/likes.svelte'
   import { isSuperadmin } from '../nostr/admin'
   import type { Playlist, QueueTrack, Club } from '../nostr/types'
@@ -57,7 +56,6 @@
   let receivedLoading = $state(false)
   let receivedError = $state('')
   let djRank = $state<DJRank | null>(null)
-  let credibility = $state<Credibility | null>(null)
   let likedTracks = $state<UserLike[]>([])
 
   // Clubs the user is currently on stage in (relay-derived djingIn; on the own profile also
@@ -112,9 +110,7 @@
     receivedLoading = false
     receivedError = ''
     djRank = null
-    credibility = null
     void fetchDJRank(pk).then((result) => (djRank = result))
-    void fetchCredibility(pk).then((result) => (credibility = result))
   })
 
   async function loadReceivedHistory(): Promise<void> {
@@ -448,21 +444,6 @@
         <button class="btn btn-ghost btn-sm" onclick={() => (editing = false)} disabled={saving}>Cancel</button>
       </div>
     </div>
-  {/if}
-
-  {#if credibility}
-    <section class="card credibility led-zone" aria-label="DJ credibility">
-      <span class="cred-score">{credibility.score > 0 ? '+' : ''}{credibility.score.toLocaleString()}</span>
-      <span class="cred-main">
-        <span class="cred-label">DJ Credibility</span>
-        <span class="cred-sub">
-          {credibility.tracks.toLocaleString()} {credibility.tracks === 1 ? 'track' : 'tracks'} played
-          · {credibility.bangers.toLocaleString()} banger {credibility.bangers === 1 ? 'vote' : 'votes'}
-          · {credibility.skipped.toLocaleString()} community {credibility.skipped === 1 ? 'skip' : 'skips'}
-        </span>
-      </span>
-      <span class="cred-proof" title="Relay-signed Nostr score">Nostr signed ✓</span>
-    </section>
   {/if}
 
   <!-- Public DJ standing from settled songs and the room's Vibemeter. -->
@@ -1048,56 +1029,6 @@
     font-size: 0.82rem;
     margin: 0;
   }
-  .credibility {
-    margin-top: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    background: #071b33;
-    border-color: #2a638d;
-    border-radius: 5px;
-    box-shadow: inset 0 0 22px rgba(0, 26, 61, 0.72);
-  }
-  .cred-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.28rem;
-  }
-  .cred-label {
-    color: #b7ddfa;
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: 0.9rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-  .cred-score {
-    flex: 0 0 auto;
-    display: grid;
-    place-items: center;
-    width: 72px;
-    height: 58px;
-    border-right: 1px solid #2a638d;
-    color: #d9f1ff;
-    font-family: 'DotGothic16', ui-monospace, monospace;
-    font-size: 1.8rem;
-    font-weight: 900;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-    text-shadow: 0 0 8px rgba(98, 199, 255, 0.38);
-  }
-  .cred-sub {
-    color: #80a9c8;
-    font-size: 0.76rem;
-  }
-  .cred-proof {
-    flex: 0 0 auto;
-    color: #80a9c8;
-    font-size: 0.66rem;
-    font-weight: 700;
-    white-space: nowrap;
-  }
   /* Public DJ standing — clickable LCD card linking to the leaderboard. */
   .djrank {
     margin-top: 1rem;
@@ -1190,9 +1121,6 @@
     color: var(--amber);
   }
   @media (max-width: 460px) {
-    .cred-proof {
-      display: none;
-    }
     .dr-cta {
       display: none;
     }
@@ -1730,8 +1658,7 @@
   :global(body.site-led-page) .howto-summary,
   :global(body.site-led-page) h2,
   :global(body.site-led-page) .club-name,
-  :global(body.site-led-page) .pl-name,
-  :global(body.site-led-page) .cred-label {
+  :global(body.site-led-page) .pl-name {
     color: var(--lcd-text);
     font-family: 'DotGothic16', ui-monospace, monospace;
     font-weight: 400;
@@ -1764,20 +1691,11 @@
   :global(body.site-led-page) .lt-remove {
     border-radius: 0;
   }
-  :global(body.site-led-page) .credibility,
   :global(body.site-led-page) .djrank,
   :global(body.site-led-page) .zaps-recv,
   :global(body.site-led-page) .liked {
     margin-top: 0.7rem;
     padding: 1rem;
-  }
-  :global(body.site-led-page) .credibility {
-    border-color: transparent;
-  }
-  :global(body.site-led-page) .cred-score {
-    color: var(--lcd-text-bright);
-    border-right-color: rgba(241, 243, 244, 0.22);
-    text-shadow: var(--lcd-text-shadow);
   }
   :global(body.site-led-page) .clubs,
   :global(body.site-led-page) .pls {
@@ -1810,7 +1728,6 @@
     :global(body.site-led-page) .wrap { padding: 0.45rem 0.45rem 3rem; }
     :global(body.site-led-page) .howto-block { margin-bottom: 0.55rem; }
     :global(body.site-led-page) .phead { min-height: 112px; padding: 0.8rem; }
-    :global(body.site-led-page) .credibility,
     :global(body.site-led-page) .djrank,
     :global(body.site-led-page) .zaps-recv,
     :global(body.site-led-page) .liked,

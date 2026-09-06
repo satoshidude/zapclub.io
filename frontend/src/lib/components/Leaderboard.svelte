@@ -36,7 +36,7 @@
 
 <div class="wrap leaderboard-page">
   <header class="lb-head led-zone">
-    <h1 class="site-h1">TOP DJS Leaderboard</h1>
+    <h1 class="site-h1">TOP 10 LEADERBOARD</h1>
     <p class="sub">Ranked by songs played and the room’s Vibemeter. DJ SCORE rewards strong sets without letting sheer volume decide the board.</p>
     <p class="score-rule"><strong>DJ SCORE</strong> = vibe quality × experience factor. Ten songs reach 50% experience.</p>
   </header>
